@@ -63,10 +63,11 @@ class Cluster:
 # Some cells of the matrix may be out of the corners perimeter
 # This will happend in not perfectly squared/rectangular perimeters
 class Matrix:
-    def __init__(self, corners, cellSize, tracked = 0):
+    def __init__(self, corners, cellSize, tracked = 0, updater = None):
         self.corners = corners
         self.cellSize = cellSize
         self.tracked = tracked
+        self.updater = updater
         # Get maximum and minimum x and y coordinates, then calculate the x and y ranges
         xcoords = []
         ycoords = []
@@ -459,6 +460,8 @@ class Matrix:
             return False
         if targetValue == source:
             self.track('SUCCESS: The cell has the source value')
+            if (self.updater):
+                self.updater(self.format())
             self.setValue(cell, value)
             return True
         self.track('The cell belongs to cluster ' + str(targetValue))
@@ -468,6 +471,8 @@ class Matrix:
         # Expand the cluster whose cell we just claimed, to compensate
         if self.expandCluster(self.getCluster(targetValue), source, banned = previous):
             self.track('SUCCESS: Cell ' + str(cell) + ' was claimed')
+            if (self.updater):
+                self.updater(self.format())
             self.setValue(cell, value)
             return True
         else:

@@ -53,23 +53,27 @@ distribution = floor('floor0',
 # MAIN CODE ------------------------------------------------------------
 
 # PRUEBAS
-matrix = Matrix(distribution.corners, distribution.parentRoom.getGCD())
+matrix = Matrix(distribution.corners, distribution.parentRoom.getGCD(), updater = addFrame)
 #matrix = Matrix(distribution.corners, distribution.parentRoom.getGCD(), tracked=1)
 
 matrix.setArea(Cell(0,10),1)
 #matrix.setCluster(Cluster(2,0.1,3,3), 1)
 
 parent = distribution.parentRoom
-matrix.setCluster(Cluster(2,
-                          parent.size,
-                          parent.minWidth,
-                          parent.maxWidth,
-                          parent.priorizeBorder),
-                          1,
-                          origin = distribution.door)
+matrix.setCluster( Cluster (2,
+                            parent.size,
+                            parent.minWidth,
+                            parent.maxWidth,
+                            parent.priorizeBorder),
+                            1,
+                            origin = distribution.door)
+
+setupRepresentProcess()
+#represent()
+
 count = 3
-#for room in parent.childRooms:
-for room in []:
+for room in parent.childRooms:
+#for room in []:
     matrix.setCluster(Cluster(count,
                           room.size,
                           room.minWidth,
@@ -84,6 +88,4 @@ for i in range(8):
         print('free -> ' + str(matrix.countCells(i)))
 
 print('yasta')
-
-represent(matrix.format())
 
