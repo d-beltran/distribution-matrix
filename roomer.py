@@ -59,6 +59,8 @@ matrix = Matrix(distribution.corners, distribution.parentRoom.getGCD(), updater 
 matrix.setArea(Cell(0,10),1)
 #matrix.setCluster(Cluster(2,0.1,3,3), 1)
 
+
+# El pasillo
 parent = distribution.parentRoom
 matrix.setCluster( Cluster (2,
                             parent.size,
