@@ -31,6 +31,7 @@ def represent (queue):
 
     # Setup
     fig = plt.figure()
+    frames = queue.get()
     matrice = plt.imshow(frames[0], vmax=8)
     plt.gca().invert_yaxis()
 
