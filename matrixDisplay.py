@@ -3,6 +3,7 @@ from matplotlib.colors import ListedColormap
 from matplotlib import animation
 from matplotlib.widgets import Slider 
 
+import numpy as np
 from multiprocessing import Process, Queue
 
 # Set the heatmap colors
@@ -23,6 +24,7 @@ queue = Queue()
 
 # Updater called from the matrix
 def addFrame (data):
+    #print('frame ' + str(len(frames)))
     frames.append(data)
     queue.put(frames)
 
@@ -33,7 +35,15 @@ def represent (queue):
     fig = plt.figure()
     frames = queue.get()
     matrice = plt.imshow(frames[0], vmax=8)
-    plt.gca().invert_yaxis()
+    ref = plt.gca()
+    ref.invert_yaxis()
+    # Get data x and y ranges
+    x_range = len(frames[0][0])
+    y_range = len(frames[0])
+    # Gridlines
+    ref.set_xticks(np.arange(-.5, x_range, 1), minor=True)
+    ref.set_yticks(np.arange(-.5, y_range, 1), minor=True)
+    ref.grid(which='minor', color='w', linestyle='-', linewidth=1)
 
     # Slider
     axslider = plt.axes([0.25, .03, 0.50, 0.02])
