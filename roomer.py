@@ -69,7 +69,8 @@ if __name__ == '__main__':
                                 parent.size,
                                 parent.minWidth,
                                 parent.maxWidth,
-                                parent.priorizeBorder),
+                                parent.priorizeBorder,
+                                2),
                                 1,
                                 origin = distribution.door)
 
