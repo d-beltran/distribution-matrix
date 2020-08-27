@@ -1,3 +1,7 @@
+#from matplotlib import use 
+#use('AGG')
+#import matplotlib
+#matplotlib.use('AGG')
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 from matplotlib import animation
@@ -24,13 +28,12 @@ queue = Queue()
 
 # Updater called from the matrix
 def addFrame (data):
-    #print('frame ' + str(len(frames)))
+    print(' [ frame ' + str(len(frames)) + ' ] ')
     frames.append(data)
     queue.put(frames)
 
 # Show the heatmap
 def represent (queue):
-
     # Setup
     fig = plt.figure()
     frames = queue.get()
@@ -51,7 +54,10 @@ def represent (queue):
 
     # Animation updater
     def updateFrame (i):
-        frames = queue.get()
+        global frames
+        # Update frames when the queue is not empty
+        if queue.qsize() > 0:
+            frames = queue.get()
         maximum = len(frames) - 1
         updated = slider.val == slider.valmax
         # Update the maximum slider value
@@ -63,7 +69,7 @@ def represent (queue):
         matrice.set_data(frames[slider.val])
         
     # Run the animation and show the plot
-    anim = animation.FuncAnimation(fig, updateFrame, repeat = False)
+    anim = animation.FuncAnimation(fig, updateFrame)
     plt.show()
 
 # Set the heatmap representation in a paralel process so the matrix can keep beeing calculated
