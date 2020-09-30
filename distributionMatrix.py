@@ -159,7 +159,7 @@ class Matrix:
             return False
         # Set the cluster inital minimum area
         first = False
-        for area in self.priorizeArea(sourceValue, cluster.minWidth, cluster.minWidth, origin):
+        for area in self.priorizeArea(sourceValue, [0], cluster.minWidth, cluster.minWidth, origin):
             first = self.claimCellGroup(area, cluster.value, sourceValue)
             if first:
                 break
@@ -349,6 +349,16 @@ class Matrix:
             return None
         self.track('Filter results: ' + str(result), level = 1, deepen = -1)
         return result
+
+    # Find all cells from the specified cluster
+    def getClusterCells (self, cluster):
+        targetValue = cluster.value
+        result = []
+        for cell in self.cells:
+            value = self.getValue(cell)
+            if value == targetValue:
+                result.append(cell)
+        return result
     
     # Get the suitable cells from a cells array
     # Suitable cells are thouse which dont belog to a 'banned' cluster
@@ -521,7 +531,7 @@ class Matrix:
         if minimumLength:
             def minLength (row):
                 return len(row) >= minimumLength
-            rows = filter(minLength, rows)
+            rows = list(filter(minLength, rows))
         return rows
     
     # Get an array with all columns in a cell array
@@ -540,14 +550,14 @@ class Matrix:
             if c in searchedColumns:
                 continue
             newColumn = [c]
-            for i in range(self.maxx):
+            for i in range(self.maxy):
                 newCell = Cell(c.x, c.y + i + 1)
                 if newCell in cells:
                     newColumn.append(newCell)
                     searchedColumns.append(newCell)
                 elif connected:
                     break
-            for i in range(self.maxx):
+            for i in range(self.maxy):
                 newCell = Cell(c.x, c.y - i - 1)
                 if newCell in cells:
                     newColumn.append(newCell)
@@ -559,7 +569,7 @@ class Matrix:
         if minimumLength:
             def minLength (column):
                 return len(column) >= minimumLength
-            columns = filter(minLength, columns)
+            columns = list(filter(minLength, columns))
         return columns
     
     # Get an array with all possible cell groups in a cell array
@@ -572,7 +582,7 @@ class Matrix:
         columns = self.getColumns(cells, connected = True, minimumLength = minimum)
         # Define a function to convert an array of seried cells in groups of a given size
         def setGroups (serie, size):
-            print('setting group with size ' + str(size) + ' in ' + str(serie))
+            #print('setting group with size ' + str(size) + ' in ' + str(serie))
             grps = []
             # Set the expected number of posible groups
             grpsNumber = len(serie) - size + 1
@@ -588,21 +598,23 @@ class Matrix:
         groups = []
         for r in rows:
             maxCells = len(r)
-            if maximum == None or maximum > maxCells:
-                maximum = maxCells
+            rows_maximum = maximum
+            if rows_maximum == None or rows_maximum > maxCells:
+                rows_maximum = maxCells
             if collapse:
-                groups += setGroups(r, maximum)
+                groups += setGroups(r, rows_maximum)
             else:
-                for n in range(minimum, maximum + 1):
+                for n in range(minimum, rows_maximum + 1):
                     groups += setGroups(r,n)
         for c in columns:
             maxCells = len(c)
-            if maximum == None or maximum > maxCells:
-                maximum = maxCells
+            column_maximum = maximum
+            if column_maximum == None or column_maximum > maxCells:
+                column_maximum = maxCells
             if collapse:
-                groups += setGroups(c, maximum)
+                groups += setGroups(c, column_maximum)
             else:
-                for n in range(minimum, maximum + 1):
+                for n in range(minimum, column_maximum + 1):
                     groups += setGroups(c,n)
         return groups
             
@@ -718,10 +730,18 @@ class Matrix:
             self.track('FAIL: Cell ' + str(cell) + ' was not claimed')
             return False
 
+    # Claim all cells in a group at the same time
+    # Count how many claimed cells belong to each cluster an expand them accordingly
+    # If any cluster is not able to expand the whole claim process fails
+    # All matrix values are saved at the begining, so we can back up when a claim fails
+    # DANI: Igual esto no hace falta
+    def claimCellGroupEXP (self, cells, value, source, previous = []):
+        print('claiming group...')
+        return True
+
     # Claim all cells in a group at the same time. If any of the claims fails, none is claimed.
     # All matrix values are saved at the begining, so we can back up when a claim fails
     def claimCellGroup (self, cells, value, source, previous = []):
-        print('claiming group...')
         targetValues = [self.getValue(cell) for cell in cells]
         # If any of them belongs to the clamed value return false
         if any([v == value for v in targetValues]):
@@ -738,6 +758,7 @@ class Matrix:
         backup = [v for v in self.values]
         for cell in cells:
             if self.claimCell(cell, value, source, previous) == False:
+                # If any claim fails recover previous values and return False
                 self.values = backup
                 return False
         if (self.updater and len(previous) == 0):
@@ -747,7 +768,7 @@ class Matrix:
     # Get a random area with cells from the specified value with the specified size
     # If there is not any area with all cells with the specified value return an area with as much as possible
     # You can specify a cell which must be included in all yield areas
-    def priorizeArea (self, value, xwide, ywide, includeCell = None, connected = True):
+    def priorizeArea (self, value, banned_values, xwide, ywide, includeCell = None, connected = True):
         results = []
         # Iterate over all matrix cells
         for i in range(0, self.size):
@@ -765,6 +786,7 @@ class Matrix:
             # Count how many cells have the source value in each area
             cells = []
             matchingCells = 0
+            bannedCells = 0
             for x in range(originX, originX + xwide):
                 for y in range(originY, originY + ywide):
                     cell = Cell(x, y)
@@ -772,6 +794,8 @@ class Matrix:
                     v = self.getValue(cell)
                     if v == value:
                         matchingCells += 1
+                    if v in banned_values:
+                        bannedCells += 1
             # Check all cells are connected when it is required
             if connected:
                 allConnected = True
@@ -782,16 +806,47 @@ class Matrix:
                 if not allConnected:
                     continue
             # Save the origin cell and the number of matching cells
-            results.append((cells, matchingCells))
+            results.append((cells, matchingCells, bannedCells))
         # Order areas randomly and by matching cells
         random.shuffle(results)
         def orderer(i):
             return i[1]
+        def reorderer(i):
+            return i[2]
+        # Order first (i.e. less important) by number of matching cells
         results.sort(key = orderer, reverse=True)
+        # Order second (i.e. the most important) by number of banned cells
+        results.sort(key = reorderer)
         # Return results 1 by 1
         # Return a getter function
         for r in results:
             yield r[0]
+
+    # Move a cluster cell by cell in the specified direction
+    # 'direction' is a tuple with the x and y values, which range from -1 to 1
+    # If any of the requested cells is not available we try to push its cluster also
+    def pushCluster (self, cluster_value, direction, source):
+        if abs(direction[0]) > 1 or abs(direction[1]) > 1:
+            return print('Error: direction x and y values must range from -1 to 1')
+        origin_cells = self.getClusterCells()
+        destination_cells = []
+        # Check that all destination cells are available
+        for cell in cells:
+            newCell = Cell(cell.x + direction[0], cell.y + direction[1])
+            value = self.getValue(newCell)
+            if value != source or value == cluster.value:
+                destination_cells.append(newCell)
+            else:
+                if self.pushCluster(cluster_value, direction, source):
+                    destination_cells.append(newCell)
+                else:
+                    return False
+        # If all destination cells are available we free the original cells and claim the destination cells
+        for cell in origin_cells:
+            self.setValue(cell, source)
+        for cell in destination_cells:
+            self.setValue(cell, cluster_value)
+        return True
 
     # Expected input cells are a cluster collider cells
     # Find all possible groups in input cells and priorize the most suitable groups to be claimed
@@ -809,7 +864,7 @@ class Matrix:
         if cluster.maxWidth:
             maxWidth = cluster.maxWidth
         if forceMaximum:
-            maxWidth = min(maxWidth, forceMaximum)
+            maxWidth = forceMaximum
         # Find all possible groups
         groups = self.getCellGroups(cells, minWidth, maxWidth, collapse = True)
         # Reorder them randomly
@@ -950,6 +1005,8 @@ class Matrix:
             # When the number of cells to expand is equal or greater than the minimum, we claim in groups
             if expansion >= cluster.minWidth:
                 forcedMax = None
+                # If the number of cells to claim is lower than the cluster maximum we reduce the maximum
+                # When there is no maximum (i.e. cluster.maxWidth = inf) this is always true, which is logic
                 if expansion < cluster.maxWidth:
                     forcedMax = expansion
                 priorizedGroups = self.priorizeGroups(suitables, cluster, source, forcedMax)
