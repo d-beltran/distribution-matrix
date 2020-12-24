@@ -4,6 +4,8 @@
 import math
 import functools
 import random  
+#import sys
+#sys.setrecursionlimit(10000)
 
 # CLASS DEFINITIONS ------------------------------------------------------------
     
@@ -84,7 +86,7 @@ class Matrix:
         for c in corners:
             xcoords.append(c[0])
             ycoords.append(c[1])
-        # Get maximum and minimums
+        # Get maximum and minimum COORDINATES
         self.maxx = max(xcoords)
         self.minx = min(xcoords)
         self.maxy = max(ycoords)
@@ -97,6 +99,9 @@ class Matrix:
         self.values = [0] * self.size
         # Set the perimeter lines
         self.lines = self.setLines(corners)
+        # Represent the first matrix frame
+        if self.updater:
+            self.updater(self.format())
         
     # Set the lines array between these coordinates
     def setLines (self, corners):
@@ -130,10 +135,10 @@ class Matrix:
     # The first cell to be placed is the 'origin', and this cell is never lost
     clusters = []
     def setCluster (self, cluster, sourceValue, origin = None):
-        self.track('Setting new cluster ' + str(cluster), deepen = 1)
+        #self.track('Setting new cluster ' + str(cluster), deepen = 1)
         # Check that there is not another cluster with the same value
         if (self.getCluster(cluster.value)):
-            self.track('FAIL: Cluster ' + str(cluster) + ' already exists', deepen = -1)
+            #self.track('FAIL: Cluster ' + str(cluster) + ' already exists', deepen = -1)
             return False
         # Save the new cluster in the clusters list
         self.clusters.append(cluster)
@@ -154,8 +159,8 @@ class Matrix:
             cluster.maxWidth = round(cluster.maxWidth / self.cellSize)
         # Check that there is enough space
         if self.countCells(sourceValue) < cluster.size:
-            self.track("FAIL: Not enought avilable cells to allocate the cluster ("+
-            str(self.countCells(sourceValue)) + "/" + str(cluster.size) + ")", deepen = -1)
+            #self.track("FAIL: Not enought avilable cells to allocate the cluster ("+
+            #str(self.countCells(sourceValue)) + "/" + str(cluster.size) + ")", deepen = -1)
             return False
         # Set the cluster inital minimum area
         first = False
@@ -164,16 +169,20 @@ class Matrix:
             if first:
                 break
         if first == False:
-            self.track("FAIL: New cluster failed to get the origin cell", deepen = -1)
+            #self.track("FAIL: New cluster failed to get the origin cell", deepen = -1)
             return False
+        return True
+
+    def fixCluster (self, cluster, sourceValue):
+        print('fixing cluster ' + str(cluster.value))
         # Try to expand the cluster cells to reach the cluster size
         # We substract the origin cell from the size count (cluster.size - 1)
         if self.expandCluster(cluster, sourceValue, expansion = cluster.size - cluster.minWidth * cluster.minWidth) == False:
-            self.track("FAIL: New cluster failed to expand", deepen = -1)
+            #self.track("FAIL: New cluster failed to expand", deepen = -1)
             return False
         # Finally set the cluster as set and return True
         cluster.set = True
-        self.track("SUCCESS: New cluster " + str(cluster) + " was set successfully", deepen = -1)
+        #self.track("SUCCESS: New cluster " + str(cluster) + " was set successfully", deepen = -1)
         return True
     
     # Get the number of cells with the specified value
@@ -351,12 +360,11 @@ class Matrix:
         return result
 
     # Find all cells from the specified cluster
-    def getClusterCells (self, cluster):
-        targetValue = cluster.value
+    def getClusterCells (self, targetValue):
         result = []
-        for cell in self.cells:
-            value = self.getValue(cell)
+        for i, value in enumerate(self.values):
             if value == targetValue:
+                cell = self.getCell(i)
                 result.append(cell)
         return result
     
@@ -718,6 +726,12 @@ class Matrix:
         # Add the value to the current list of previous clusters if not there 
         if (value not in previous):
             previous.append(value)
+        # Try to move the conflictive cluster
+        # First set the available directions to push it: cells from the same pushed cluster
+        if self.pushCluster(value, cell, source, [0]):
+            self.track('SUCCESS: The cluster was pushed away')
+            self.setValue(cell, value)
+            return True
         # Expand the cluster whose cell we just claimed, to compensate
         if self.expandCluster(self.getCluster(targetValue), source, banned = previous):
             self.track('SUCCESS: Cell ' + str(cell) + ' was claimed')
@@ -776,7 +790,7 @@ class Matrix:
             originX = origin.x
             originY = origin.y
             # If the expected area excels the matrix we skip this area
-            if originX + xwide >= self.xrange or originY + ywide >= self.yrange:
+            if originX + xwide > self.xrange or originY + ywide > self.yrange:
                 continue
             # If there is an 'includeCell' and it is not included we skip this area
             if (includeCell and not
@@ -822,31 +836,82 @@ class Matrix:
         for r in results:
             yield r[0]
 
-    # Move a cluster cell by cell in the specified direction
-    # 'direction' is a tuple with the x and y values, which range from -1 to 1
-    # If any of the requested cells is not available we try to push its cluster also
-    def pushCluster (self, cluster_value, direction, source):
-        if abs(direction[0]) > 1 or abs(direction[1]) > 1:
-            return print('Error: direction x and y values must range from -1 to 1')
-        origin_cells = self.getClusterCells()
-        destination_cells = []
-        # Check that all destination cells are available
-        for cell in cells:
-            newCell = Cell(cell.x + direction[0], cell.y + direction[1])
-            value = self.getValue(newCell)
-            if value != source or value == cluster.value:
-                destination_cells.append(newCell)
-            else:
-                if self.pushCluster(cluster_value, direction, source):
+    # Move a cluster 1 position cell by cell to free a perimetral cell
+    # The direction to move the cluster is calculated according to the position of the clusters
+    # Pusher is the value of the pusher cluster
+    # 'cell' is the cell to be freed and thus it defines the cluster to be pushed
+    # The pushed cluster may push other clusters in a chain reaction
+    # The 'banned' list is used to exclude cluster values which must not be pushed
+    # Values may be set by default, but this array is also used internally to avoid loops
+    def pushCluster (self, pusher_value, cell, source, banned = []):
+        # Add the pusher cluster to the banned clusters list to prevent looping
+        banned = banned + [pusher_value]
+        # Get the cluster value of the selected cell
+        pushed_value = self.getValue(cell)
+        print('Pushing: cluster ' + str(pushed_value) + ' | cell -> ' + str(cell))
+        # First set the available directions to push it:
+        # Cells from the pushed cluster whose oposite direction cell is not from the pushed cluster
+        directions = []
+        # Get all collider cells from the pushed cluster value
+        colliders = self.getColliderCells(cell, value=pushed_value)
+        for collider in colliders:
+            # Get the direction to reach this cell
+            direction = (collider.x - cell.x, collider.y - cell.y)
+            # If the opossite cell is not from the cluster value we save this direction
+            oposite_cell = Cell(cell.x -direction[0], cell.y -direction[1])
+            if self.getValue(oposite_cell) == pusher_value:
+                directions.append(direction)
+        # If afterall we have no available directions it means the cell is not in the cluster perimeter
+        # This is not supported, so we return an error
+        if len(directions) == 0:
+            return print('Error: the requested cell is not in the perimeter')
+        # Randomize the directions order
+        random.shuffle(directions)
+        # Get all current cells of the cluster to be pushed
+        origin_cells = self.getClusterCells(pushed_value)
+        # Now try to push the cluster in each available direction
+        for direction in directions:
+            print(direction)
+            destination_cells = []
+            # Check that all destination cells are available
+            for cell in origin_cells:
+                # Set the new destination cell for each origin cell
+                # If any new cell is outside the matrix the push fails
+                newX = cell.x + direction[0]
+                if newX < 0 or newX >= self.xrange:
+                    #print('OUT!!!')
+                    break
+                newY = cell.y + direction[1]
+                if newY < 0 or newY >= self.yrange:
+                    #print('OUT!!!')
+                    break
+                newCell = Cell(newX, newY)
+                value = self.getValue(newCell)
+                if value in banned:
+                    #print('BANNED!!!')
+                    break
+                if value == source or value == pushed_value:
                     destination_cells.append(newCell)
                 else:
-                    return False
-        # If all destination cells are available we free the original cells and claim the destination cells
-        for cell in origin_cells:
-            self.setValue(cell, source)
-        for cell in destination_cells:
-            self.setValue(cell, cluster_value)
-        return True
+                    # Try to push the conflic cluster thus creating a chain effect
+                    if self.pushCluster(pushed_value, newCell, source, banned):
+                        destination_cells.append(newCell)
+                    else:
+                        break
+            # The number of destination and origin cells must be the same at this point
+            # If not, it means some destination cell was not available
+            # In this case, we stop here and try other direction
+            if len(destination_cells) < len(origin_cells):
+                continue
+            # If all destination cells are available we free the original cells and claim the destination cells
+            for cell in origin_cells:
+                self.setValue(cell, source)
+            for cell in destination_cells:
+                self.setValue(cell, pushed_value)
+            print('ALLRIGHT')
+            return True
+        # If any direction worked we return false
+        return False
 
     # Expected input cells are a cluster collider cells
     # Find all possible groups in input cells and priorize the most suitable groups to be claimed
@@ -1020,7 +1085,7 @@ class Matrix:
                         # If expansion is 0 we are done
                         if expansion == 0:
                             self.track('SUCCESS: Expansion completed', deepen = -1)
-                            if(len(banned) > 0):
+                            if len(banned) > 0:
                                 banned.pop()
                             return True
                     # If there is no successful expansion
@@ -1032,8 +1097,10 @@ class Matrix:
                     else:
                         self.track('OK: The maximum priority group was available')
                         break
+
             # When the number of cells to expand is lower than the minimum, we claim cells 1 by 1
-            else:
+            # When there are no available groups (not probable but possible) we claim cells 1 by 1
+            if expansion == PREpreviousExpansion:
                 priorizedCells = self.priorizeCells(suitables, cluster, source)
 
                 for cell in priorizedCells:

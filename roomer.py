@@ -43,10 +43,10 @@ distribution = floor('floor0',
         (+20,-60,0)],
     door = Cell(0,10),
     parentRoom = room('pasillo', 0.1, 15, maxWidth=15, priorizeBorder=-1, childRooms=[
-        room('comedor', 0.25, 50),
-        room('cocina', 0.15, 40),
-        room('habitacion1', 0.2, 40),
-        room('habitacion2', 0.2, 40),
+        room('comedor', 0.25, 30),
+        room('cocina', 0.15, 30),
+        room('habitacion1', 0.2, 30),
+        room('habitacion2', 0.2, 30),
         room('baño', 0.1, 20),
 ]))
     
@@ -62,30 +62,31 @@ if __name__ == '__main__':
     matrix.setArea(Cell(0,10),1)
     #matrix.setCluster(Cluster(2,0.1,3,3), 1)
 
+    clusters = []
 
     # El pasillo
     parent = distribution.parentRoom
-    matrix.setCluster( Cluster (2,
-                                parent.size,
-                                parent.minWidth,
-                                parent.maxWidth,
-                                parent.priorizeBorder,
-                                2),
-                                1,
-                                origin = distribution.door)
+
+    corridor_cluster =  Cluster (2, parent.size, parent.minWidth, parent.maxWidth, parent.priorizeBorder, 2)
+
+    matrix.setCluster(corridor_cluster, 1, origin = distribution.door)
+    #matrix.fixCluster(corridor_cluster, 1)
 
     setupRepresentProcess()
-    #represent()
 
+    room_clusters = []
     count = 3
     for room in parent.childRooms:
-    #for room in []:
-        matrix.setCluster(Cluster(count,
-                            room.size,
-                            room.minWidth,
-                            room.maxWidth,
-                            room.priorizeBorder), 1)
+        room_cluster = Cluster(count, room.size, room.minWidth, room.maxWidth, room.priorizeBorder)
+        matrix.setCluster(room_cluster, 1)
+        room_clusters.append(room_cluster)
         count += 1
+
+    clusters = room_clusters
+    #clusters = [corridor_cluster] + room_clusters
+    print(clusters)
+    for cluster in clusters:
+        matrix.fixCluster(cluster, 1)
         
     for i in range(8):
         if matrix.getCluster(i):

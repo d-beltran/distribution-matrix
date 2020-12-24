@@ -1,8 +1,8 @@
 Implementar lógica de claimGroup
 
-En priorizeFitCells se podría incluir una lógica para poder alternar entre dos parámetros:
-- Comportamiento 1: prioriza minWidth ante maxWidth -> Habitaciones más cuadradas
-- Comportamiento 2: prioriza maxWidth ante minWidth -> Habitaciones más rectangulares o en forma de L
+pushCluster
+- Esta cogiendo celdas fuera de perímetro. No debería ser posible
+	* Si que lo es si posicionas el cuadrado inicial sobre otro cluster
 
 Se podría crear una nueva función de priorizeClusters:
 - Sería coger todas las celdas colindantes a las celdas libres y guardar los números de sus clusters
