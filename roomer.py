@@ -1,5 +1,8 @@
-from distributionMatrix import *
-from matrixDisplay import *
+from grid import *
+from grid_display import *
+
+from scheme import *
+from scheme_display import plot_lines
 
 # CLASSES ----------------------------------------------------------
 
@@ -29,31 +32,11 @@ class room:
             return mins[0]
         else:
             return functools.reduce(math.gcd, mins)
-        
     
-# INPUTS ------------------------------------------------------------
-             
-distribution = floor('floor0',
-    corners = [
-        (-60,-60,0),
-        (-60,+60,0),
-        (+60,+60,0),
-        (+60,-40,0),
-        (+20,-40,0),
-        (+20,-60,0)],
-    door = Cell(0,10),
-    parentRoom = room('pasillo', 0.1, 15, maxWidth=15, priorizeBorder=-1, childRooms=[
-        room('comedor', 0.25, 30),
-        room('cocina', 0.15, 30),
-        room('habitacion1', 0.2, 30),
-        room('habitacion2', 0.2, 30),
-        room('baño', 0.1, 20),
-]))
-    
+
 # MAIN CODE ------------------------------------------------------------
 
-# This line is for windows to dont loop
-if __name__ == '__main__':
+def grid_distribution (distribution):
 
     # PRUEBAS
     matrix = Matrix(distribution.corners, distribution.parentRoom.getGCD(), updater = addFrame)
@@ -96,3 +79,61 @@ if __name__ == '__main__':
 
     print('yasta')
 
+
+def vectors_distribution (distribution):
+
+    # Set the limits of the whole scheme
+    limits = Perimeter.from_corners(distribution.corners)
+
+    # Set the base scheme
+    #scheme = Scheme(limits, display = True)
+    scheme = Scheme(limits)
+
+    test1 = Rect(Point(-10,-10),Point(10,10))
+    test2 = Rect(Point(5,-15),Point(25,5))
+
+    line1 = Line(Point(-20, -20), Point(-20, 10))
+    line2 = Line(Point(-20, -20), Point(-10, -20))
+
+    #test3 = subtract_rects(test1, test2)
+    test3 = limits.split_in_rectangles()
+
+    lines = []
+    for rect in test3:
+        for line in rect.get_lines():
+            lines.append(line)
+
+    test4 = limits.area
+    print(test4)
+
+    #plot_lines([ *limits.lines, *test1.get_lines(), *test2.get_lines() ])
+    plot_lines([ *limits.lines, *lines ])
+
+    print('yasta')
+    
+        
+# INPUTS ------------------------------------------------------------
+             
+distribution = floor('floor0',
+    corners = [
+        Point(-60,-60),
+        Point(-60,+60),
+        Point(+60,+60),
+        Point(+60,-40),
+        Point(+20,-40),
+        Point(+20,-60)],
+    door = Cell(0,10),
+    parentRoom = room('pasillo', 0.1, 15, maxWidth=15, priorizeBorder=-1, childRooms=[
+        room('comedor', 0.25, 30),
+        room('cocina', 0.15, 30),
+        room('habitacion1', 0.2, 30),
+        room('habitacion2', 0.2, 30),
+        room('baño', 0.1, 20),
+]))
+
+
+# This line is for windows to dont loop
+if __name__ == '__main__':
+
+    #grid_distribution(distribution)
+    vectors_distribution(distribution)
