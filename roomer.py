@@ -86,8 +86,8 @@ def vectors_distribution (distribution):
     limits = Perimeter.from_corners(distribution.corners)
 
     # Set the base scheme
-    #scheme = Scheme(limits, display = True)
-    scheme = Scheme(limits)
+    scheme = Scheme(limits, display = True)
+    #scheme = Scheme(limits)
 
     test1 = Rect(Point(-10,-10),Point(10,10))
     test2 = Rect(Point(5,-15),Point(25,5))
@@ -100,6 +100,7 @@ def vectors_distribution (distribution):
 
     lines = []
     for rect in test3:
+        lines.append(rect.get_corssing_line())
         for line in rect.get_lines():
             lines.append(line)
 
@@ -117,7 +118,12 @@ def vectors_distribution (distribution):
 distribution = floor('floor0',
     corners = [
         Point(-60,-60),
-        Point(-60,+60),
+        #-------------
+        Point(-60,+40),
+        Point(-40,+40),
+        Point(-40,+60),
+        #-------------
+        #Point(-60,+60),
         Point(+60,+60),
         Point(+60,-40),
         Point(+20,-40),

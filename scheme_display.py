@@ -59,15 +59,16 @@ def represent (queue):
         # If the slider is in the maximum value we keep it updated
         if updated:
             slider.set_val(maximum)
-        # Check if the current frames index exists
-        if i >= len(frames):
-            return
+
+        # Clear previous lines
+        ax.lines = []
+
         # Draw all lines
-        lines = frames[i]
+        lines = frames[slider.val]
         for line in lines:
             xs = [line.a.x, line.b.x]
             ys = [line.a.y, line.b.y]
-            ax.plot(xs,ys,color='black')
+            ploted_lines = ax.plot(xs,ys,color='black')
         
     # Run the animation and show the plot
     anim = animation.FuncAnimation(fig, update_frame)

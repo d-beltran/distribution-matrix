@@ -117,6 +117,10 @@ class Rect:
         lines = [ Line(a,b) for a, b in pairwise(points, retro=True) ]
         return lines
 
+    # Return all rectangle lines in a 'perimeter-friendly' order
+    def get_corssing_line(self):
+        return Line(self.pmin, self.pmax)
+
     # Calculate the rectangle area
     def get_area(self):
         if self._area:
@@ -435,8 +439,13 @@ def join_2_rects (rect1 : Rect, rect2 : Rect) -> Optional[list]:
 # Join multiple rectangles by joining all of them by pairs
 def join_rects (rects : list) -> Optional[list]:
     joined_rects = []
-    for rect_1, rect_2 in pairwise(rects, retro=True):
-        joined_rects += join_2_rects(rect_1, rect_2)
+    for rect1, rect2 in pairwise(rects, retro=True):
+        add_frame([ *rect1.lines, *rect2.lines ])
+        joined_rects += join_2_rects(rect1, rect2)
+        lines = []
+        for rect in joined_rects:
+            lines += rect.lines
+        add_frame([ *lines ])
     # Return only unique rectangles
     return set(joined_rects)
 
