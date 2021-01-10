@@ -5,6 +5,8 @@ from functools import reduce
 
 from typing import List, Union, Optional
 
+import math
+
 # CLASS DEFINITIONS ------------------------------------------------------------
 
 # An x,y coordinate
@@ -28,30 +30,124 @@ class Point:
     def __hash__(self):
         return hash((self.x, self.y))
     
+    # Point + Vector -> Point, Point + Point -> Vector
     def __add__(self, other):
-        return Point(self.x + other.x, self.y + other.y)
+        if isinstance(other, self.__class__):
+            return Vector(self.x + other.x, self.y + other.y)
+        if isinstance(other, Vector):
+            return Point(self.x + other.x, self.y + other.y)
 
+    # Point - Vector -> Point, Point - Point -> Vector
     def __sub__(self, other):
-        return Point(self.x - other.x, self.y - other.y)
+        if isinstance(other, self.__class__):
+            return Vector(self.x - other.x, self.y - other.y)
+        if isinstance(other, Vector):
+            return Point(self.x - other.x, self.y - other.y)
+
+    # get the distance from this point to other specified point
+    def get_distance (self, other):
+        x_distance = self.x - other.x
+        y_distance = self.y - other.y
+        return math.sqrt( x_distance**2 + y_distance**2 )
+
+class Vector:
+
+    def __init__(self, x : float, y : float):
+        self.x = x
+        self.y = y
+
+    def __str__(self):
+        return '(x: ' + str(self.x) + ', y: ' + str(self.y) + ')'
+
+    def __repr__(self):
+        return '(x: ' + str(self.x) + ', y: ' + str(self.y) + ')'
+
+    def __eq__(self, other):
+        if isinstance(other, self.__class__):
+            return self.x == other.x and self.y == other.y
+        return False
+
+    def __hash__(self):
+        return hash((self.x, self.y))
+
+    def __neg__(self):
+        return Vector(-self.x, -self.y)
+    
+    # Vector + Vector -> Vector, Vector + Point -> Point
+    def __add__(self, other):
+        if isinstance(other, self.__class__):
+            return Vector(self.x + other.x, self.y + other.y)
+        if isinstance(other, Point):
+            return Point(self.x + other.x, self.y + other.y)
+
+    # Vector - Vector -> Vector, Vector - Point -> Point
+    def __sub__(self, other):
+        if isinstance(other, self.__class__):
+            return Vector(self.x - other.x, self.y - other.y)
+        if isinstance(other, Point):
+            return Point(self.x - other.x, self.y - other.y)
+
+    def __mul__(self, num):
+        if isinstance(num, int) or isinstance(num, float):
+            x_mul = self.x * num
+            y_mul = self.y * num
+            return Vector(x_mul, y_mul)
+        raise NameError('Vector multiplication is only supported with numeric values')
+
+    __rmul__ = __mul__
+
+    def __div__(self, num):
+        if isinstance(num, int) or isinstance(num, float):
+            x_div = self.x / num
+            y_div = self.y / num
+            return Vector(x_div, y_div)
+        raise NameError('Vector division is only supported with numeric values')
+
+    __rdiv__ = __div__
+
+    def __truediv__(self, num):
+        if isinstance(num, int) or isinstance(num, float):
+            x_div = self.x / num
+            y_div = self.y / num
+            return Vector(x_div, y_div)
+        raise NameError('Vector division is only supported with numeric values')
+
+    __rtruediv__ = __truediv__
+
+    def get_magnitude(self) -> float:
+        return math.sqrt( self.x**2 + self.y**2 )
+
+    def normalized(self):
+        magnitude = self.get_magnitude()
+        return self / magnitude
         
 # A segment defined by 2 coordinates (Points): 'a' and 'b'
 class Line:
 
-    def __init__(self, a : Point, b : Point):
+    def __init__(self, a : Point, b : Point, color : str = 'black'):
         self.a = a
         self.b = b
+        self.color = color
         self.vector = b - a
+        self.length = a.get_distance(b)
 
     def __str__(self):
         return 'A: ' + str(self.a) + ', B: ' + str(self.b)
 
     def __eq__(self, other):
         if isinstance(other, self.__class__):
-            return self.a == other.a and self.b == other.b
+            return (self.a == other.a and self.b == other.b) or (self.a == other.b and self.b == other.a)
         return False
 
     def __hash__(self):
         return hash((self.a, self.b))
+
+    def __contains__(self, other):
+        if other.x and other.y:
+            distance1 = self.a.get_distance(other)
+            distance2 = self.b.get_distance(other)
+            return distance1 + distance2 == self.length
+        return False
 
 # A rectangular area defined by 2 coordinates (Points): 'max' and 'min'
 class Rect:
@@ -162,20 +258,6 @@ class Perimeter:
     def __str__(self):
         return ', '.join([str(line) for line in self.lines])
 
-    # A point between 2 lines in the perimeter
-    # The 'inside' variable defines if the corner is "pointing" to the inside of the perimeter
-    # (e.g. rectangles have no inside corners while an 'L' has one inside corner)
-    class Corner:
-
-        def __init__(self, point : Point, lines : list, inside : bool):
-            self.x = point.x
-            self.y = point.y
-            self.lines = lines
-            self.inside = inside
-
-        def __repr__(self):
-            return '(x: ' + str(self.x) + ', y: ' + str(self.y) + ')'
-
     # Check if the current lines create a closed perimeter or if it is open
     def is_closed(self):
         # Check that each line ends in the same point that the next line starts
@@ -192,7 +274,10 @@ class Perimeter:
         if not self.is_closed():
             raise NameError('The perimeter is not closed')
 
-    # Set the perimeter corners
+    # Set the perimeter corners as points with additional stored values
+    # The 'lines' variable defines the two lines of the perimeter which form the corner itself
+    # The 'inside' variable defines if the corner is "pointing" to the inside of the perimeter
+    # (e.g. rectangles have no inside corners while an 'L' has one inside corner)
     def set_corners(self):
         # For each line, save the end point and if the direction of the next line is left
         # Count how many corners are there in one direction (left in this case)
@@ -223,8 +308,9 @@ class Perimeter:
             lines = precorner[1]
             lefted_corner = precorner[2]
             inside = lefted_corner != lefted_perimeter
-            corner = self.Corner(point, lines, inside)
-            corners.append(corner)
+            point.lines = lines
+            point.inside = inside
+            corners.append(point)
         self.corners = corners
 
     # Get all perimeter points
@@ -233,38 +319,173 @@ class Perimeter:
         self.closed_check()
         return [ line.a for line in self.lines ]
 
-    # Split the current perimeter in a list of rectangle perimeters
+    # Get a rectangle which contains the whole perimeter
+    def get_box(self):
+        points = self.get_points()
+        x_coords = [ point.x for point in points ]
+        y_coords = [ point.y for point in points ]
+        x_min = min(x_coords)
+        x_max = max(x_coords)
+        y_min = min(x_coords)
+        y_max = max(x_coords)
+        pmin = Point(x_min, y_min)
+        pmax = Point(x_max, y_max)
+        return Rect(pmin, pmax)
+
+    # Return all points in the perimeter lines which intersect with a given line
+    # Points are sorted according to their distance with the 'a' point of the line (from less to more distance)
+    # WARNING: Intersection of paralel (overlapping) lines is not detected
+    # WARNING: If the origen point is in a corner/line it may return or not the origen as intersection point
+    # DANI: No se ha probado a fondo
+    # DANI: Actualmente NO está en uso
+    def get_line_intersection_points(self, line : Line) -> Optional[list]:
+        # Get the intersection point of the specfied line with each perimeter limit
+        intersection_points = []
+        for limit in self.lines:
+            point = get_intersection_point(limit, line)
+            if point:
+                intersection_points.append(point)
+        # Find out also if the lines intersects any corner
+        for corner in self.corners:
+            if corner in line:
+                intersection_points.append(corner)
+        # If no points are found return None
+        if len(intersection_points) == 0:
+            return None
+        # Sort the points
+        def by_distance(point):
+            return line.a.get_distance(point)
+        sorted_points = sorted(intersection_points, key=by_distance)
+        return sorted_points
+
+    # Return all lines inside the perimeter which intersect with a given line
+    # Lines are sorted according to their distance with the 'a' point of the line (from less to more distance)
+    # WARNING: Intersection of paralel (overlapping) lines is not detected
+    # DANI: No se ha probado
+    # DANI: No está acabado. No se contempla la posibilidad de que la linea que intersecta empieze dentro del perímetro
+    # DANI: Actualmente NO está en uso
+    def get_line_intersection_lines(self, line : Line) -> Optional[list]:
+        # Get the intersection points
+        sorted_points = self.get_line_intersection_points(line)
+        # If no points are found return None
+        points_count = len(sorted_points)
+        if points_count == 0:
+            return None
+        # Create new lines with the intersecting points
+        intersecting_lines = []
+        for a, b in pairwise(sorted_points):
+            intersecting_lines.append(Line(a,b))
+        # If the last intersecting point has no pair then use the line 'b' point a the end of the last intersecting line
+        if points_count % 2 == 1:
+            last_intersection_point = sorted_points[-1]
+            last_line_point = line.b
+            last_intersection_line = Line(last_intersection_point, last_line_point)
+            intersecting_lines.append(last_intersection_line)
+        return intersecting_lines
+
+    # Given a perimeter corner which is pointing inside,
+    # Create two lines opposed to the corner lines but as long as required to cut the perimeter at onther line or corner
+    # This two lines will always be inside the perimeter
+    def get_corner_insider_lines(self, corner : Point) -> list:
+        # Check that the corner exists
+        if corner not in self.corners:
+            raise NameError('This is not a perimeter corner')
+        # Check that the corner is inside
+        if not corner.inside:
+            raise NameError('This is only supported por inside corners')
+        # Get the length of the most large possible line in the perimeter
+        max_length = self.get_box().get_corssing_line().length
+        # Get the oppoiste lines to the corner lines but as long as the max_length
+        # NEVER FORGET: The corner point is the entry line 'b' point and the exit line 'a' point
+        entry_line, exit_line = corner.lines
+
+        tracing1 = Line(corner, corner + entry_line.vector.normalized() * max_length, color='green')
+        tracing2 = Line(corner, corner + (-exit_line.vector.normalized()) * max_length, color='green')
+
+        insider_lines = []
+        for line in [tracing1, tracing2]:
+
+            # Get the intersection point of the specfied line with each perimeter limit
+            intersection_points = []
+            for limit in self.lines:
+                # Skip the lines of the main corner
+                if limit in corner.lines:
+                    continue
+                point = get_intersection_point(limit, line)
+                if point:
+                    intersection_points.append(point)
+            # Find out also if the line intersects any corner
+            for corn in self.corners:
+                # Skip the main corner
+                if corn == corner:
+                    continue
+                if corn in line:
+                    intersection_points.append(corn)
+
+            # Sort the points by distance
+            def by_distance(point):
+                return line.a.get_distance(point)
+            sorted_points = sorted(intersection_points, key=by_distance)
+
+            # The closest point will be the first point
+            cut_point = sorted_points[0]
+
+            insider_line = Line(line.a, cut_point, color='red')
+            insider_lines.append(insider_line)
+
+        #return [tracing1, tracing2]
+        return insider_lines
+
+    # Split the current perimeter in a list of rectangles
     # If the multisplit option is true it will return as many splitted rectangles as possible
     # Else, it will return the minimum splits to cover all the perimeter
     # (e.g. an 'L' will return 2 rectangles if multisplit is false but 3 rectangles if it is true)
-    def split_in_rectangles(self):
+    def split_in_rectangles(self) -> list:
         self.closed_check()
 
-        # Get all outside corners
-        outside_corners = [ corner for corner in self.corners if not corner.inside ]
-
-        # Create a new rectangle for each outside corner
-        rects = [ Rect.from_lines(corner.lines) for corner in outside_corners ]
-
-        # Discard rectangles which contain any interior corner
-        # i.e. this rectange cuts the perimeter at some point
+        # Get all inside corners
         inside_corners = [ corner for corner in self.corners if corner.inside ]
-        def is_real(rect):
-            for corner in inside_corners:
-                if corner in rect:
-                    return False
-            return True
-        real_rects = list(filter(is_real, rects))
 
-        # Join all rectangles
-        joined_rects = join_rects(real_rects)
+        inside_separators = []
+        for corner in inside_corners:
+            for line in self.get_corner_insider_lines(corner):
+                inside_separators.append(line)
 
-        # Save this data since it is expensive
-        self.rects = joined_rects
+        add_frame([ *self.lines, *inside_separators ])
+        
+        return []
 
-        # And finally return rectangles
-        return joined_rects
+    # Split the current perimeter in a list of rectangles
+    # If the multisplit option is true it will return as many splitted rectangles as possible
+    # Else, it will return the minimum splits to cover all the perimeter
+    # (e.g. an 'L' will return 2 rectangles if multisplit is false but 3 rectangles if it is true)
+    def split(self):
+        self.closed_check()
 
+        corners = self.corners
+
+        # Get all the cutting points in both x and y dimensions
+        x_corners = [ corner.x for corner in corners]
+        y_corners = [ corner.y for corner in corners]
+        
+        # Remove duplicates and order the cutting points
+        x_splits = sort(list(set(x_corners)))
+        y_splits = sort(list(set(x_corners)))
+
+        # Set the steps to form rectangles
+        # WARNING: The doble 'for' loop with generators seems to work wrong
+        x_steps = list(pairwise(x_splits))
+        y_steps = list(pairwise(y_splits))
+
+        # Create as many rectangles as required
+        rects = []
+        for xmin, xmax in x_steps:
+            for ymin, ymax in y_steps:
+                pmin = Point(xmin, ymin)
+                pmax = Point(xmax, ymax)
+                rects.append(Rect(pmin, pmax))
+        
+        return rects
 
     # Calculate the area of the current perimeter
     def get_area(self):
@@ -320,9 +541,12 @@ class Scheme:
 # Return each value of the array and the next value
 # By default, the final array value is skipped, since it has no next value
 # However, if the 'retro' argument is True, the final array value is returned with the first array value as the next value
-def pairwise (values : list, retro : bool = False):
+# By default, values are returned as follows: A with B, B with C, C with D ...
+# However, if the 'loyals' argument is True, values are returned as follows: A with B, C with D, E with F ...
+def pairwise (values : list, retro : bool = False, loyals = False):
     last = len(values) - 1
-    for i in range(0, last):
+    step = 2 if loyals else 1
+    for i in range(0, last, step):
         yield values[i], values[i+1]
     if retro:
         yield values[last], values[0]
@@ -340,28 +564,38 @@ def next_left (line1 : Line, line2 : Line) -> bool:
 # Get the intersection between two lines
 # https://stackoverflow.com/questions/20677795/how-do-i-compute-the-intersection-point-of-two-lines
 def get_intersection_point (line1 : Line, line2 : Line) -> Optional[Point]:
-    xdiff = (line1.a.x - line1.b.x, line2.a.x - line2.b.x)
-    ydiff = (line1.a.y - line1.b.y, line2.a.y - line2.b.y)
+    xdiff = Vector(line1.a.x - line1.b.x, line2.a.x - line2.b.x)
+    ydiff = Vector(line1.a.y - line1.b.y, line2.a.y - line2.b.y)
 
     def det(a, b):
-        return a[0] * b[1] - a[1] * b[0]
+        return a.x * b.y - a.y * b.x
 
     div = det(xdiff, ydiff)
+    # Lines are paralel
     if div == 0:
        return None
 
-    d = (det(line1.a, line1.b), det(line2.a, line2.b))
+    d = Vector(det(line1.a, line1.b), det(line2.a, line2.b))
     x = det(d, xdiff) / div
     y = det(d, ydiff) / div
+    intersection_point = Point(x, y)
+
+    # WARNING: Till this point, we have taken lines as infinite lines, not segments
+    # WARNING: Two lines may not intersect, but this function will return the hipotetic intersection point if both lines where infinite
+    # Now we must verify that the intersection point is in both lines
+    if not intersection_point in line1 or not intersection_point in line2:
+        return None
+
+    #print(str(line1) + ' / ' + str(line2) + ' -> ' + str(Point(x, y)))
     return Point(x, y)
 
 # Check if two lines intersect
 def intersect (line1 : Line, line2 : Line) -> bool:
-    xdiff = (line1.a.x - line1.b.x, line2.a.x - line2.b.x)
-    ydiff = (line1.a.y - line1.b.y, line2.a.y - line2.b.y)
+    xdiff = Vector(line1.a.x - line1.b.x, line2.a.x - line2.b.x)
+    ydiff = Vector(line1.a.y - line1.b.y, line2.a.y - line2.b.y)
 
     def det(a, b):
-        return a[0] * b[1] - a[1] * b[0]
+        return a.x * b.y - a.y * b.x
 
     div = det(xdiff, ydiff)
     if div == 0:
@@ -443,8 +677,9 @@ def join_rects (rects : list) -> Optional[list]:
         add_frame([ *rect1.lines, *rect2.lines ])
         joined_rects += join_2_rects(rect1, rect2)
         lines = []
-        for rect in joined_rects:
+        for rect in join_2_rects(rect1, rect2):
             lines += rect.lines
+            lines.append(rect.get_corssing_line())
         add_frame([ *lines ])
     # Return only unique rectangles
     return set(joined_rects)

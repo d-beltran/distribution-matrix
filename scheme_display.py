@@ -55,7 +55,7 @@ def represent (queue):
         # Update the maximum slider value
         slider.valmax = maximum
         if maximum != 0:
-            slider.ax.set_xlim(slider.valmin,slider.valmax) # This is necessary to make the valmax stable
+            slider.ax.set_xlim(slider.valmin, slider.valmax) # This is necessary to make the valmax stable
         # If the slider is in the maximum value we keep it updated
         if updated:
             slider.set_val(maximum)
@@ -64,11 +64,11 @@ def represent (queue):
         ax.lines = []
 
         # Draw all lines
-        lines = frames[slider.val]
+        lines = frames[int(slider.val)]
         for line in lines:
             xs = [line.a.x, line.b.x]
             ys = [line.a.y, line.b.y]
-            ploted_lines = ax.plot(xs,ys,color='black')
+            ploted_lines = ax.plot(xs,ys,color=line.color)
         
     # Run the animation and show the plot
     anim = animation.FuncAnimation(fig, update_frame)

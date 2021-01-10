@@ -108,26 +108,80 @@ def vectors_distribution (distribution):
     print(test4)
 
     #plot_lines([ *limits.lines, *test1.get_lines(), *test2.get_lines() ])
-    plot_lines([ *limits.lines, *lines ])
+    #plot_lines([ *limits.lines, *lines ])
 
     print('yasta')
     
         
 # INPUTS ------------------------------------------------------------
+
+corners0 = [
+    Point(-60,-60),
+    Point(-60,+60),
+    Point(+60,+60),
+    Point(+60,-40),
+    Point(+20,-40),
+    Point(+20,-60)
+]
+
+corners1 = [
+    Point(-60,-60),
+    Point(-60,+40),
+    Point(-40,+40),
+    Point(-40,+60),
+    Point(+60,+60),
+    Point(+60,-40),
+    Point(+20,-40),
+    Point(+20,-60)
+]
+
+corners2 = [
+    Point(-60,-60),
+    Point(-60,+20),
+    Point(-20,+20),
+    Point(-20,+60),
+    Point(+20,+60),
+    Point(+20,-20),
+    Point(+60,-20),
+    Point(+60,-60),
+]
+
+corners3 = [
+    Point(-60,-20),
+    Point(-60,+20),
+    Point(-40,+20),
+    Point(-40,+40),
+    Point(-20,+40),
+    Point(-20,+60),
+    Point(+20,+60),
+    Point(+20,+40),
+    Point(+40,+40),
+    Point(+40,+20),
+    Point(+60,+20),
+    Point(+60,-20),
+    Point(+40,-20),
+    Point(+40,-40),
+    Point(+20,-40),
+    Point(+20,-60),
+    Point(-20,-60),
+    Point(-20,-40),
+    Point(-40,-40),
+    Point(-40,-20),
+]
+
+corners4 = [
+    Point(-60,-60),
+    Point(-60,+60),
+    Point(-20,+60),
+    Point(-20,-20),
+    Point(+20,-20),
+    Point(+20,+20),
+    Point(+60,+20),
+    Point(+60,-60),
+]
              
 distribution = floor('floor0',
-    corners = [
-        Point(-60,-60),
-        #-------------
-        Point(-60,+40),
-        Point(-40,+40),
-        Point(-40,+60),
-        #-------------
-        #Point(-60,+60),
-        Point(+60,+60),
-        Point(+60,-40),
-        Point(+20,-40),
-        Point(+20,-60)],
+    corners = corners3,
     door = Cell(0,10),
     parentRoom = room('pasillo', 0.1, 15, maxWidth=15, priorizeBorder=-1, childRooms=[
         room('comedor', 0.25, 30),
