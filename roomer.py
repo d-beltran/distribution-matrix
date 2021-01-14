@@ -104,8 +104,8 @@ def vectors_distribution (distribution):
         for line in rect.get_lines():
             lines.append(line)
 
-    test4 = limits.area
-    print(test4)
+    #test4 = limits.area
+    #print(test4)
 
     #plot_lines([ *limits.lines, *test1.get_lines(), *test2.get_lines() ])
     #plot_lines([ *limits.lines, *lines ])
@@ -181,7 +181,7 @@ corners4 = [
 ]
              
 distribution = floor('floor0',
-    corners = corners3,
+    corners = corners4,
     door = Cell(0,10),
     parentRoom = room('pasillo', 0.1, 15, maxWidth=15, priorizeBorder=-1, childRooms=[
         room('comedor', 0.25, 30),

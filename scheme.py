@@ -3,18 +3,25 @@ from scheme_display import setup_display, add_frame, plot_lines
 
 from functools import reduce
 
+import itertools
+
 from typing import List, Union, Optional
 
 import math
 
 # CLASS DEFINITIONS ------------------------------------------------------------
 
+# Set a cutoff to avoid missmatches in natural offsets when operating with float values
+# e.g. a resolution of 1000 means that different points must be in coordinates separated by 0.001
+resolution = 1000
+
 # An x,y coordinate
 class Point:
 
     def __init__(self, x : float, y : float):
-        self.x = x
-        self.y = y
+        # Apply here the resolution cutoff
+        self.x = round( x * resolution ) / resolution
+        self.y = round( y * resolution ) / resolution
 
     def __str__(self):
         return '(x: ' + str(self.x) + ', y: ' + str(self.y) + ')'
@@ -120,11 +127,16 @@ class Vector:
     def normalized(self):
         magnitude = self.get_magnitude()
         return self / magnitude
+
+    def get_direction(self) -> float:
+        return math.sqrt( self.x**2 + self.y**2 )
         
 # A segment defined by 2 coordinates (Points): 'a' and 'b'
 class Line:
 
     def __init__(self, a : Point, b : Point, color : str = 'black'):
+        if a == b:
+            raise NameError('ERROR: Inexistent line. Points "a" and "b" must be different')
         self.a = a
         self.b = b
         self.color = color
@@ -140,7 +152,7 @@ class Line:
         return False
 
     def __hash__(self):
-        return hash((self.a, self.b))
+        return hash(self.get_hash())
 
     def __contains__(self, other):
         if other.x and other.y:
@@ -148,6 +160,41 @@ class Line:
             distance2 = self.b.get_distance(other)
             return distance1 + distance2 == self.length
         return False
+
+    # Get a value which is always the same no matter the order of a and b
+    def get_hash(self):
+        def sort_by_x(point):
+            return point.x
+        def sort_by_y(point):
+            return point.y
+        points = [self.a, self.b]
+        sorted_points = sorted( sorted(points, key=sort_by_x), key=sort_by_y )
+        return tuple(sorted_points)
+
+    # Check if two lines form a corner
+    # i.e. only one of their points is the same and both lines have different direction
+    def makes_corner_with(self, line):
+        if self == line:
+            return False
+        if same_direction(self, line):
+            return False
+        return line.a == self.a or line.b == self.a or line.a == self.b or line.b == self.b
+
+    def split_at_points(self, points : List[Point]) -> list:
+        # Get only thouse points which are cutting the line
+        cutting_points = [ point for point in points if point in self and point != self.a and point != self.b ]
+        # If no points are cutting the line then return only the intact line
+        if len(cutting_points) == 0:
+            yield self
+            return
+        # Sort points by distance with the line 'a' point
+        def by_distance(point):
+            return self.a.get_distance(point)
+        sorted_points = sorted(cutting_points, key=by_distance)
+        # Nex create all possible lines with these points
+        for a, b in pairwise([self.a, *sorted_points, self.b]):
+            yield Line(a, b)
+        
 
 # A rectangular area defined by 2 coordinates (Points): 'max' and 'min'
 class Rect:
@@ -446,14 +493,73 @@ class Perimeter:
         # Get all inside corners
         inside_corners = [ corner for corner in self.corners if corner.inside ]
 
+        # Get all inside separator lines
         inside_separators = []
         for corner in inside_corners:
             for line in self.get_corner_insider_lines(corner):
                 inside_separators.append(line)
 
         add_frame([ *self.lines, *inside_separators ])
+
+        # Remove duplicates
+        inside_separators = list(set(inside_separators))
+
+        # Find all points where the inside separator lines intersect each other
+        inside_intersections = []
+        for line1, line2 in itertools.combinations(inside_separators, 2):
+            intersection_point = get_intersection_point(line1, line2)
+            if not intersection_point:
+                continue
+            # All inside lines will be found as intersection points, since their 2 lines intersect
+            # We skip these points
+            if intersection_point in inside_corners:
+                continue
+            inside_intersections.append(intersection_point)
+
+        inside_intersections = list(set(inside_intersections))
+
+        #print('Intersections: ' + str(len(inside_intersections)))
+
+        # Split the inside separator lines at the intersection points
+        inside_lines = []
+        for line in inside_separators:
+            splitted_lines = line.split_at_points(inside_intersections)
+            inside_lines += list(splitted_lines)
+
+        #print('Inside lines: ' + str(len(inside_lines)))
+
+        # Join all inside lines with the perimeter limits in a isngle list
+        # WARNING: inside lines MUST be before limit lines
+        all_lines = [ *inside_lines, *self.lines ]
+
+        # Finally, for each inside line, try to find 2 rectangles
+        # In theory:
+        # - All inside lines will be connected to exactly 2 rectangles
+        # - All inside rectangles will be defined by at least 1 inside line
+        inside_rectangles = []
+        for line in inside_lines:
+            this_line_rects = [] # Max 2
+            count = 0
+            for other_line in all_lines:
+                if line.makes_corner_with(other_line):
+                    new_rect = Rect.from_lines([ line, other_line ])
+                    if new_rect not in this_line_rects:
+                        #print(str(line) + ' / ' + str(other_line) + ' -> ' + str(count) + ': ' + str(new_rect))
+                        count += 1
+                        this_line_rects.append(new_rect)
+                    if count == 2:
+                        break
+            inside_rectangles += this_line_rects
+
+        #print('Total rectangles: ' + str(len(list(set(inside_rectangles)))))
+
+        frame_lines = []
+        for rect in list(set(inside_rectangles)):
+            frame_lines += rect.get_lines()
+            frame_lines.append(rect.get_corssing_line())
+        add_frame([ *self.lines, *frame_lines ])
         
-        return []
+        return inside_rectangles
 
     # Split the current perimeter in a list of rectangles
     # If the multisplit option is true it will return as many splitted rectangles as possible
@@ -601,6 +707,11 @@ def intersect (line1 : Line, line2 : Line) -> bool:
     if div == 0:
        return False
     return True
+
+def same_direction (line1 : Line, line2 : Line) -> bool:
+    nvector1 = line1.vector.normalized()
+    nvector2 = line2.vector.normalized()
+    return nvector1 == nvector2 or nvector1 == -nvector2
 
 # Operations with rectangles ----------------------------------------------------------
 
