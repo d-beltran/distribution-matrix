@@ -57,11 +57,11 @@ class Room:
         for room in rooms:
             children_area += room.forced_area
         if children_area > self.area:
-            raise NameError('ERROR: Children require more area than the parent has')
+            raise NameError('Input error: Children together require more area than the parent has')
         # Check all children are inside the perimeter, if they have a predefined perimeter
         for room in rooms:
             if room.perimeter and room.perimeter not in self.perimeter:
-                raise NameError('ERROR: The child room "' + room.name + '" is out of the parent perimeter')
+                raise NameError('Input error: The child room "' + room.name + '" is out of the parent perimeter')
         # Set up each room by giving them a position and correct size to match the forced area
         for room in rooms:
 

@@ -179,12 +179,18 @@ class Line:
         sorted_points = sorted( sorted(points, key=sort_by_x), key=sort_by_y )
         return tuple(sorted_points)
 
+    # Check if another line has the same direction than this line
+    def same_direction_as (self, line) -> bool:
+        nvector1 = self.vector.normalized()
+        nvector2 = line.vector.normalized()
+        return nvector1 == nvector2 or nvector1 == -nvector2
+
     # Check if two lines form a corner
     # i.e. only one of their points is the same and both lines have different direction
     def makes_corner_with(self, line):
         if self == line:
             return False
-        if same_direction(self, line):
+        if self.same_direction_as(line):
             return False
         return line.a == self.a or line.b == self.a or line.a == self.b or line.b == self.b
 
@@ -202,7 +208,40 @@ class Line:
         # Nex create all possible lines with these points
         for a, b in pairwise([self.a, *sorted_points, self.b]):
             yield Line(a, b)
-        
+
+    # Get the intersection between two lines
+    # https://stackoverflow.com/questions/20677795/how-do-i-compute-the-intersection-point-of-two-lines
+    # The 'in_extremis' sets if the 'a' and 'b' points which define lines are considered
+    # When false, if the intersection point is one of these points then it will be ignored
+    def get_intersection_point (self, line, in_extremis : bool = True) -> Optional[Point]:
+        xdiff = Vector(self.a.x - self.b.x, line.a.x - line.b.x)
+        ydiff = Vector(self.a.y - self.b.y, line.a.y - line.b.y)
+
+        def det(a, b):
+            return a.x * b.y - a.y * b.x
+
+        div = det(xdiff, ydiff)
+        # Lines are paralel
+        if div == 0:
+            return None
+
+        d = Vector(det(self.a, self.b), det(line.a, line.b))
+        x = det(d, xdiff) / div
+        y = det(d, ydiff) / div
+        intersection_point = Point(x, y)
+
+        # WARNING: Till this point, we have taken lines as infinite lines, not segments
+        # WARNING: Two lines may not intersect, but this function will return the hipotetic intersection point if both lines where infinite
+        # Now we must verify that the intersection point is in both lines
+        if not intersection_point in self or not intersection_point in line:
+            return None
+
+        # In case the 'in_extremis' argument is false check the intersection point to not be one of the 'a' or 'b' points from any line
+        if in_extremis == False and intersection_point in [ self.a, self.b, line.a, line.b ]:
+            return None
+
+        #print(str(self) + ' / ' + str(line) + ' -> ' + str(Point(x, y)))
+        return Point(x, y)
 
 # A rectangular area defined by 2 coordinates (Points): 'max' and 'min'
 class Rect:
@@ -333,7 +372,7 @@ class Perimeter:
             return False
         if isinstance(other, Line):
             in_a = other.a in self
-            cross_any_line = any([ intersect(other, line) for line in self.lines ])
+            cross_any_line = any([ other.get_intersection_point(line, in_extremis=False) for line in self.lines ])
             return in_a and not cross_any_line
         if isinstance(other, Rect):
             return all([ line in self for line in other.get_lines() ])
@@ -477,7 +516,7 @@ class Perimeter:
         # Get the intersection point of the specfied line with each perimeter limit
         intersection_points = []
         for limit in self.lines:
-            point = get_intersection_point(limit, line)
+            point = limit.get_intersection_point(line)
             if point:
                 intersection_points.append(point)
         # Find out also if the lines intersects any corner
@@ -546,7 +585,7 @@ class Perimeter:
                 # Skip the lines of the main corner
                 if limit in corner.lines:
                     continue
-                point = get_intersection_point(limit, line)
+                point = limit.get_intersection_point(line)
                 if point:
                     intersection_points.append(point)
             # Find out also if the line intersects any corner
@@ -599,7 +638,7 @@ class Perimeter:
         # Find all points where the inside separator lines intersect each other
         inside_intersections = []
         for line1, line2 in itertools.combinations(inside_separators, 2):
-            intersection_point = get_intersection_point(line1, line2)
+            intersection_point = line1.get_intersection_point(line2)
             if not intersection_point:
                 continue
             # All inside lines will be found as intersection points, since their 2 lines intersect
@@ -608,7 +647,7 @@ class Perimeter:
                 continue
             inside_intersections.append(intersection_point)
 
-        inside_intersections = list(set(inside_intersections))
+        inside_intersections = list(set(inside_intersections))        
 
         #print('Intersections: ' + str(len(inside_intersections)))
 
@@ -669,55 +708,6 @@ def pairwise (values : list, retro : bool = False, loyals = False):
     if retro:
         yield values[last], values[0]
 
-# Operations with lines ----------------------------------------------------------
-
-# Get the intersection between two lines
-# https://stackoverflow.com/questions/20677795/how-do-i-compute-the-intersection-point-of-two-lines
-def get_intersection_point (line1 : Line, line2 : Line) -> Optional[Point]:
-    xdiff = Vector(line1.a.x - line1.b.x, line2.a.x - line2.b.x)
-    ydiff = Vector(line1.a.y - line1.b.y, line2.a.y - line2.b.y)
-
-    def det(a, b):
-        return a.x * b.y - a.y * b.x
-
-    div = det(xdiff, ydiff)
-    # Lines are paralel
-    if div == 0:
-       return None
-
-    d = Vector(det(line1.a, line1.b), det(line2.a, line2.b))
-    x = det(d, xdiff) / div
-    y = det(d, ydiff) / div
-    intersection_point = Point(x, y)
-
-    # WARNING: Till this point, we have taken lines as infinite lines, not segments
-    # WARNING: Two lines may not intersect, but this function will return the hipotetic intersection point if both lines where infinite
-    # Now we must verify that the intersection point is in both lines
-    if not intersection_point in line1 or not intersection_point in line2:
-        return None
-
-    #print(str(line1) + ' / ' + str(line2) + ' -> ' + str(Point(x, y)))
-    return Point(x, y)
-
-# This function is used down here
-def ccw (a : Point, b : Point, c : Point):
-    return (c.y-a.y) * (b.x-a.x) > (b.y-a.y) * (c.x-a.x)
-
-# Check if two lines intersect        
-def intersect (line1 : Line, line2 : Line) -> bool:
-    a = line1.a
-    b = line1.b
-    c = line2.a
-    d = line2.b
-    if ccw(c,a,b) != ccw(d,a,b) and ccw(c,d,a) != ccw(c,d,b):
-        return True
-    return False
-
-def same_direction (line1 : Line, line2 : Line) -> bool:
-    nvector1 = line1.vector.normalized()
-    nvector2 = line2.vector.normalized()
-    return nvector1 == nvector2 or nvector1 == -nvector2
-
 # Operations with rectangles ----------------------------------------------------------
 
 # Given 2 rectangles, it returns the overlapping region, if exists, as a new rectangle
@@ -746,6 +736,7 @@ def get_rects_overlap (rect1 : Rect, rect2 : Rect) -> Optional[Rect]:
     overlap = Rect(pmin_overlap, pmax_overlap)
     return overlap
 
+# Split a rect in as many rects as specified by the 'x' and 'y' cuts
 def split_rect (rect : Rect, x_splits : list = [], y_splits : list = []):
     # Get the rectangle minimum and maximum values
     pmin = rect.pmin
