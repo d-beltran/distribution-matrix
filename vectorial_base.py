@@ -331,6 +331,90 @@ class Rect:
     # The area is treated appart since it may be an expensive calculation
     area = property(get_area, None, None, "The rectangle area")
 
+    # Split a rect in as many rects as specified by the 'x' and 'y' cuts
+    # DANI: No lo he provado desde que lo moví de abajo
+    def split (self, x_splits : list = [], y_splits : list = []):
+        # Get the rectangle minimum and maximum values
+        pmin = self.pmin
+        pmax = self.pmax
+        # Sort the split values and discard those values out of range
+        def x_in_range(x):
+            return x > pmin.x and x < pmax.x
+        formatted_x_splits = list(filter(x_in_range, sorted(x_splits)))
+        def y_in_range(y):
+            return y > pmin.y and y < pmax.y
+        formatted_y_splits = list(filter(y_in_range, sorted(y_splits)))
+        # Set the steps to form rectangles
+        # WARNING: The doble 'for' loop with generators seems to work wrong
+        x_steps = list(pairwise([ pmin.x, *formatted_x_splits, pmax.x ]))
+        y_steps = list(pairwise([ pmin.y, *formatted_y_splits, pmax.y ]))
+        # Create as many rectangles as required
+        for xmin, xmax in x_steps:
+            for ymin, ymax in y_steps:
+                pmin = Point(xmin, ymin)
+                pmax = Point(xmax, ymax)
+                yield Rect(pmin, pmax)
+
+    # Given 2 rectangles, it returns the overlapping region, if exists, as a new rectangle
+    # DANI: No lo he provado desde que lo moví de abajo
+    def overlap_rect (self, rect):
+        # Find the overlap in the 'x' dimension
+        # Get the maximum of the minimums
+        x_minimum = max(self.pmin.x, rect.pmin.x)
+        # Get the minimum of the maximums
+        x_maximum = min(self.pmax.x, rect.pmax.x)
+        # Check that the overlap range exists
+        x_overlap = ( x_minimum, x_maximum )
+        if x_minimum >= x_maximum:
+            return None
+        # Find the overlap in the 'y' dimension
+        # Get the maximum of the minimums
+        y_minimum = max(self.pmin.y, rect.pmin.y)
+        # Get the minimum of the maximums
+        y_maximum = min(self.pmax.y, rect.pmax.y)
+        # Check that the overlap range exists
+        y_overlap = ( y_minimum, y_maximum )
+        if y_minimum >= y_maximum:
+            return None
+        # Build a rectangle with both dimensional overlaps
+        pmin_overlap = Point(x_overlap[0], y_overlap[0])
+        pmax_overlap = Point(x_overlap[1], y_overlap[1])
+        overlap = Rect(pmin_overlap, pmax_overlap)
+        return overlap
+
+    # Join 2 rectangles by returning a list of all rectangles which define the resulting polygon
+    # The overlapped region, if exists is transformed to a single rectangle
+    # DANI: No lo he provado desde que lo moví de abajo
+    def join_rect (self, rect) -> Optional[list]:
+        # Find the overlap between these two rectangles
+        overlap = self.overlap_rect(rect)
+        # If there is no overlap then just return both input rectangles
+        if not overlap:
+            return [self, rect]
+        # Split both input rectangles using the overlap maximum and minimum points as split points
+        x_splits = [ overlap.pmin.x, overlap.pmax.x ]
+        y_splits = [ overlap.pmin.y, overlap.pmax.y ]
+        split1 = self.split(x_splits, y_splits)
+        split2 = rect.split(x_splits, y_splits)
+        rects = list(split1) + list(split2)
+        # Return only unique rectangles
+        return set(rects)
+
+    # Substract the second rectangle form the first rectangle and return the rectangles which define the resulting polygon
+    # DANI: No lo he provado desde que lo moví de abajo
+    def subtract_rect (self, rect) -> Optional[list]:
+        # Find the overlap between these two rectangles
+        overlap = selfoverlap_rect(rect)
+        # If there is no overlap then just return the first rectangle intact
+        if not overlap:
+            return [self]
+        # Split the first input rectangle using the overlap maximum and minimum points as split points
+        x_splits = [ overlap.pmin.x, overlap.pmax.x ]
+        y_splits = [ overlap.pmin.y, overlap.pmax.y ]
+        split = self.split(x_splits, y_splits)
+        # Return all splits but the overlapped rectangle
+        rects = [ rect for rect in list(split) if rect != overlap ]
+        return rects
     
 
 # A perimeter defined by several lines
@@ -707,87 +791,3 @@ def pairwise (values : list, retro : bool = False, loyals = False):
         yield values[i], values[i+1]
     if retro:
         yield values[last], values[0]
-
-# Operations with rectangles ----------------------------------------------------------
-
-# Given 2 rectangles, it returns the overlapping region, if exists, as a new rectangle
-def get_rects_overlap (rect1 : Rect, rect2 : Rect) -> Optional[Rect]:
-    # Find the overlap in the 'x' dimension
-    # Get the maximum of the minimums
-    x_minimum = max(rect1.pmin.x, rect2.pmin.x)
-    # Get the minimum of the maximums
-    x_maximum = min(rect1.pmax.x, rect2.pmax.x)
-    # Check that the overlap range exists
-    x_overlap = ( x_minimum, x_maximum )
-    if x_minimum >= x_maximum:
-        return None
-    # Find the overlap in the 'y' dimension
-    # Get the maximum of the minimums
-    y_minimum = max(rect1.pmin.y, rect2.pmin.y)
-    # Get the minimum of the maximums
-    y_maximum = min(rect1.pmax.y, rect2.pmax.y)
-    # Check that the overlap range exists
-    y_overlap = ( y_minimum, y_maximum )
-    if y_minimum >= y_maximum:
-        return None
-    # Build a rectangle with both dimensional overlaps
-    pmin_overlap = Point(x_overlap[0], y_overlap[0])
-    pmax_overlap = Point(x_overlap[1], y_overlap[1])
-    overlap = Rect(pmin_overlap, pmax_overlap)
-    return overlap
-
-# Split a rect in as many rects as specified by the 'x' and 'y' cuts
-def split_rect (rect : Rect, x_splits : list = [], y_splits : list = []):
-    # Get the rectangle minimum and maximum values
-    pmin = rect.pmin
-    pmax = rect.pmax
-    # Sort the split values and discard those values out of range
-    def x_in_range(x):
-        return x > pmin.x and x < pmax.x
-    formatted_x_splits = list(filter(x_in_range, sorted(x_splits)))
-    def y_in_range(y):
-        return y > pmin.y and y < pmax.y
-    formatted_y_splits = list(filter(y_in_range, sorted(y_splits)))
-    # Set the steps to form rectangles
-    # WARNING: The doble 'for' loop with generators seems to work wrong
-    x_steps = list(pairwise([ pmin.x, *formatted_x_splits, pmax.x ]))
-    y_steps = list(pairwise([ pmin.y, *formatted_y_splits, pmax.y ]))
-    # Create as many rectangles as required
-    for xmin, xmax in x_steps:
-        for ymin, ymax in y_steps:
-            pmin = Point(xmin, ymin)
-            pmax = Point(xmax, ymax)
-            yield Rect(pmin, pmax)
-
-
-# Join 2 rectangles by returning a list of all rectangles which define the resulting polygon
-# The overlapped region, if exists is transformed to a single rectangle
-def join_2_rects (rect1 : Rect, rect2 : Rect) -> Optional[list]:
-    # Find the overlap between these two rectangles
-    overlap = get_rects_overlap(rect1, rect2)
-    # If there is no overlap then just return both input rectangles
-    if not overlap:
-        return [rect1, rect2]
-    # Split both input rectangles using the overlap maximum and minimum points as split points
-    x_splits = [ overlap.pmin.x, overlap.pmax.x ]
-    y_splits = [ overlap.pmin.y, overlap.pmax.y ]
-    split1 = split_rect(rect1, x_splits, y_splits)
-    split2 = split_rect(rect2, x_splits, y_splits)
-    rects = list(split1) + list(split2)
-    # Return only unique rectangles
-    return set(rects)
-
-# Substract the second rectangle form the first rectangle and return the rectangles which define the resulting polygon
-def subtract_2_rects (rect1 : Rect, rect2 : Rect) -> Optional[list]:
-    # Find the overlap between these two rectangles
-    overlap = get_rects_overlap(rect1, rect2)
-    # If there is no overlap then just return the first rectangle intact
-    if not overlap:
-        return [rect1]
-    # Split the first input rectangle using the overlap maximum and minimum points as split points
-    x_splits = [ overlap.pmin.x, overlap.pmax.x ]
-    y_splits = [ overlap.pmin.y, overlap.pmax.y ]
-    split = split_rect(rect1, x_splits, y_splits)
-    # Return all splits but the overlapped rectangle
-    rects = [ rect for rect in list(split) if rect != overlap ]
-    return rects
