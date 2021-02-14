@@ -82,9 +82,9 @@ corners6 = [
     Point(-40,-40),
     Point(-40,-80),
 ]
-             
+
 distribution = Room(
-    perimeter=Perimeter.from_corners(corners0),
+    perimeter=Perimeter.from_corners(corners3),
     display=True,
     name='Planta',
     children=[

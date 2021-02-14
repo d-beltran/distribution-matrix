@@ -415,7 +415,6 @@ class Rect:
         # Return all splits but the overlapped rectangle
         rects = [ rect for rect in list(split) if rect != overlap ]
         return rects
-    
 
 # A perimeter defined by several lines
 # The perimeter parameters must never be modified
@@ -735,6 +734,14 @@ class Perimeter:
 
         #print('Intersections: ' + str(len(inside_intersections)))
 
+        # Find all inside separator lines which had no intersections with other separator lines
+        # This is used further
+        alone_inside_separators = []
+        for inside_separator in inside_separators:
+            if any( intersection in inside_separator for intersection in inside_intersections ):
+                continue
+            alone_inside_separators.append(inside_separator)
+
         # Split the inside separator lines at the intersection points
         inside_lines = []
         for line in inside_separators:
@@ -751,7 +758,7 @@ class Perimeter:
         # In theory:
         # - All inside lines will be connected to exactly 2 rectangles
         # - All inside rectangles will be defined by at least 1 inside line
-        inside_rectangles = []
+        minimum_rectangles = []
         for line in inside_lines:
             this_line_rects = [] # Max 2
             count = 0
@@ -764,17 +771,22 @@ class Perimeter:
                         this_line_rects.append(new_rect)
                     if count == 2:
                         break
-            inside_rectangles += this_line_rects
+            minimum_rectangles += this_line_rects
 
-        #print('Total rectangles: ' + str(len(list(set(inside_rectangles)))))
+        #print('Total rectangles: ' + str(len(list(set(minimum_rectangles)))))
 
         #frame_lines = []
-        #for rect in list(set(inside_rectangles)):
+        #for rect in list(set(minimum_rectangles)):
         #    frame_lines += rect.get_lines()
         #    frame_lines.append(rect.get_corssing_line())
         #add_frame([ *self.lines, *frame_lines ])
+
+        # At this point we have the "minimum" rectangles
+        # Now it is time to find the "maximum" rectangles
         
-        return inside_rectangles
+
+        
+        return minimum_rectangles
 
 # Auxiliar functions ---------------------------------------------------------------
 
