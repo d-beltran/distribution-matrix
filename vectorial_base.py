@@ -301,12 +301,18 @@ class Rect:
             return in_pmin and in_pmax
         return False
 
+    # Get rectangle corners appart from pmin and pmax
+    def get_upper_left_corner (self):
+        return Point(self.pmin.x, self.pmax.y)
+    def get_bottom_right_corner (self):
+        return Point(self.pmax.x, self.pmin.y)
+
     # Return all rectangle points in a 'perimeter-friendly' order
     def get_points(self):
         point1 = self.pmin
-        point2 = Point(self.pmin.x, self.pmax.y)
+        point2 = self.get_upper_left_corner()
         point3 = self.pmax
-        point4 = Point(self.pmax.x, self.pmin.y)
+        point4 = self.get_bottom_right_corner()
         return [ point1, point2, point3, point4 ]
 
     # Return all rectangle lines in a 'perimeter-friendly' order
@@ -724,23 +730,16 @@ class Perimeter:
             intersection_point = line1.get_intersection_point(line2)
             if not intersection_point:
                 continue
-            # All inside lines will be found as intersection points, since their 2 lines intersect
+            # All inside corners will be found as intersection points, since their 2 lines intersect
             # We skip these points
             if intersection_point in inside_corners:
                 continue
             inside_intersections.append(intersection_point)
 
+        # Remove duplicates
         inside_intersections = list(set(inside_intersections))        
 
         #print('Intersections: ' + str(len(inside_intersections)))
-
-        # Find all inside separator lines which had no intersections with other separator lines
-        # This is used further
-        alone_inside_separators = []
-        for inside_separator in inside_separators:
-            if any( intersection in inside_separator for intersection in inside_intersections ):
-                continue
-            alone_inside_separators.append(inside_separator)
 
         # Split the inside separator lines at the intersection points
         inside_lines = []
@@ -783,9 +782,86 @@ class Perimeter:
 
         # At this point we have the "minimum" rectangles
         # Now it is time to find the "maximum" rectangles
-        
 
-        
+        # First, some functions are defined to find colliding rects
+        def get_left_rect (rect : Rect):
+            pmax = rect.get_upper_left_corner()
+            for r in minimum_rectangles:
+                if r.pmax == pmax:
+                    return r
+            return None
+        def get_right_rect (rect : Rect):
+            pmin = rect.get_bottom_right_corner()
+            for r in minimum_rectangles:
+                if r.pmin == pmin:
+                    return r
+            return None
+        def get_upper_rect (rect : Rect):
+            pmin = rect.get_upper_left_corner()
+            for r in minimum_rectangles:
+                if r.pmin == pmin:
+                    return r
+            return None
+        def get_bottom_rect (rect : Rect):
+            pmax = rect.get_bottom_right_corner()
+            for r in minimum_rectangles:
+                if r.pmax == pmax:
+                    return r
+            return None
+
+        # One by one for each *available rectangle, where available rectangles are the minimum rectangles
+        # Get as many rectanges as possible which are connected horizontally to the current rectangle
+        # Get as many rows of rectangles as possible which are connected vertically to all previous rectangles
+        # Consider all previous rectangles as a single rectange
+        # Repeat in the inverse order (first vertically, then horizontally)
+        # Remove all previous rectangles from the *available rectangles list
+        maximum_rectangles = []
+        available_rectangles = [ rect for rect in minimum_rectangles ]
+        for available_rect in available_rectangles:
+            # Set the first row
+            row = [ available_rect ]
+            # Append all rectangles at right from current rectangle to the row
+            rightest = available_rect
+            while (True):
+                rightest = get_right_rect(rightest)
+                if not rightest:
+                    break
+                row.append(rightest)
+            # Append all rectangles at left from current rectangle to the row
+            leftest = available_rect
+            while (True):
+                leftest = get_left_rect(leftest)
+                if not leftest:
+                    break
+                row.append(leftest)
+            # Set the group of rectangles to be joined
+            group = [ rect for rect in row ]
+            # If all rectangles in the row have a botton rectangle then add all those new rects to a new row
+            # This new row is then added to the whole group of rectanges and used to find the next row
+            while (True):
+                new_row = [ get_bottom_rect(rect) for rect in row ]
+                if not all(new_row):
+                    break
+                group += new_row
+                row = [ *new_row ]
+            # Create a new rect which contains all group rects
+            # Find the most maximum pmax and the most minimum pmin
+            def sort_by_x(point):
+                return point.x
+            def sort_by_y(point):
+                return point.y
+            pmax_points = [ rect.pmax for rect in group ]
+            sorted_pmax_points = sorted( sorted(pmax_points, key=sort_by_x), key=sort_by_y )
+            maximum_pmax = sorted_pmax_points[0]
+            pmin_points = [ rect.pmin for rect in group ]
+            sorted_pmin_points = sorted( sorted( pmin_points, key=sort_by_x, inverse=True ), key=sort_by_y, inverse=True )
+            minimum_pmin = sorted_pmin_points[0]
+            maximum_rect = Rect(minimum_pmin, maximum_pmax)
+            # Add the new maximum rectnagle to the list and update the available rects list
+            maximum_rectangles.append(maximum_rect)
+            available_rectangles = [ rect not in group for rect in available_rectangles ]
+
+        # DANI: Falta añadir el 'maximum_rectangles' aqui
         return minimum_rectangles
 
 # Auxiliar functions ---------------------------------------------------------------
