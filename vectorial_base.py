@@ -322,7 +322,7 @@ class Rect:
         return lines
 
     # Return all rectangle lines in a 'perimeter-friendly' order
-    def get_corssing_line(self):
+    def get_crossing_line(self):
         return Line(self.pmin, self.pmax)
 
     # Calculate the rectangle area
@@ -433,6 +433,7 @@ class Perimeter:
         self.check() 
         self._corners = None
         self._rects = None
+        self._mrects = None
         self._area = None
 
     # Set the perimeter from its corners
@@ -490,10 +491,23 @@ class Perimeter:
         # Get all rectangles which form the perimeter
         rects = self.split_in_rectangles()
         self._rects = rects
-        return self._rects
+        return rects
 
     # The area is treated appart since it may be an expensive calculation
     rects = property(get_rects, None, None, "The rectangles which form the perimeter")
+
+    # Get all rectangles which form the perimeter
+    def get_mrects(self):
+        # If rects are previously calculated then return them
+        if self._mrects:
+            return self._mrects
+        # Get all rectangles which form the perimeter
+        mrects = self.get_maximum_rectangles()
+        self._mrects = mrects
+        return mrects
+
+    # The area is treated appart since it may be an expensive calculation
+    mrects = property(get_mrects, None, None, "The maximum rectangles posible inside the perimeter")
 
     # Get the area inside the perimeter
     def get_area(self):
@@ -657,7 +671,7 @@ class Perimeter:
         if not corner.inside:
             raise NameError('This is only supported por inside corners')
         # Get the length of the most large possible line in the perimeter
-        max_length = self.get_box().get_corssing_line().length
+        max_length = self.get_box().get_crossing_line().length
         # Get the oppoiste lines to the corner lines but as long as the max_length
         # NEVER FORGET: The corner point is the entry line 'b' point and the exit line 'a' point
         entry_line, exit_line = corner.lines
@@ -757,7 +771,7 @@ class Perimeter:
         # In theory:
         # - All inside lines will be connected to exactly 2 rectangles
         # - All inside rectangles will be defined by at least 1 inside line
-        minimum_rectangles = []
+        final_rectangles = []
         for line in inside_lines:
             this_line_rects = [] # Max 2
             count = 0
@@ -770,99 +784,166 @@ class Perimeter:
                         this_line_rects.append(new_rect)
                     if count == 2:
                         break
-            minimum_rectangles += this_line_rects
+            final_rectangles += this_line_rects
 
-        #print('Total rectangles: ' + str(len(list(set(minimum_rectangles)))))
+        #print('Total rectangles: ' + str(len(list(set(final_rectangles)))))
 
         #frame_lines = []
-        #for rect in list(set(minimum_rectangles)):
+        #for rect in list(set(final_rectangles)):
         #    frame_lines += rect.get_lines()
-        #    frame_lines.append(rect.get_corssing_line())
+        #    frame_lines.append(rect.get_crossing_line())
         #add_frame([ *self.lines, *frame_lines ])
 
-        # At this point we have the "minimum" rectangles
-        # Now it is time to find the "maximum" rectangles
+        return final_rectangles
+
+
+    # One by one for each *available rectangle, where available rectangles are the splitted rectangles
+    # Get as many rectanges as possible which are connected horizontally to the current rectangle
+    # Get as many rows of rectangles as possible which are connected vertically to all previous rectangles
+    # Consider all previous rectangles as a single rectange
+    # Repeat in the inverse order (first vertically, then horizontally)
+    # Remove all previous rectangles from the *available rectangles list
+    def get_maximum_rectangles(self) -> list:
+        splitted_rects = self.rects
 
         # First, some functions are defined to find colliding rects
         def get_left_rect (rect : Rect):
             pmax = rect.get_upper_left_corner()
-            for r in minimum_rectangles:
+            for r in splitted_rects:
                 if r.pmax == pmax:
                     return r
             return None
         def get_right_rect (rect : Rect):
             pmin = rect.get_bottom_right_corner()
-            for r in minimum_rectangles:
+            for r in splitted_rects:
                 if r.pmin == pmin:
                     return r
             return None
         def get_upper_rect (rect : Rect):
             pmin = rect.get_upper_left_corner()
-            for r in minimum_rectangles:
+            for r in splitted_rects:
                 if r.pmin == pmin:
                     return r
             return None
         def get_bottom_rect (rect : Rect):
             pmax = rect.get_bottom_right_corner()
-            for r in minimum_rectangles:
+            for r in splitted_rects:
                 if r.pmax == pmax:
                     return r
             return None
 
-        # One by one for each *available rectangle, where available rectangles are the minimum rectangles
-        # Get as many rectanges as possible which are connected horizontally to the current rectangle
-        # Get as many rows of rectangles as possible which are connected vertically to all previous rectangles
-        # Consider all previous rectangles as a single rectange
-        # Repeat in the inverse order (first vertically, then horizontally)
-        # Remove all previous rectangles from the *available rectangles list
+        # Set a function to merge multiple rects into a single big rect
+        # Do it by finding the most maximum pmax and the most minimum pmin
+        def sort_by_x(point):
+            return point.x
+        def sort_by_y(point):
+            return point.y
+        def merge_rectangles(rects):
+            pmax_points = [ rect.pmax for rect in rects ]
+            sorted_pmax_points = sorted( sorted( pmax_points, key=sort_by_x, reverse=True ), key=sort_by_y, reverse=True )
+            maximum_pmax = sorted_pmax_points[0]
+            pmin_points = [ rect.pmin for rect in rects ]
+            sorted_pmin_points = sorted( sorted( pmin_points, key=sort_by_x), key=sort_by_y )
+            minimum_pmin = sorted_pmin_points[0]
+            return Rect(minimum_pmin, maximum_pmax)
+
         maximum_rectangles = []
-        available_rectangles = [ rect for rect in minimum_rectangles ]
-        for available_rect in available_rectangles:
+        # Save rectangles already grouped to avoid analyzing them again
+        grouped_rectangles = []
+        for splitted_rect in splitted_rects:
+            # Skip already grouped rectangles
+            if splitted_rect in grouped_rectangles:
+                continue
             # Set the first row
-            row = [ available_rect ]
+            first_row = [ splitted_rect ]
             # Append all rectangles at right from current rectangle to the row
-            rightest = available_rect
+            rightest = splitted_rect
             while (True):
                 rightest = get_right_rect(rightest)
                 if not rightest:
                     break
-                row.append(rightest)
+                first_row.append(rightest)
             # Append all rectangles at left from current rectangle to the row
-            leftest = available_rect
+            leftest = splitted_rect
             while (True):
                 leftest = get_left_rect(leftest)
                 if not leftest:
                     break
-                row.append(leftest)
+                first_row.append(leftest)
             # Set the group of rectangles to be joined
-            group = [ rect for rect in row ]
+            group = [ rect for rect in first_row ]
             # If all rectangles in the row have a botton rectangle then add all those new rects to a new row
             # This new row is then added to the whole group of rectanges and used to find the next row
+            current_row = [ rect for rect in first_row ]
             while (True):
-                new_row = [ get_bottom_rect(rect) for rect in row ]
+                new_row = [ get_bottom_rect(rect) for rect in current_row ]
                 if not all(new_row):
                     break
                 group += new_row
-                row = [ *new_row ]
+                current_row = [ *new_row ]
+            # Repeat the process but upperwards
+            current_row = [ rect for rect in first_row ]
+            while (True):
+                new_row = [ get_upper_rect(rect) for rect in current_row ]
+                if not all(new_row):
+                    break
+                group += new_row
+                current_row = [ *new_row ]
             # Create a new rect which contains all group rects
-            # Find the most maximum pmax and the most minimum pmin
-            def sort_by_x(point):
-                return point.x
-            def sort_by_y(point):
-                return point.y
-            pmax_points = [ rect.pmax for rect in group ]
-            sorted_pmax_points = sorted( sorted(pmax_points, key=sort_by_x), key=sort_by_y )
-            maximum_pmax = sorted_pmax_points[0]
-            pmin_points = [ rect.pmin for rect in group ]
-            sorted_pmin_points = sorted( sorted( pmin_points, key=sort_by_x, inverse=True ), key=sort_by_y, inverse=True )
-            minimum_pmin = sorted_pmin_points[0]
-            maximum_rect = Rect(minimum_pmin, maximum_pmax)
-            # Add the new maximum rectnagle to the list and update the available rects list
-            maximum_rectangles.append(maximum_rect)
-            available_rectangles = [ rect not in group for rect in available_rectangles ]
+            maximum_rect = merge_rectangles(group)
+            # Add the new maximum rectnagle to the list if it is not there already
+            if maximum_rect not in maximum_rectangles:
+                maximum_rectangles.append(maximum_rect)
+            # Then update the grouped rects list
+            grouped_rectangles += [ rect for rect in group if rect not in grouped_rectangles ]
+
+            # Now repeat the process in the inverse order (first vertically, then horizontally)
+
+            # Set the first column
+            first_column = [ splitted_rect ]
+            # Append all rectangles at the bottom from current rectangle to the column
+            bottomest = splitted_rect
+            while (True):
+                bottomest = get_bottom_rect(bottomest)
+                if not bottomest:
+                    break
+                first_column.append(bottomest)
+            # Append all rectangles upper from current rectangle to the column
+            upperest = splitted_rect
+            while (True):
+                upperest = get_upper_rect(upperest)
+                if not upperest:
+                    break
+                first_column.append(upperest)
+            # Set the group of rectangles to be joined
+            group = [ rect for rect in first_column ]
+            # If all rectangles in the column have a right rectangle then add all those new rects to a new column
+            # This new column is then added to the whole group of rectanges and used to find the next column
+            current_column = [ rect for rect in first_column ]
+            while (True):
+                new_column = [ get_right_rect(rect) for rect in current_column ]
+                if not all(new_column):
+                    break
+                group += new_column
+                current_column = [ *new_column ]
+            # Repeat the process but to the left
+            current_column = [ rect for rect in first_column ]
+            while (True):
+                new_column = [ get_left_rect(rect) for rect in current_column ]
+                if not all(new_column):
+                    break
+                group += new_column
+                current_column = [ *new_column ]
+            # Create a new rect which contains all group rects
+            maximum_rect = merge_rectangles(group)
+            # Add the new maximum rectnagle to the list if it is not there already
+            if maximum_rect not in maximum_rectangles:
+                maximum_rectangles.append(maximum_rect)
+            # Then update the grouped rects list
+            grouped_rectangles += [ rect for rect in group if rect not in grouped_rectangles ]
 
         # DANI: Falta añadir el 'maximum_rectangles' aqui
-        return minimum_rectangles
+        return maximum_rectangles
 
 # Auxiliar functions ---------------------------------------------------------------
 

@@ -84,26 +84,25 @@ corners6 = [
 ]
 
 distribution = Room(
-    perimeter=Perimeter.from_corners(corners3),
+    perimeter=Perimeter.from_corners(corners4),
     display=True,
     name='Planta',
-    children=[
-        Room(
-            perimeter=Perimeter.from_corners(corners5),
-            forced_area=100,
-            min_size=15,
-            name='Habitación')
-    ]
+    #children=[
+    #    Room(
+    #        perimeter=Perimeter.from_corners(corners5),
+    #        forced_area=100,
+    #        min_size=15,
+    #        name='Habitación')
+    #]
 )
 
-
-    #door = Point(-60,0),
-    #parentRoom = Room('pasillo', 0.1, 15, maxWidth=15, priorizeBorder=-1, childRooms=[
-    #    room('comedor', 0.25, 30),
-    #    room('cocina', 0.15, 30),
-    #    room('habitacion1', 0.2, 30),
-    #    room('habitacion2', 0.2, 30),
-    #    room('baño', 0.1, 20),
+#door = Point(-60,0),
+#parentRoom = Room('pasillo', 0.1, 15, maxWidth=15, priorizeBorder=-1, childRooms=[
+#    room('comedor', 0.25, 30),
+#    room('cocina', 0.15, 30),
+#    room('habitacion1', 0.2, 30),
+#    room('habitacion2', 0.2, 30),
+#    room('baño', 0.1, 20),
 
 
 # This line is for windows to dont loop
