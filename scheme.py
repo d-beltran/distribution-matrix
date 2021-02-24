@@ -31,6 +31,9 @@ class Room:
             self.forced_area = forced_area
         else:
             self.forced_area = self.area
+        # If the forced area does not cover the minimum size it makes no sense
+        if min_size and forced_area < min_size**2:
+            raise NameError('Input error: Forced area is not sufficient for the minimum size in room ' + name)
         # Set the free area: area where there is no children rooms
         self.free_area = self.area
         # Set size limits
@@ -62,9 +65,13 @@ class Room:
         for room in rooms:
             if room.perimeter and room.perimeter not in self.perimeter:
                 raise NameError('Input error: The child room "' + room.name + '" is out of the parent perimeter')
+        # Check all children minim sizes fit in the perimeter, if they have a predefined minimum size
+        for room in rooms:
+            size = room.min_size
+            if size and not self.perimeter.fit(size, size):
+                raise NameError('Input error: The child room "' + room.name + '" minimum size does not fit in the parent perimeter')    
         # Set up each room by giving them a position and correct size to match the forced area
         for room in rooms:
-
             # Finally, update the room hierarchy
             room.parent = self
             self.children.append(room)

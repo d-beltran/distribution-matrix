@@ -84,16 +84,16 @@ corners6 = [
 ]
 
 distribution = Room(
-    perimeter=Perimeter.from_corners(corners4),
+    perimeter=Perimeter.from_corners(corners3),
     display=True,
     name='Planta',
-    #children=[
-    #    Room(
-    #        perimeter=Perimeter.from_corners(corners5),
-    #        forced_area=100,
-    #        min_size=15,
-    #        name='Habitación')
-    #]
+    children=[
+        Room(
+            perimeter=Perimeter.from_corners(corners5),
+            forced_area=600,
+            min_size=15,
+            name='Habitación')
+    ]
 )
 
 #door = Point(-60,0),

@@ -326,11 +326,16 @@ class Rect:
         return Line(self.pmin, self.pmax)
 
     # Calculate the rectangle area
+    def get_size(self):
+        x_size = self.pmax.x - self.pmin.x
+        y_size = self.pmax.y - self.pmin.y
+        return x_size, y_size
+
+    # Calculate the rectangle area
     def get_area(self):
         if self._area:
             return self._area
-        x_size = self.pmax.x - self.pmin.x
-        y_size = self.pmax.y - self.pmin.y
+        x_size, y_size = self.get_size()
         self._area = x_size * y_size
         return self._area
 
@@ -944,6 +949,16 @@ class Perimeter:
 
         # DANI: Falta añadir el 'maximum_rectangles' aqui
         return maximum_rectangles
+
+    # Check if a rectangle fits somewhere in the perimeter
+    # Iterate over all maximum rectangles and try to fit 
+    def fit (self, x_fit_size : float, y_fit_size : float):
+        for rect in self.mrects:
+            x_size, y_size = rect.get_size()
+            if x_fit_size <= x_size and y_fit_size <= y_size:
+                return True
+        return False
+                
 
 # Auxiliar functions ---------------------------------------------------------------
 
