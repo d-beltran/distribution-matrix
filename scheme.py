@@ -77,11 +77,45 @@ class Room:
             self.children.append(room)
 
     # Get all lines from this room and all children room perimeters
-    def get_lines_recuersive (self):
-        lines = self.perimeter.lines if self.perimeter else []
+    def get_lines_recuersive (self, only_children : bool = False):
+        lines = []
+        if not only_children and self.perimeter:
+            lines += self.perimeter.lines
         for room in self.children:
             lines += room.get_lines_recuersive()
         return lines
+
+    # Check if a point is in the border of any children perimeter
+    def in_children_border(self, point : Point):
+        for room in self.children:
+            for corner in room.perimeter.corners:
+                if point == corner:
+                    return True
+            for line in room.perimeter.lines:
+                if point in line:
+                    return True
+        return False
+
+    # Get the available space inside de perimeter splitted in rects
+    # i.e. space not filled by children rooms
+    def get_free_rects (self):
+        # Inside corneres are the parent perimeter inside corners and the children perimeters outside corners
+        parent_inside_corners = [ corner for corner in self.perimeter.corners if corner.inside ]
+        children_inside_corners = []
+        for room in self.children:
+            child_inside_corners = [ corner for corner in room.perimeter.corners if not corner.inside ]
+            children_inside_corners += child_inside_corners
+        # Children corners which are in the perimeter border are discarded and viceversa
+        filtered_parent_inside_corners = [ corner for corner in parent_inside_corners if not self.in_children_border(corner) ]   
+        filtered_children_inside_corners = [ corner for corner in children_inside_corners if not self.perimeter.in_border(corner) ]
+        inside_corners = filtered_parent_inside_corners + filtered_children_inside_corners
+        # Limit points are all inside corners
+        limit_points = [ *inside_corners ]
+        # Limit lines are both parent and children lines
+        limit_lines = self.get_lines_recuersive()
+        # Split in rectangles
+        free_rects = self.perimeter.split_in_rectangles(inside_corners, limit_points, limit_lines)
+        return free_rects
 
     # Add a new frame in the display with the current lines of this room and its children
     def update_display (self):

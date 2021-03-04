@@ -136,7 +136,7 @@ class Line:
 
     def __init__(self, a : Point, b : Point, color : str = 'black'):
         if a == b:
-            raise NameError('ERROR: Inexistent line. Points "a" and "b" must be different')
+            raise NameError('ERROR: Inexistent line. Points "a" and "b" must be different: ' + str(a))
         self.a = a
         self.b = b
         self.color = color
@@ -614,6 +614,16 @@ class Perimeter:
         pmax = Point(x_max, y_max)
         return Rect(pmin, pmax)
 
+    # Find out if a point is in the border of the perimeter (lines and corners)
+    def in_border(self, point : Point):
+        for corner in self.corners:
+            if point == corner:
+                return True
+        for line in self.lines:
+            if point in line:
+                return True
+        return False
+
     # Return all points in the perimeter lines which intersect with a given line
     # Points are sorted according to their distance with the 'a' point of the line (from less to more distance)
     # WARNING: Intersection of paralel (overlapping) lines is not detected
@@ -668,13 +678,13 @@ class Perimeter:
     # Given a perimeter corner which is pointing inside,
     # Create two lines opposed to the corner lines but as long as required to cut the perimeter at onther line or corner
     # This two lines will always be inside the perimeter
-    def get_corner_insider_lines(self, corner : Point) -> list:
+    def get_corner_insider_lines(self, corner : Point, limit_points : list = [], limit_lines : list = []) -> list:
         # Check that the corner exists
-        if corner not in self.corners:
-            raise NameError('This is not a perimeter corner')
+        #if corner not in self.corners:
+        #    raise NameError('This is not a perimeter corner')
         # Check that the corner is inside
-        if not corner.inside:
-            raise NameError('This is only supported por inside corners')
+        #if not corner.inside:
+        #    raise NameError('This is only supported por inside corners')
         # Get the length of the most large possible line in the perimeter
         max_length = self.get_box().get_crossing_line().length
         # Get the oppoiste lines to the corner lines but as long as the max_length
@@ -684,25 +694,31 @@ class Perimeter:
         tracing1 = Line(corner, corner + entry_line.vector.normalized() * max_length, color='green')
         tracing2 = Line(corner, corner + (-exit_line.vector.normalized()) * max_length, color='green')
 
+        # Set the limits if they were not passed
+        if not limit_points or len(limit_points) == 0:
+            limit_points = self.corners
+        if not limit_lines or len(limit_lines) == 0:
+            limit_lines = self.lines 
+
         insider_lines = []
         for line in [tracing1, tracing2]:
 
             # Get the intersection point of the specfied line with each perimeter limit
             intersection_points = []
-            for limit in self.lines:
+            for limit_line in limit_lines:
                 # Skip the lines of the main corner
-                if limit in corner.lines:
+                if limit_line in corner.lines:
                     continue
-                point = limit.get_intersection_point(line)
+                point = limit_line.get_intersection_point(line)
                 if point:
                     intersection_points.append(point)
             # Find out also if the line intersects any corner
-            for corn in self.corners:
+            for limit_point in limit_points:
                 # Skip the main corner
-                if corn == corner:
+                if limit_point == corner:
                     continue
-                if corn in line:
-                    intersection_points.append(corn)
+                if limit_point in line:
+                    intersection_points.append(limit_point)
 
             # Sort the points by distance
             def by_distance(point):
@@ -710,7 +726,7 @@ class Perimeter:
             sorted_points = sorted(intersection_points, key=by_distance)
 
             # The closest point will be the first point
-            cut_point = sorted_points[0]
+            cut_point = sorted_points[0] # DANI: Me quedé aquí. Parece que una linea no corta, hay que chequear
 
             insider_line = Line(line.a, cut_point, color='red')
             insider_lines.append(insider_line)
@@ -722,10 +738,11 @@ class Perimeter:
     # If the multisplit option is true it will return as many splitted rectangles as possible
     # Else, it will return the minimum splits to cover all the perimeter
     # (e.g. an 'L' will return 2 rectangles if multisplit is false but 3 rectangles if it is true)
-    def split_in_rectangles(self) -> list:
+    def split_in_rectangles(self, inside_corners : list = [], limit_points : list = [], limit_lines : list = []) -> list:
 
-        # Get all inside corners
-        inside_corners = [ corner for corner in self.corners if corner.inside ]
+        # Get all inside corners if they were not passed
+        if not inside_corners or len(inside_corners) == 0:
+            inside_corners = [ corner for corner in self.corners if corner.inside ]
 
         # If there are no inside corners it means our perimeter is a single rectangle
         if len(inside_corners) == 0:
@@ -735,7 +752,7 @@ class Perimeter:
         # Get all inside separator lines
         inside_separators = []
         for corner in inside_corners:
-            for line in self.get_corner_insider_lines(corner):
+            for line in self.get_corner_insider_lines(corner, limit_points, limit_lines):
                 inside_separators.append(line)
 
         #add_frame([ *self.lines, *inside_separators ])

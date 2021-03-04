@@ -94,3 +94,11 @@ def plot_lines (lines : list):
         ys = [line.a.y, line.b.y]
         ax.plot(xs,ys,color='black')
     plt.show()
+
+# Plot rectangles manually
+
+def plot_rects (rects : list):
+    lines = []
+    for rect in rects:
+        lines += rect.lines
+    plot_lines(lines)
