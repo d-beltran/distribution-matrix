@@ -155,7 +155,7 @@ class Line:
         return hash(self.get_hash())
 
     def __contains__(self, other):
-        if other.x and other.y:
+        if hasattr(other, 'x') and hasattr(other, 'y'):
             distance1 = self.a.get_distance(other)
             distance2 = self.b.get_distance(other)
             return distance1 + distance2 == self.length
