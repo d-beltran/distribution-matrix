@@ -212,8 +212,11 @@ class Line:
     # Get the intersection between two lines
     # https://stackoverflow.com/questions/20677795/how-do-i-compute-the-intersection-point-of-two-lines
     # The 'in_extremis' sets if the 'a' and 'b' points which define lines are considered
+    # in_extremis = 0 -> Intersections which are the 'extrem' point of any line are ignored
+    # in_extremis = 1 -> Intersections which are the 'extrem' point of only one of the lines are also considered
+    # in_extremis = 2 -> All interactions are considered
     # When false, if the intersection point is one of these points then it will be ignored
-    def get_intersection_point (self, line, in_extremis : bool = True) -> Optional[Point]:
+    def get_intersection_point (self, line, in_extremis : int = 2) -> Optional[Point]:
         xdiff = Vector(self.a.x - self.b.x, line.a.x - line.b.x)
         ydiff = Vector(self.a.y - self.b.y, line.a.y - line.b.y)
 
@@ -236,8 +239,12 @@ class Line:
         if not intersection_point in self or not intersection_point in line:
             return None
 
-        # In case the 'in_extremis' argument is false check the intersection point to not be one of the 'a' or 'b' points from any line
-        if in_extremis == False and intersection_point in [ self.a, self.b, line.a, line.b ]:
+        # In case the 'in_extremis' argument is 0 check the intersection point to not be one of the 'a' or 'b' points from any line
+        if in_extremis == 0 and intersection_point in [ self.a, self.b, line.a, line.b ]:
+            return None
+
+         # In case the 'in_extremis' argument is 1 check the intersection point to not be one of the 'a' or 'b' points from both lines
+        if in_extremis == 1 and intersection_point in [ self.a, self.b ] and intersection_point in [ line.a, line.b ]:
             return None
 
         #print(str(self) + ' / ' + str(line) + ' -> ' + str(Point(x, y)))
@@ -467,7 +474,7 @@ class Perimeter:
             return False
         if isinstance(other, Line):
             in_a = other.a in self
-            cross_any_line = any([ other.get_intersection_point(line, in_extremis=False) for line in self.lines ])
+            cross_any_line = any([ other.get_intersection_point(line, in_extremis=0) for line in self.lines ])
             return in_a and not cross_any_line
         if isinstance(other, Rect):
             return all([ line in self for line in other.get_lines() ])
@@ -679,18 +686,13 @@ class Perimeter:
     # Create two lines opposed to the corner lines but as long as required to cut the perimeter at onther line or corner
     # This two lines will always be inside the perimeter
     def get_corner_insider_lines(self, corner : Point, limit_points : list = [], limit_lines : list = []) -> list:
-        # Check that the corner exists
-        #if corner not in self.corners:
-        #    raise NameError('This is not a perimeter corner')
-        # Check that the corner is inside
-        #if not corner.inside:
-        #    raise NameError('This is only supported por inside corners')
+
         # Get the length of the most large possible line in the perimeter
         max_length = self.get_box().get_crossing_line().length
+
         # Get the oppoiste lines to the corner lines but as long as the max_length
         # NEVER FORGET: The corner point is the entry line 'b' point and the exit line 'a' point
         entry_line, exit_line = corner.lines
-
         tracing1 = Line(corner, corner + entry_line.vector.normalized() * max_length, color='green')
         tracing2 = Line(corner, corner + (-exit_line.vector.normalized()) * max_length, color='green')
 
@@ -698,7 +700,7 @@ class Perimeter:
         if not limit_points or len(limit_points) == 0:
             limit_points = self.corners
         if not limit_lines or len(limit_lines) == 0:
-            limit_lines = self.lines 
+            limit_lines = self.lines
 
         insider_lines = []
         for line in [tracing1, tracing2]:
@@ -711,6 +713,10 @@ class Perimeter:
                     continue
                 point = limit_line.get_intersection_point(line)
                 if point:
+                    # Intersection point may be the corner even ignoring corner lines
+                    # This happens when one of the corner lines has been splited
+                    if point == corner:
+                        continue
                     intersection_points.append(point)
             # Find out also if the line intersects any corner
             for limit_point in limit_points:
@@ -719,6 +725,10 @@ class Perimeter:
                     continue
                 if limit_point in line:
                     intersection_points.append(limit_point)
+
+            # There should be always at least 1 intersection
+            if len(intersection_points) == 0:
+                raise NameError('An inside line has no intersection point: ' + str(line))
 
             # Sort the points by distance
             def by_distance(point):
@@ -738,20 +748,45 @@ class Perimeter:
     # If the multisplit option is true it will return as many splitted rectangles as possible
     # Else, it will return the minimum splits to cover all the perimeter
     # (e.g. an 'L' will return 2 rectangles if multisplit is false but 3 rectangles if it is true)
-    def split_in_rectangles(self, inside_corners : list = [], limit_points : list = [], limit_lines : list = []) -> list:
+    def split_in_rectangles(self, exclusion_perimeters : list = []) -> list:
 
-        # Get all inside corners if they were not passed
-        if not inside_corners or len(inside_corners) == 0:
-            inside_corners = [ corner for corner in self.corners if corner.inside ]
+        # Inside corneres are the parent perimeter inside corners and the children perimeters outside corners
+        parent_inside_corners = [ corner for corner in self.corners if corner.inside ]
+        children_inside_corners = []
+        for perimeter in exclusion_perimeters:
+            child_inside_corners = [ corner for corner in perimeter.corners if not corner.inside ]
+            children_inside_corners += child_inside_corners
+        inside_corners = parent_inside_corners + children_inside_corners
+
+        # Limits are the current perimeter and all exclusion perimeters
+        limits = [ self, *exclusion_perimeters ]
+
+        # Inside corners which are overlapped with other perimeters are skipped
+        limit_points = []
+        for corner in inside_corners:
+            count = 0
+            for perimeter in limits:
+                if perimeter.in_border(corner):
+                    count += 1
+                    if count > 1:
+                        break
+            # If this corner was found in more than 1 perimeter then skip it
+            if count == 1:
+                limit_points.append(corner)
+
+        # Limit lines are both parent and children lines
+        limit_lines = []
+        for perimeter in limits:
+            limit_lines += perimeter.lines
 
         # If there are no inside corners it means our perimeter is a single rectangle
-        if len(inside_corners) == 0:
+        if len(limit_points) == 0:
             # Return only the box
             return [ self.get_box() ]
 
         # Get all inside separator lines
         inside_separators = []
-        for corner in inside_corners:
+        for corner in limit_points:
             for line in self.get_corner_insider_lines(corner, limit_points, limit_lines):
                 inside_separators.append(line)
 
@@ -760,61 +795,66 @@ class Perimeter:
         # Remove duplicates
         inside_separators = list(set(inside_separators))
 
+        # Join all inside lines with the perimeter limits in a single list
+        # WARNING: inside lines MUST be before limit lines
+        all_lines = [ *inside_separators, *limit_lines ]
+
         # Find all points where the inside separator lines intersect each other
-        inside_intersections = []
-        for line1, line2 in itertools.combinations(inside_separators, 2):
-            intersection_point = line1.get_intersection_point(line2)
-            if not intersection_point:
+        all_intersections = []
+        for line1, line2 in itertools.combinations(all_lines, 2):
+            # All inside corners would be found as intersection points, since their 2 lines intersect
+            # For this reason, we set 'in_extremis' as false
+            intersection = line1.get_intersection_point(line2)
+            if not intersection:
                 continue
-            # All inside corners will be found as intersection points, since their 2 lines intersect
-            # We skip these points
-            if intersection_point in inside_corners:
-                continue
-            inside_intersections.append(intersection_point)
+            all_intersections.append(intersection)
 
         # Remove duplicates
-        inside_intersections = list(set(inside_intersections))        
+        all_intersections = list(set(all_intersections))
 
-        #print('Intersections: ' + str(len(inside_intersections)))
+        #print('Intersections: ' + str(len(all_intersections)))
 
         # Split the inside separator lines at the intersection points
-        inside_lines = []
-        for line in inside_separators:
-            splitted_lines = line.split_at_points(inside_intersections)
-            inside_lines += list(splitted_lines)
+        all_splitted_lines = []
+        for line in all_lines:
+            splitted_lines = line.split_at_points(all_intersections)
+            all_splitted_lines += list(splitted_lines)
 
-        #print('Inside lines: ' + str(len(inside_lines)))
+        #print('All lines: ' + str(len(all_splitted_lines)))
 
-        # Join all inside lines with the perimeter limits in a isngle list
-        # WARNING: inside lines MUST be before limit lines
-        all_lines = [ *inside_lines, *self.lines ]
-
-        # Finally, for each inside line, try to find 2 rectangles
-        # In theory:
-        # - All inside lines will be connected to exactly 2 rectangles
-        # - All inside rectangles will be defined by at least 1 inside line
+        # Finally, for each line, try to find 2 rectangles
+        # Each line will be connected to exactly 1 or 2 rectangles
         final_rectangles = []
-        for line in inside_lines:
+        for line in all_splitted_lines:
             this_line_rects = [] # Max 2
             count = 0
-            for other_line in all_lines:
+            for other_line in all_splitted_lines:
+                # If 2 lines are connected making a corner there may be a rectangle
                 if line.makes_corner_with(other_line):
+                    # Create the rect that the two previous lines would make
                     new_rect = Rect.from_lines([ line, other_line ])
+                    # Must check that the other 2 lines which would complete the rectangle do exist
+                    other_lines = [ rect_line for rect_line in new_rect.lines if rect_line not in [ line, other_line ] ]
+                    if other_lines[0] not in all_splitted_lines or other_lines[1] not in all_splitted_lines:
+                        continue
                     if new_rect not in this_line_rects:
                         #print(str(line) + ' / ' + str(other_line) + ' -> ' + str(count) + ': ' + str(new_rect))
                         count += 1
                         this_line_rects.append(new_rect)
                     if count == 2:
                         break
+            #print(str(line) + ' -> ' + str(this_line_rects[0]) + ' / ' + str(this_line_rects[1]))
             final_rectangles += this_line_rects
 
-        #print('Total rectangles: ' + str(len(list(set(final_rectangles)))))
+        # Remove duplicates
+        final_rectangles = list(set(final_rectangles))
 
-        #frame_lines = []
-        #for rect in list(set(final_rectangles)):
-        #    frame_lines += rect.get_lines()
-        #    frame_lines.append(rect.get_crossing_line())
-        #add_frame([ *self.lines, *frame_lines ])
+        # In some cases, some rectangles may be found inside exclusion perimeters
+        # Find and discard those rectangles
+        for perimeter in exclusion_perimeters:
+            final_rectangles = [ rect for rect in final_rectangles if rect not in perimeter ]
+
+        #print('Total rectangles: ' + str(len(final_rectangles)))
 
         return final_rectangles
 

@@ -1,6 +1,6 @@
 from vectorial_base import *
 from scheme import *
-from scheme_display import plot_lines, plot_rects
+from scheme_display import plot_lines, plot_everything
         
 # INPUTS ------------------------------------------------------------
 
@@ -96,10 +96,6 @@ distribution = Room(
     ]
 )
 
-test = distribution.get_free_rects()
-
-plot_rects(test)
-
 #door = Point(-60,0),
 #parentRoom = Room('pasillo', 0.1, 15, maxWidth=15, priorizeBorder=-1, childRooms=[
 #    room('comedor', 0.25, 30),
@@ -114,3 +110,6 @@ if __name__ == '__main__':
 
     # Represent current rooms tagged as display = True
     setup_display()
+
+    test = distribution.get_free_rects()
+    plot_everything(test)
