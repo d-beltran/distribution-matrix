@@ -865,8 +865,11 @@ class Perimeter:
     # Consider all previous rectangles as a single rectange
     # Repeat in the inverse order (first vertically, then horizontally)
     # Remove all previous rectangles from the *available rectangles list
-    def get_maximum_rectangles(self) -> list:
-        splitted_rects = self.rects
+    def get_maximum_rectangles(self, splitted_rects : list = []) -> list:
+
+        # If splitted rects are not existend use the perimeter splitted rects
+        if not splitted_rects or len(splitted_rects) == 0:
+            splitted_rects = self.rects
 
         # First, some functions are defined to find colliding rects
         def get_left_rect (rect : Rect):
@@ -909,12 +912,18 @@ class Perimeter:
             minimum_pmin = sorted_pmin_points[0]
             return Rect(minimum_pmin, maximum_pmax)
 
-        maximum_rectangles = []
-        # Save rectangles already grouped to avoid analyzing them again
-        grouped_rectangles = []
+        # Trace which rectangles have been already checked both horizontally and vertically to avoid repeating
         for splitted_rect in splitted_rects:
-            # Skip already grouped rectangles
-            if splitted_rect in grouped_rectangles:
+            splitted_rect.horizontal_check = False
+            splitted_rect.vertical_check = False
+
+        # Save all maximum rectangles in a list to be returned at the end
+        maximum_rectangles = []
+
+        # Group rectangles first horizontally and then vertically
+        for splitted_rect in splitted_rects:
+            # Skip already grouped rectangles horizontally
+            if splitted_rect.horizontal_check == True:
                 continue
             # Set the first row
             first_row = [ splitted_rect ]
@@ -932,6 +941,9 @@ class Perimeter:
                 if not leftest:
                     break
                 first_row.append(leftest)
+            # Set all rectangles in the first row as checked horizontally
+            for rect in first_row:
+                rect.horizontal_check = True
             # Set the group of rectangles to be joined
             group = [ rect for rect in first_row ]
             # If all rectangles in the row have a botton rectangle then add all those new rects to a new row
@@ -956,11 +968,12 @@ class Perimeter:
             # Add the new maximum rectnagle to the list if it is not there already
             if maximum_rect not in maximum_rectangles:
                 maximum_rectangles.append(maximum_rect)
-            # Then update the grouped rects list
-            grouped_rectangles += [ rect for rect in group if rect not in grouped_rectangles ]
 
-            # Now repeat the process in the inverse order (first vertically, then horizontally)
-
+        # Now repeat the process in the inverse order (first vertically, then horizontally)
+        for splitted_rect in splitted_rects:
+            # Skip already grouped rectangles vertically
+            if splitted_rect.vertical_check == True:
+                continue
             # Set the first column
             first_column = [ splitted_rect ]
             # Append all rectangles at the bottom from current rectangle to the column
@@ -977,6 +990,9 @@ class Perimeter:
                 if not upperest:
                     break
                 first_column.append(upperest)
+            # Set all rectangles in the first column as checked vertically
+            for rect in first_column:
+                rect.vertical_check = True
             # Set the group of rectangles to be joined
             group = [ rect for rect in first_column ]
             # If all rectangles in the column have a right rectangle then add all those new rects to a new column
@@ -1001,10 +1017,7 @@ class Perimeter:
             # Add the new maximum rectnagle to the list if it is not there already
             if maximum_rect not in maximum_rectangles:
                 maximum_rectangles.append(maximum_rect)
-            # Then update the grouped rects list
-            grouped_rectangles += [ rect for rect in group if rect not in grouped_rectangles ]
 
-        # DANI: Falta añadir el 'maximum_rectangles' aqui
         return maximum_rectangles
 
     # Check if a rectangle fits somewhere in the perimeter

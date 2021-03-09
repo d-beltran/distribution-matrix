@@ -111,5 +111,8 @@ if __name__ == '__main__':
     # Represent current rooms tagged as display = True
     setup_display()
 
-    test = distribution.get_free_rects()
+    test = distribution.free_rects
+    plot_everything(test)
+
+    test = distribution.get_maximum_free_rectangles()
     plot_everything(test)

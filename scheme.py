@@ -49,6 +49,22 @@ class Room:
         self.add_children(children)
         # Update the representation after the setup
         self.update_display()
+        # Set internal variables
+        self._free_rects = None
+
+    # Get the available space inside de perimeter splitted in rects
+    # i.e. space not filled by children rooms
+    def get_free_rects (self):
+        # If rects are previously calculated then return them
+        if self._free_rects:
+            return self._free_rects
+        # Split in rectangles using the children as exclusion perimeters
+        free_rects = self.perimeter.split_in_rectangles( exclusion_perimeters = [ child.perimeter for child in self.children ] )
+        self._free_rects = free_rects
+        return free_rects
+
+    # The area is treated appart since it may be an expensive calculation
+    free_rects = property(get_free_rects, None, None, "The room free area splitted in rectangles")
 
     # Add children rooms
     def add_children(self, rooms : list):
@@ -96,12 +112,10 @@ class Room:
                     return True
         return False
 
-    # Get the available space inside de perimeter splitted in rects
-    # i.e. space not filled by children rooms
-    def get_free_rects (self):
-        # Split in rectangles using the children as exclusion perimeters
-        free_rects = self.perimeter.split_in_rectangles( exclusion_perimeters = [ child.perimeter for child in self.children ] )
-        return free_rects
+    # Get the maximum joined rectangles from the free rectangles
+    def get_maximum_free_rectangles (self):
+        maximum_free_rects = self.perimeter.get_maximum_rectangles( splitted_rects = self.free_rects )
+        return maximum_free_rects
 
     # Add a new frame in the display with the current lines of this room and its children
     def update_display (self):
