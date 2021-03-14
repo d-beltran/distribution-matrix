@@ -1,7 +1,7 @@
 
 from typing import List, Union, Optional
 
-from scheme_display import setup_display, add_frame, plot_lines
+from scheme_display import setup_display, add_frame, plot_lines, plot_everything
 
 from functools import reduce
 
@@ -790,8 +790,6 @@ class Perimeter:
             for line in self.get_corner_insider_lines(corner, limit_points, limit_lines):
                 inside_separators.append(line)
 
-        #add_frame([ *self.lines, *inside_separators ])
-
         # Remove duplicates
         inside_separators = list(set(inside_separators))
 
@@ -855,6 +853,9 @@ class Perimeter:
             final_rectangles = [ rect for rect in final_rectangles if rect not in perimeter ]
 
         #print('Total rectangles: ' + str(len(final_rectangles)))
+
+        # Represent these rectangles as a new frame
+        plot_everything(final_rectangles)
 
         return final_rectangles
 
@@ -1017,6 +1018,9 @@ class Perimeter:
             # Add the new maximum rectnagle to the list if it is not there already
             if maximum_rect not in maximum_rectangles:
                 maximum_rectangles.append(maximum_rect)
+
+        # Represent these rectangles
+        plot_everything(maximum_rectangles)
 
         return maximum_rectangles
 

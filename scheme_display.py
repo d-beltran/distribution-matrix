@@ -107,4 +107,4 @@ def plot_everything (things : list):
         # If it is a rectangle or something with a "crossing line" getter
         if hasattr(thing, 'get_crossing_line'):
             lines.append(thing.get_crossing_line())
-    plot_lines(lines)
+    add_frame(lines)
