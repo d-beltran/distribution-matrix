@@ -89,7 +89,7 @@ distribution = Room(
     name='Planta',
     children=[
         Room(
-            perimeter=Perimeter.from_corners(corners5),
+            #perimeter=Perimeter.from_corners(corners5),
             forced_area=600,
             min_size=15,
             name='Habitación')

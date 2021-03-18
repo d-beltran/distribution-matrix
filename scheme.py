@@ -59,11 +59,14 @@ class Room:
         # If rects are previously calculated then return them
         if self._free_rects:
             return self._free_rects
+        # Return none if there is not perimeter yet
+        if not self.perimeter:
+            return None
         # If there are no children then return the current perimeter rectangles
         if len(self.children) == 0:
-            return self.rects
+            return self.perimeter.rects
         # Split in rectangles using the children as exclusion perimeters
-        free_rects = self.perimeter.split_in_rectangles( exclusion_perimeters = [ child.perimeter for child in self.children ] )
+        free_rects = self.perimeter.split_in_rectangles( exclusion_perimeters = [ child.perimeter for child in self.children if child.perimeter ] )
         self._free_rects = free_rects
         return free_rects
 
@@ -75,6 +78,9 @@ class Room:
         # If rects are previously calculated then return them
         if self._free_mrects:
             return self._free_mrects
+        # Return none if there is not perimeter yet
+        if not self.perimeter:
+            return None
         # If there are no children then return the current perimeter rectangles
         if len(self.children) == 0:
             return self.mrects
@@ -108,6 +114,9 @@ class Room:
                 raise NameError('Input error: The child room "' + room.name + '" minimum size does not fit in the parent perimeter')    
         # Set up each room by giving them a position and correct size to match the forced area
         for room in rooms:
+            # If the children has no perimeter it must be built
+            if not room.perimeter:
+                self.set_child_room_perimeter(room)
             # Finally, update the room hierarchy
             room.parent = self
             self.children.append(room)
@@ -131,6 +140,12 @@ class Room:
                 if point in line:
                     return True
         return False
+
+    # Set up a room perimeter
+    def set_child_room_perimeter(self, room):
+        # Find a suitable maximum free rectangle to deploy a starting base perimeter
+        # The minimum base perimeter is a square which both sides as long as the room minimum size
+        pass
 
     # Add a new frame in the display with the current lines of this room and its children
     def update_display (self):
