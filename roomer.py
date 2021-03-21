@@ -92,7 +92,11 @@ distribution = Room(
             #perimeter=Perimeter.from_corners(corners5),
             forced_area=600,
             min_size=15,
-            name='Habitación')
+            name='Habitación'),
+        Room(
+            forced_area=400,
+            min_size=10,
+            name='Lavabo')
     ]
 )
 

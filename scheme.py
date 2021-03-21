@@ -19,7 +19,10 @@ class Room:
         name : str = 'Unnamed',
         children : list = [],
         ):
-        
+        # Set internal variables
+        self._free_rects = None
+        self._free_mrects = None
+        # Save the perimeter
         self.perimeter = perimeter
         # Se the real area
         if perimeter:
@@ -49,9 +52,6 @@ class Room:
         self.add_children(children)
         # Update the representation after the setup
         self.update_display()
-        # Set internal variables
-        self._free_rects = None
-        self._free_mrects = None
 
     # Get the available space inside de perimeter splitted in rects
     # i.e. space not filled by children rooms
@@ -83,7 +83,7 @@ class Room:
             return None
         # If there are no children then return the current perimeter rectangles
         if len(self.children) == 0:
-            return self.mrects
+            return self.perimeter.mrects
         # Split in rectangles using the children as exclusion perimeters
         free_mrects = self.perimeter.get_maximum_rectangles( splitted_rects = self.free_rects )
         self._free_mrects = free_mrects
@@ -91,6 +91,31 @@ class Room:
 
     # The area is treated appart since it may be an expensive calculation
     free_mrects = property(get_free_mrects, None, None, "The maximum free are rectnagles")
+
+    # Check if a rectangle fits somewhere in the perimeter
+    # Iterate over all maximum rectangles and try to fit
+    # If only the x size parameter is passed it is assumed to be both x and y size
+    def fit (self, x_fit_size : float, y_fit_size : float = None):
+        if not y_fit_size:
+            y_fit_size = x_fit_size
+        for rect in self.free_mrects:
+            x_size, y_size = rect.get_size()
+            if x_fit_size <= x_size and y_fit_size <= y_size:
+                return True
+        return False
+
+    # Get all maximum free rectangles with the minimum specified x and y sizes
+    # Iterate over all free maximum rectangles and try to fit
+    # If only the x size parameter is passed it is assumed to be both x and y size
+    def get_fit (self, x_fit_size : float, y_fit_size : float = None):
+        fit_rects = []
+        if not y_fit_size:
+            y_fit_size = x_fit_size
+        for rect in self.free_mrects:
+            x_size, y_size = rect.get_size()
+            if x_fit_size <= x_size and y_fit_size <= y_size:
+                fit_rects.append(rect)
+        return fit_rects
 
     # Add children rooms
     def add_children(self, rooms : list):
@@ -111,9 +136,15 @@ class Room:
         for room in rooms:
             size = room.min_size
             if size and not self.perimeter.fit(size, size):
-                raise NameError('Input error: The child room "' + room.name + '" minimum size does not fit in the parent perimeter')    
+                raise NameError('Input error: The child room "' + room.name + '" minimum size does not fit in the parent perimeter')
+
+        # Sort children rooms by minimum size, with the biggest sizes first
+        def sort_by_size(room):
+            return room.min_size
+        sorted_rooms = sorted( rooms, key=sort_by_size, reverse=True )
+
         # Set up each room by giving them a position and correct size to match the forced area
-        for room in rooms:
+        for room in sorted_rooms:
             # If the children has no perimeter it must be built
             if not room.perimeter:
                 self.set_child_room_perimeter(room)
@@ -144,8 +175,11 @@ class Room:
     # Set up a room perimeter
     def set_child_room_perimeter(self, room):
         # Find a suitable maximum free rectangle to deploy a starting base perimeter
-        # The minimum base perimeter is a square which both sides as long as the room minimum size
-        pass
+        # The minimum base perimeter is a square with both sides as long as the room minimum size
+        suitable_rects = self.get_fit(room.min_size)
+        for rect in suitable_rects:
+            pass
+
 
     # Add a new frame in the display with the current lines of this room and its children
     def update_display (self):
