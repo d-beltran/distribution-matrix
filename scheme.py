@@ -177,9 +177,15 @@ class Room:
         # Find a suitable maximum free rectangle to deploy a starting base perimeter
         # The minimum base perimeter is a square with both sides as long as the room minimum size
         suitable_rects = self.get_fit(room.min_size)
+        # Stop here if there are no available rectangles
+        # DANI: Esto no debería pasar nunca. Debería preveerse de antes.
+        if len(suitable_rects) == 0:
+            raise NameError('ERROR: The room ' + room.name + ' fits nowhere')
+        # Try to set up the new room in all possible sites until we find one
+        # Check each site to allow other rooms to grow
         for rect in suitable_rects:
+            # 
             pass
-
 
     # Add a new frame in the display with the current lines of this room and its children
     def update_display (self):
