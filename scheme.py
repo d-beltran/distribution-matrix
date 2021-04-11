@@ -3,6 +3,8 @@ from typing import List, Union, Optional
 from scheme_display import setup_display, add_frame, plot_lines
 
 from vectorial_base import *
+
+import random  
         
 # A room is a smart perimeter that may contain other perimeters with conservative areas and size restrictions
 # A start 'perimeter' may be passed. If no perimeters i passed it is assigned automatically according the room rules
@@ -22,7 +24,14 @@ class Room:
         # Set internal variables
         self._free_rects = None
         self._free_mrects = None
-        # Save the perimeter
+        self._perimeter = None
+        # Set representation parameters
+        self.display = display
+        self.name = name
+        # Set up the hierarchy of rooms
+        self.parent = None
+        self.children = []
+        # Set the perimeter
         self.perimeter = perimeter
         # Se the real area
         if perimeter:
@@ -42,16 +51,26 @@ class Room:
         # Set size limits
         self.min_size = min_size
         self.max_size = max_size
-        # Set representation parameters
-        self.display = display
-        self.name = name
-        # Set up the hierarchy of rooms
-        self.parent = None
-        self.children = []
         # Set up all children rooms
         self.add_children(children)
         # Update the representation after the setup
         self.update_display()
+
+    # Get the perimeter
+    # Just return the internal perimeter value
+    def get_perimeter (self):
+        return self._perimeter
+
+    # Set the perimeter
+    # Reset the own rects and the parent rects also
+    def set_perimeter (self, value):
+        self.reset_rects()
+        if self.parent:
+            self.parent.reset_rects()
+        self._perimeter = value
+
+    # The area is treated appart since it may be an expensive calculation
+    perimeter = property(get_perimeter, set_perimeter, None, "The room perimeter")
 
     # Get the available space inside de perimeter splitted in rects
     # i.e. space not filled by children rooms
@@ -91,6 +110,12 @@ class Room:
 
     # The area is treated appart since it may be an expensive calculation
     free_mrects = property(get_free_mrects, None, None, "The maximum free are rectnagles")
+
+    # Reset all minimum and maximum free rects
+    # This must be done each time the perimeter is modified since they are not valid anymore
+    def reset_rects(self):
+        self._free_rects = None
+        self._free_mrects = None
 
     # Check if a rectangle fits somewhere in the perimeter
     # Iterate over all maximum rectangles and try to fit
@@ -145,21 +170,12 @@ class Room:
 
         # Set up each room by giving them a position and correct size to match the forced area
         for room in sorted_rooms:
+            # Update the room hierarchy
+            room.parent = self
+            self.children.append(room)
             # If the children has no perimeter it must be built
             if not room.perimeter:
                 self.set_child_room_perimeter(room)
-            # Finally, update the room hierarchy
-            room.parent = self
-            self.children.append(room)
-
-    # Get all lines from this room and all children room perimeters
-    def get_lines_recuersive (self, only_children : bool = False):
-        lines = []
-        if not only_children and self.perimeter:
-            lines += self.perimeter.lines
-        for room in self.children:
-            lines += room.get_lines_recuersive()
-        return lines
 
     # Check if a point is in the border of any children perimeter
     def in_children_border(self, point : Point):
@@ -177,17 +193,55 @@ class Room:
         # Find a suitable maximum free rectangle to deploy a starting base perimeter
         # The minimum base perimeter is a square with both sides as long as the room minimum size
         suitable_rects = self.get_fit(room.min_size)
+        # Shuffle the suitable rects
+        random.shuffle(suitable_rects)
+        # Sort the suitable rects by minimum size, with the biggest sizes first
+        def sort_by_size(rect):
+            return min(rect.get_size())
+        sorted_suitable_rects = sorted( suitable_rects, key=sort_by_size, reverse=True )
         # Stop here if there are no available rectangles
         # DANI: Esto no debería pasar nunca. Debería preveerse de antes.
         if len(suitable_rects) == 0:
             raise NameError('ERROR: The room ' + room.name + ' fits nowhere')
         # Try to set up the new room in all possible sites until we find one
+        # Each 'site' means each corner in each suitable rectnagle
         # Check each site to allow other rooms to grow
-        for rect in suitable_rects:
-            # 
-            pass
+        for rect in sorted_suitable_rects:
+            for corner in rect.get_corners():
+                directions = [ line.vector.normalized() for line in corner.lines ]
+                room.set_minimum_perimeter(corner, directions)
+        # 
+
+    # Set the room perimeter as the minimum square
+    # Use a corner and the 2 vectors (directions) of the lines which make the corner
+    # NEVER FORGET: The first direction is the 'entring' line so its vector points from away to the corner
+    # NEVER FORGET: The second direction is the 'exiting' line so its vector points from the corner to away
+    def set_minimum_perimeter(self, corner : Point, directions : list):
+        line_1 = Line(corner, corner - directions[0] * self.min_size)
+        line_2 = Line(corner, corner + directions[1] * self.min_size)
+        minimum_rect = Rect.from_lines([ line_1, line_2 ])
+        self.perimeter = Perimeter(minimum_rect.get_lines())
+        self.update_display()
+
+    # Go uppwards in the hyerarchy until you reach the room which has no parent
+    def get_root_room(self):
+        root = self
+        while(root.parent):
+            root = root.parent
+        return root
+
+    # Get all lines from this room and all children room perimeters
+    def get_lines_recuersive (self, only_children : bool = False):
+        lines = []
+        if not only_children and self.perimeter:
+            lines += self.perimeter.lines
+        for room in self.children:
+            lines += room.get_lines_recuersive()
+        return lines
 
     # Add a new frame in the display with the current lines of this room and its children
     def update_display (self):
-        if self.display:
-            add_frame(self.get_lines_recuersive())
+        # Find the root room
+        root = self.get_root_room()
+        if root.display:
+            add_frame(root.get_lines_recuersive())

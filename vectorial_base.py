@@ -144,7 +144,10 @@ class Line:
         self.length = a.get_distance(b)
 
     def __str__(self):
-        return 'A: ' + str(self.a) + ', B: ' + str(self.b)
+        return 'A: ' + str(self.a) + ' -> B: ' + str(self.b)
+
+    def __repr__(self):
+        return 'A: ' + str(self.a) + ' -> B: ' + str(self.b)
 
     def __eq__(self, other):
         if isinstance(other, self.__class__):
@@ -285,6 +288,9 @@ class Rect:
     def __str__(self):
         return 'Min: ' + str(self.pmin) + ', Max: ' + str(self.pmax)
 
+    def __repr__(self):
+        return 'Min: ' + str(self.pmin) + ', Max: ' + str(self.pmax)
+
     def __eq__(self, other):
         if isinstance(other, self.__class__):
             return self.pmin == other.pmin and self.pmax == other.pmax
@@ -327,6 +333,18 @@ class Rect:
         points = self.get_points()
         lines = [ Line(a,b) for a, b in pairwise(points, retro=True) ]
         return lines
+
+    # Return all rectangle points in a 'perimeter-friendly' order
+    # Each point contains its two adjacent liNes
+    def get_corners(self):
+        points = self.get_points()
+        lines = [ Line(a,b) for a, b in pairwise(points, retro=True) ]
+        line_pairs = list(pairwise(lines, retro=True))
+        # Place the last element as the first
+        line_pairs = [ line_pairs[-1] ] + line_pairs[0:-1]
+        for p, point in enumerate(points):
+            point.lines = line_pairs[p]
+        return points
 
     # Return all rectangle lines in a 'perimeter-friendly' order
     def get_crossing_line(self):
@@ -615,8 +633,8 @@ class Perimeter:
         y_coords = [ point.y for point in points ]
         x_min = min(x_coords)
         x_max = max(x_coords)
-        y_min = min(x_coords)
-        y_max = max(x_coords)
+        y_min = min(y_coords)
+        y_max = max(y_coords)
         pmin = Point(x_min, y_min)
         pmax = Point(x_max, y_max)
         return Rect(pmin, pmax)
@@ -745,9 +763,8 @@ class Perimeter:
         return insider_lines
 
     # Split the current perimeter in a list of rectangles
-    # If the multisplit option is true it will return as many splitted rectangles as possible
-    # Else, it will return the minimum splits to cover all the perimeter
-    # (e.g. an 'L' will return 2 rectangles if multisplit is false but 3 rectangles if it is true)
+    # The exclusion perimeters are those perimeters inside the current perimeter which are not considered
+    # (e.g. children perimeters)
     def split_in_rectangles(self, exclusion_perimeters : list = []) -> list:
 
         # Inside corneres are the parent perimeter inside corners and the children perimeters outside corners
@@ -846,10 +863,13 @@ class Perimeter:
 
         # Remove duplicates
         final_rectangles = list(set(final_rectangles))
+        #print(final_rectangles)
 
         # In some cases, some rectangles may be found inside exclusion perimeters
         # Find and discard those rectangles
         for perimeter in exclusion_perimeters:
+            # DANI: No funciona cuando el rectangulo es exactamente el perímetro a descartar
+            #print(perimeter)
             final_rectangles = [ rect for rect in final_rectangles if rect not in perimeter ]
 
         #print('Total rectangles: ' + str(len(final_rectangles)))
