@@ -1,7 +1,7 @@
 
 from typing import List, Union, Optional
 
-from scheme_display import setup_display, add_frame, plot_lines, plot_everything
+from scheme_display import add_frame, plot_lines, plot_everything
 
 from functools import reduce
 
@@ -130,6 +130,24 @@ class Vector:
 
     def get_direction(self) -> float:
         return math.sqrt( self.x**2 + self.y**2 )
+
+    # Find out if the vector is totally vertical
+    def is_vertical(self):
+        if self.x == 0:
+            return True
+        return False
+
+    # Find out if the line is totally horizontal
+    def is_horizontal(self):
+        if self.y == 0:
+            return True
+        return False
+
+    # Find out if the line is diagonal
+    def is_diagonal(self):
+        if self.is_vertical() or self.is_horizontal():
+            return False
+        return True
         
 # A segment defined by 2 coordinates (Points): 'a' and 'b'
 class Line:
@@ -164,11 +182,21 @@ class Line:
             return distance1 + distance2 == self.length
         return False
 
+    # Find out if the line is totally vertical
+    def is_vertical(self):
+        if self.a.x == self.b.x:
+            return True
+        return False
+
+    # Find out if the line is totally horizontal
+    def is_horizontal(self):
+        if self.a.y == self.b.y:
+            return True
+        return False
+
     # Find out if the line is diagonal
     def is_diagonal(self):
-        if self.a.x == self.b.x:
-            return False
-        if self.a.y == self.b.y:
+        if self.is_vertical() or self.is_horizontal():
             return False
         return True
 
@@ -284,6 +312,30 @@ class Rect:
         pmin = Point(x_min, y_min)
         pmax = Point(x_max, y_max)
         return cls(pmin, pmax)
+
+    # Set the rect from a corner (i.e. a point with 2 lines)
+    # Optionally you can ask for specific x and y sizes
+    # If no size is passed the the size of the original corner line is used
+    @classmethod
+    def from_corner(cls, corner : Point, x_size = None, y_size = None):
+        # Get the two lines from the corner
+        lines = corner.lines
+        directions = [ line.vector.normalized() for line in lines ]
+        # NEVER FORGET: The first direction is the 'entring' line so its vector points from away to the corner
+        # NEVER FORGET: The second direction is the 'exiting' line so its vector points from the corner to away
+        # We want both directions 'exiting', so we change the direction of the first vector
+        directions[0] = -directions[0]
+        # Find out which is the horizontal and which is the vertical direction
+        # If some of these steps fail it means there is no horizontal or/and vertical lines
+        hdir = next( d for d, direction in enumerate(directions) if direction.is_horizontal() )
+        vdir = next( d for d, direction in enumerate(directions) if direction.is_vertical() )
+        # Finally set the rectangle lines
+        # If the size of any direction is forced then use the vector to build a new lines
+        # Otherwise use the original lines
+        hline = Line(corner, corner + directions[hdir] * x_size) if x_size else lines[hdir]
+        vline = Line(corner, corner + directions[vdir] * y_size) if y_size else lines[vdir]
+
+        return cls.from_lines([hline, vline])
 
     def __str__(self):
         return 'Min: ' + str(self.pmin) + ', Max: ' + str(self.pmax)

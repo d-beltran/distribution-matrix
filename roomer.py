@@ -1,6 +1,6 @@
 from vectorial_base import *
 from scheme import *
-from scheme_display import plot_lines, plot_everything
+from scheme_display import setup_display, plot_lines, plot_everything
 
 # Represent current rooms tagged as display = True
 # DANI: Es posible que esto falle en windows
