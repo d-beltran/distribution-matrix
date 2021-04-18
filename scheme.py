@@ -1,5 +1,7 @@
 from typing import List, Union, Optional
 
+from math import sqrt
+
 from scheme_display import add_frame, plot_lines
 
 from vectorial_base import *
@@ -209,38 +211,61 @@ class Room:
         if len(suitable_rects) == 0:
             raise NameError('ERROR: The room ' + room.name + ' fits nowhere')
         # Try to set up the new room in all possible sites until we find one
-        # Each 'site' means each corner in each suitable rectnagle
+        # Each 'site' means each corner in each suitable rectangle
         # Check each site to allow other rooms to grow
         for rect in sorted_suitable_rects:
             for corner in rect.get_corners():
-                minimum_rect = Rect.from_corner(corner, room.min_size, room.min_size)
-                room.perimeter = Perimeter(minimum_rect.get_lines())
+                #minimum_rect = Rect.from_corner(corner, room.min_size, room.min_size)
+                #room.perimeter = Perimeter(minimum_rect.get_lines())
+                room.perimeter = room.set_maximum_initial_perimeter(corner, rect)
                 self.update_display()
-        # 
 
     # Set the initial room perimeter as the maximum possible rectangle
     # This is a shortcut to skip the difficult expansion protocol
     # It is useful to set a whole room at the begining, when there is plenty of free space
     # It is useful to set as much perimeter as possible at the start before we resolve space conflicts
-    def set_maximum_initial_perimeter(self, corner : Point, directions : list, space : Rect):
+    def set_maximum_initial_perimeter(self, corner : Point, space : Rect) -> Perimeter:
         x_space, y_space = space.get_size()
         # If the room area is greater than the space then return the whole space as a permeter
-        if space.area <= self.area:
+        if space.area <= self.forced_area:
             # If both space sizes are bigger than the maximum size we can not return the whole space
-            # The size in one of both sides must be limited (the biggest size)
+            # The size in one of both sides must be limited (the biggest size is filled)
             if x_space > self.max_size and y_space > self.max_size:
                 if x_space >= y_space:
-                    # DANI: Me quedé aquí
-                    pass
-
+                    maximum_rect = Rect.from_corner(corner, x_space, self.max_size)
+                else:
+                    maximum_rect = Rect.from_corner(corner, self.max_size, y_space)
+                return Perimeter(maximum_rect.get_lines())
             return Perimeter(space.get_lines())
         # Else, fit the room in the space
-        # DANI: Me quedé aquí
-        
-        #line_1 = Line(corner, corner - directions[0] * self.min_size)
-        #line_2 = Line(corner, corner + directions[1] * self.min_size)
-        #minimum_rect = Rect.from_lines([ line_1, line_2 ])
-        #return Perimeter(minimum_rect.get_lines())
+        # First of all create the 3 rule rectangle from the space
+        # i.e. calculate the relation of areas and apply it to the square root to both x and y sizes
+        area_relation = self.forced_area / space.area # At this point the relation is always < 1
+        new_x_size = x_space * sqrt(area_relation)
+        new_y_size = y_space * sqrt(area_relation)
+        # If any of the new sizes is shorter than the maximum size then the rectangle is valid
+        if x_space > self.max_size and y_space > self.max_size:
+            maximum_rect = Rect.from_corner(corner, new_x_size, new_y_size)
+            return Perimeter(maximum_rect.get_lines())
+        # If both new sizes are longer than the maximum size we must find another solution
+        # The new rectangle will have the maximum size in one of its sides
+        # Calculate the other side size
+        second_size = self.forced_area / self.max_size
+        # Now set which are the maximum and minimum sizes of the new rect
+        new_sizes = [ self.max_size, second_size ]
+        new_max_size = max(new_sizes)
+        new_min_size = min(new_sizes)
+        # Create the new rect fitting the biggest size in the biggest space and the opposite
+        # For each size of the new rect use the calculated size only if it is not longer than the space
+        if x_space >= y_space:
+            new_x_size = min(new_max_size, new_x_size)
+            new_y_size = min(new_min_size, new_y_size)
+        else:
+            new_x_size = min(new_min_size, new_x_size)
+            new_y_size = min(new_max_size, new_y_size)
+        maximum_rect = Rect.from_corner(corner, new_x_size, new_y_size)
+        return Perimeter(maximum_rect.get_lines())
+
 
     # Go uppwards in the hyerarchy until you reach the room which has no parent
     def get_root_room(self):

@@ -1,21 +1,9 @@
 import matplotlib.pyplot as plt
-from matplotlib.colors import ListedColormap
 from matplotlib import animation
 from matplotlib.widgets import Slider 
 
 import numpy as np
 from multiprocessing import Process, Queue
-
-# Set the heatmap colors
-colors = ListedColormap([
-    'black',
-    'white',
-    'blue',
-    'green',
-    'yellow',
-    'red',
-    'pink',
-])
 
 # Set a list with all system values at each recorded step
 frames = []

@@ -9,6 +9,21 @@ import itertools
 
 import math
 
+import random
+colors = [
+    'black',
+    #'white',
+    'blue',
+    'green',
+    'yellow',
+    'red',
+    'pink',
+    'orange',
+    'brown',
+    'cyan',
+    'purple',
+]
+
 # CLASS DEFINITIONS ------------------------------------------------------------
 
 # Set a cutoff to avoid missmatches in natural offsets when operating with float values
@@ -315,7 +330,7 @@ class Rect:
 
     # Set the rect from a corner (i.e. a point with 2 lines)
     # Optionally you can ask for specific x and y sizes
-    # If no size is passed the the size of the original corner line is used
+    # If no size is passed then the size of the original corner line is used
     @classmethod
     def from_corner(cls, corner : Point, x_size = None, y_size = None):
         # Get the two lines from the corner
@@ -819,7 +834,7 @@ class Perimeter:
     # (e.g. children perimeters)
     def split_in_rectangles(self, exclusion_perimeters : list = []) -> list:
 
-        # Inside corneres are the parent perimeter inside corners and the children perimeters outside corners
+        # Inside corners are the parent perimeter inside corners and the children perimeters outside corners
         parent_inside_corners = [ corner for corner in self.corners if corner.inside ]
         children_inside_corners = []
         for perimeter in exclusion_perimeters:
@@ -866,6 +881,9 @@ class Perimeter:
         # WARNING: inside lines MUST be before limit lines
         all_lines = [ *inside_separators, *limit_lines ]
 
+        # DANI: Usa esto para ver los perímetros en negro y las lineas interiores en rojo
+        #add_frame(all_lines)
+
         # Find all points where the inside separator lines intersect each other
         all_intersections = []
         for line1, line2 in itertools.combinations(all_lines, 2):
@@ -888,6 +906,11 @@ class Perimeter:
             all_splitted_lines += list(splitted_lines)
 
         #print('All lines: ' + str(len(all_splitted_lines)))
+        print('SPLITTED LINES')
+        for line in all_splitted_lines:
+            random_color = random.choice(colors)
+            line.color = random_color
+        add_frame(all_splitted_lines)
 
         # Finally, for each line, try to find 2 rectangles
         # Each line will be connected to exactly 1 or 2 rectangles
@@ -916,12 +939,15 @@ class Perimeter:
         # Remove duplicates
         final_rectangles = list(set(final_rectangles))
         #print(final_rectangles)
+        print('FINAL RECTANGLES')
+        log_lines = []
+        for rect in final_rectangles:
+            log_lines += rect.get_lines()
+        add_frame(log_lines)
 
         # In some cases, some rectangles may be found inside exclusion perimeters
         # Find and discard those rectangles
         for perimeter in exclusion_perimeters:
-            # DANI: No funciona cuando el rectangulo es exactamente el perímetro a descartar
-            #print(perimeter)
             final_rectangles = [ rect for rect in final_rectangles if rect not in perimeter ]
 
         #print('Total rectangles: ' + str(len(final_rectangles)))
