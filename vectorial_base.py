@@ -1,3 +1,4 @@
+from decimal import Decimal
 
 from typing import List, Union, Optional
 
@@ -26,17 +27,18 @@ colors = [
 
 # CLASS DEFINITIONS ------------------------------------------------------------
 
-# Set a cutoff to avoid missmatches in natural offsets when operating with float values
-# e.g. a resolution of 1000 means that different points must be in coordinates separated by 0.001
-resolution = 1000
+# Float numbers are not allowed
+number = Union[Decimal, int]
+def is_number(var):
+    return isinstance(var, int) or isinstance(var, Decimal)
 
 # An x,y coordinate
 class Point:
 
-    def __init__(self, x : float, y : float):
+    def __init__(self, x : number, y : number):
         # Apply here the resolution cutoff
-        self.x = round( x * resolution ) / resolution
-        self.y = round( y * resolution ) / resolution
+        self.x = Decimal(x)
+        self.y = Decimal(y)
 
     def __str__(self):
         return '(x: ' + str(self.x) + ', y: ' + str(self.y) + ')'
@@ -70,13 +72,13 @@ class Point:
     def get_distance (self, other):
         x_distance = self.x - other.x
         y_distance = self.y - other.y
-        return math.sqrt( x_distance**2 + y_distance**2 )
+        return Decimal( x_distance**2 + y_distance**2 ).sqrt()
 
 class Vector:
 
-    def __init__(self, x : float, y : float):
-        self.x = x
-        self.y = y
+    def __init__(self, x : number, y : number):
+        self.x = Decimal(x)
+        self.y = Decimal(y)
 
     def __str__(self):
         return '(x: ' + str(self.x) + ', y: ' + str(self.y) + ')'
@@ -110,7 +112,7 @@ class Vector:
             return Point(self.x - other.x, self.y - other.y)
 
     def __mul__(self, num):
-        if isinstance(num, int) or isinstance(num, float):
+        if is_number(num):
             x_mul = self.x * num
             y_mul = self.y * num
             return Vector(x_mul, y_mul)
@@ -119,7 +121,7 @@ class Vector:
     __rmul__ = __mul__
 
     def __div__(self, num):
-        if isinstance(num, int) or isinstance(num, float):
+        if is_number(num):
             x_div = self.x / num
             y_div = self.y / num
             return Vector(x_div, y_div)
@@ -128,7 +130,7 @@ class Vector:
     __rdiv__ = __div__
 
     def __truediv__(self, num):
-        if isinstance(num, int) or isinstance(num, float):
+        if is_number(num):
             x_div = self.x / num
             y_div = self.y / num
             return Vector(x_div, y_div)
@@ -136,15 +138,15 @@ class Vector:
 
     __rtruediv__ = __truediv__
 
-    def get_magnitude(self) -> float:
-        return math.sqrt( self.x**2 + self.y**2 )
+    def get_magnitude(self) -> number:
+        return Decimal( self.x**2 + self.y**2 ).sqrt()
 
     def normalized(self):
         magnitude = self.get_magnitude()
         return self / magnitude
 
-    def get_direction(self) -> float:
-        return math.sqrt( self.x**2 + self.y**2 )
+    def get_direction(self) -> number:
+        return Decimal( self.x**2 + self.y**2 ).sqrt()
 
     # Find out if the vector is totally vertical
     def is_vertical(self):
@@ -194,6 +196,7 @@ class Line:
         if hasattr(other, 'x') and hasattr(other, 'y'):
             distance1 = self.a.get_distance(other)
             distance2 = self.b.get_distance(other)
+            suma = distance1 + distance2
             return distance1 + distance2 == self.length
         return False
 
@@ -906,11 +909,6 @@ class Perimeter:
             all_splitted_lines += list(splitted_lines)
 
         #print('All lines: ' + str(len(all_splitted_lines)))
-        print('SPLITTED LINES')
-        for line in all_splitted_lines:
-            random_color = random.choice(colors)
-            line.color = random_color
-        add_frame(all_splitted_lines)
 
         # Finally, for each line, try to find 2 rectangles
         # Each line will be connected to exactly 1 or 2 rectangles
@@ -938,12 +936,6 @@ class Perimeter:
 
         # Remove duplicates
         final_rectangles = list(set(final_rectangles))
-        #print(final_rectangles)
-        print('FINAL RECTANGLES')
-        log_lines = []
-        for rect in final_rectangles:
-            log_lines += rect.get_lines()
-        add_frame(log_lines)
 
         # In some cases, some rectangles may be found inside exclusion perimeters
         # Find and discard those rectangles
@@ -1124,7 +1116,7 @@ class Perimeter:
 
     # Check if a rectangle fits somewhere in the perimeter
     # Iterate over all maximum rectangles and try to fit 
-    def fit (self, x_fit_size : float, y_fit_size : float):
+    def fit (self, x_fit_size : number, y_fit_size : number):
         for rect in self.mrects:
             x_size, y_size = rect.get_size()
             if x_fit_size <= x_size and y_fit_size <= y_size:

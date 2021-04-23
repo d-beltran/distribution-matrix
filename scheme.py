@@ -1,6 +1,6 @@
-from typing import List, Union, Optional
+from decimal import Decimal
 
-from math import sqrt
+from typing import List, Union, Optional
 
 from scheme_display import add_frame, plot_lines
 
@@ -16,9 +16,9 @@ import random
 class Room:
     def __init__(self,
         perimeter : Perimeter = None,
-        forced_area : float = None,
-        min_size : float = None,
-        max_size : float = None,
+        forced_area : number = None,
+        min_size : number = None,
+        max_size : number = None,
         display : bool = False,
         name : str = 'Unnamed',
         children : list = [],
@@ -42,7 +42,7 @@ class Room:
             self.area = None
         # Set the expected final area
         if forced_area:
-            self.forced_area = forced_area
+            self.forced_area = Decimal(forced_area)
         else:
             self.forced_area = self.area
         # If the forced area does not cover the minimum size it makes no sense
@@ -51,9 +51,12 @@ class Room:
         # Set the free area: area where there is no children rooms
         self.free_area = self.area
         # Set size limits
-        self.min_size = min_size
+        if min_size or min_size == 0:
+            self.min_size = Decimal(min_size)
+        else:
+            self.min_size = min_size
         if max_size:
-            self.max_size = max_size
+            self.max_size = Decimal(max_size)
         elif self.forced_area and self.min_size:
             self.max_size = self.forced_area / self.min_size
         else:
@@ -127,7 +130,7 @@ class Room:
     # Check if a rectangle fits somewhere in the perimeter
     # Iterate over all maximum rectangles and try to fit
     # If only the x size parameter is passed it is assumed to be both x and y size
-    def fit (self, x_fit_size : float, y_fit_size : float = None):
+    def fit (self, x_fit_size : number, y_fit_size : number = None):
         if not y_fit_size:
             y_fit_size = x_fit_size
         for rect in self.free_mrects:
@@ -139,7 +142,7 @@ class Room:
     # Get all maximum free rectangles with the minimum specified x and y sizes
     # Iterate over all free maximum rectangles and try to fit
     # If only the x size parameter is passed it is assumed to be both x and y size
-    def get_fit (self, x_fit_size : float, y_fit_size : float = None):
+    def get_fit (self, x_fit_size : number, y_fit_size : number = None):
         fit_rects = []
         if not y_fit_size:
             y_fit_size = x_fit_size
@@ -241,8 +244,8 @@ class Room:
         # First of all create the 3 rule rectangle from the space
         # i.e. calculate the relation of areas and apply it to the square root to both x and y sizes
         area_relation = self.forced_area / space.area # At this point the relation is always < 1
-        new_x_size = x_space * sqrt(area_relation)
-        new_y_size = y_space * sqrt(area_relation)
+        new_x_size = x_space * Decimal(area_relation).sqrt()
+        new_y_size = y_space * Decimal(area_relation).sqrt()
         # If any of the new sizes is shorter than the maximum size then the rectangle is valid
         if x_space > self.max_size and y_space > self.max_size:
             maximum_rect = Rect.from_corner(corner, new_x_size, new_y_size)
