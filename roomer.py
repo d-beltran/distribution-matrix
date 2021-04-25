@@ -118,9 +118,3 @@ if __name__ == '__main__':
 
     # Represent current rooms tagged as display = True
     setup_display()
-
-    test = distribution.free_mrects
-
-    # test_point = Point(20.0, 20.0)
-    # test_line = Line( Point(20.0, 40.0), Point(20.0, -5.858))
-    # print(test_point in test_line)

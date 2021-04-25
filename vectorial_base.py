@@ -1,5 +1,3 @@
-from decimal import Decimal
-
 from typing import List, Union, Optional
 
 from scheme_display import add_frame, plot_lines, plot_everything
@@ -8,7 +6,7 @@ from functools import reduce
 
 import itertools
 
-import math
+from math import sqrt
 
 import random
 colors = [
@@ -27,18 +25,25 @@ colors = [
 
 # CLASS DEFINITIONS ------------------------------------------------------------
 
-# Float numbers are not allowed
-number = Union[Decimal, int]
+# Float numbers are not allowed internally
+number = Union[int, float]
 def is_number(var):
-    return isinstance(var, int) or isinstance(var, Decimal)
+    return isinstance(var, int) or isinstance(var, float)
+
+# Set a resoltion limit
+# This is the number of decimals to take in count when comparing different coordinates
+resolution = 4
+def resolute(num):
+    res = 10**resolution
+    return round(num * res) / res
 
 # An x,y coordinate
 class Point:
 
     def __init__(self, x : number, y : number):
-        # Apply here the resolution cutoff
-        self.x = Decimal(x)
-        self.y = Decimal(y)
+        # Save the coordinates in Decimal format applying the precision limit
+        self.x = resolute(x)
+        self.y = resolute(y)
 
     def __str__(self):
         return '(x: ' + str(self.x) + ', y: ' + str(self.y) + ')'
@@ -72,13 +77,14 @@ class Point:
     def get_distance (self, other):
         x_distance = self.x - other.x
         y_distance = self.y - other.y
-        return Decimal( x_distance**2 + y_distance**2 ).sqrt()
+        return sqrt( x_distance**2 + y_distance**2 )
 
 class Vector:
 
     def __init__(self, x : number, y : number):
-        self.x = Decimal(x)
-        self.y = Decimal(y)
+        # Save the coordinates in Decimal format applying the precision limit
+        self.x = resolute(x)
+        self.y = resolute(y)
 
     def __str__(self):
         return '(x: ' + str(self.x) + ', y: ' + str(self.y) + ')'
@@ -139,14 +145,14 @@ class Vector:
     __rtruediv__ = __truediv__
 
     def get_magnitude(self) -> number:
-        return Decimal( self.x**2 + self.y**2 ).sqrt()
+        return sqrt( self.x**2 + self.y**2 )
 
     def normalized(self):
         magnitude = self.get_magnitude()
         return self / magnitude
 
     def get_direction(self) -> number:
-        return Decimal( self.x**2 + self.y**2 ).sqrt()
+        return sqrt( self.x**2 + self.y**2 )
 
     # Find out if the vector is totally vertical
     def is_vertical(self):
@@ -196,21 +202,16 @@ class Line:
         if hasattr(other, 'x') and hasattr(other, 'y'):
             distance1 = self.a.get_distance(other)
             distance2 = self.b.get_distance(other)
-            suma = distance1 + distance2
-            return distance1 + distance2 == self.length
+            return resolute(distance1 + distance2) == resolute(self.length)
         return False
 
     # Find out if the line is totally vertical
     def is_vertical(self):
-        if self.a.x == self.b.x:
-            return True
-        return False
+        return self.vector.is_vertical()
 
     # Find out if the line is totally horizontal
     def is_horizontal(self):
-        if self.a.y == self.b.y:
-            return True
-        return False
+        return self.vector.is_horizontal()
 
     # Find out if the line is diagonal
     def is_diagonal(self):
@@ -900,14 +901,11 @@ class Perimeter:
         # Remove duplicates
         all_intersections = list(set(all_intersections))
 
-        #print('Intersections: ' + str(len(all_intersections)))
-
         # Split the inside separator lines at the intersection points
         all_splitted_lines = []
         for line in all_lines:
             splitted_lines = line.split_at_points(all_intersections)
             all_splitted_lines += list(splitted_lines)
-
         #print('All lines: ' + str(len(all_splitted_lines)))
 
         # Finally, for each line, try to find 2 rectangles
