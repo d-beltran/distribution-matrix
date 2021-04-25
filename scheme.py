@@ -1,6 +1,6 @@
 from typing import List, Union, Optional
 
-from scheme_display import add_frame, plot_lines
+from scheme_display import add_frame
 
 from vectorial_base import *
 
@@ -32,12 +32,14 @@ class Room:
         # Set up the hierarchy of rooms
         self.parent = None
         self.children = []
-        # Set the perimeter
-        self.perimeter = perimeter
-        # Se the real area
+        # Set the perimeter and the real area
+        # If the perimeter has been forced then update the display with the initial lines
         if perimeter:
+            self.perimeter = perimeter
+            self.update_display()
             self.area = perimeter.area
         else:
+            self.perimeter = None
             self.area = None
         # Set the expected final area
         if forced_area:
@@ -63,7 +65,7 @@ class Room:
         # Set up all children rooms
         self.add_children(children)
         # Update the representation after the setup
-        self.update_display()
+        #self.update_display()
 
     # Get the perimeter
     # Just return the internal perimeter value
@@ -219,8 +221,11 @@ class Room:
             for corner in rect.get_corners():
                 #minimum_rect = Rect.from_corner(corner, room.min_size, room.min_size)
                 #room.perimeter = Perimeter(minimum_rect.get_lines())
-                room.perimeter = room.set_maximum_initial_perimeter(corner, rect)
-                self.update_display()
+                initial_perimeter = room.set_maximum_initial_perimeter(corner, rect)
+                if initial_perimeter:
+                    room.perimeter = initial_perimeter
+                    self.update_display()
+                    return True
 
     # Set the initial room perimeter as the maximum possible rectangle
     # This is a shortcut to skip the difficult expansion protocol

@@ -52,7 +52,8 @@ def represent (queue):
         ax.lines = []
 
         # Draw all lines
-        lines = frames[int(slider.val)]
+        data = frames[int(slider.val)]
+        lines = get_lines_from_anything(data)
         for line in lines:
             xs = [line.a.x, line.b.x]
             ys = [line.a.y, line.b.y]
@@ -70,24 +71,12 @@ def setup_display ():
 
 # --------------------------------------------------------------------------------------------------
 
-# Plot lines manually
-def plot_lines (lines : list):
-    fig, ax = plt.subplots()
-    # Remove top and right box lines
-    ax.spines['right'].set_visible(False)
-    ax.spines['top'].set_visible(False)
-    for line in lines:
-        xs = [line.a.x, line.b.x]
-        ys = [line.a.y, line.b.y]
-        ax.plot(xs,ys,color='black')
-    plt.show()
-
 # Plot lines, rectangles and perimeters manually
-def plot_everything (things : list):
+def get_lines_from_anything (things : list):
     lines = []
     for thing in things:
-        # If it is a line or something with x and y (i.e. something "linealizable")
-        if hasattr(thing, 'x') and hasattr(thing, 'y'):
+        # If it is a line or something with a and b (i.e. something "linealizable")
+        if hasattr(thing, 'a') and hasattr(thing, 'b'):
             lines.append(thing)
         # If it is a rectangle, perimeter, or something with lines
         if hasattr(thing, 'lines'):
@@ -95,4 +84,4 @@ def plot_everything (things : list):
         # If it is a rectangle or something with a "crossing line" getter
         if hasattr(thing, 'get_crossing_line'):
             lines.append(thing.get_crossing_line())
-    add_frame(lines)
+    return lines

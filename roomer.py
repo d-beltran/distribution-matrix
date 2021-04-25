@@ -1,6 +1,6 @@
 from vectorial_base import *
 from scheme import *
-from scheme_display import setup_display, plot_lines, plot_everything
+from scheme_display import setup_display
 
 # Represent current rooms tagged as display = True
 # DANI: Es posible que esto falle en windows
@@ -87,23 +87,6 @@ corners6 = [
     Point(-40,-80),
 ]
 
-distribution = Room(
-    perimeter=Perimeter.from_corners(corners3),
-    display=True,
-    name='Planta',
-    children=[
-        Room(
-            #perimeter=Perimeter.from_corners(corners5),
-            forced_area=600,
-            min_size=15,
-            name='Habitación'),
-        Room(
-            forced_area=400,
-            min_size=10,
-            name='Lavabo')
-    ]
-)
-
 #door = Point(-60,0),
 #parentRoom = Room('pasillo', 0.1, 15, maxWidth=15, priorizeBorder=-1, childRooms=[
 #    room('comedor', 0.25, 30),
@@ -115,6 +98,23 @@ distribution = Room(
 
 # This line is for windows to dont loop
 if __name__ == '__main__':
+
+    distribution = Room(
+        perimeter=Perimeter.from_corners(corners3),
+        display=True,
+        name='Planta',
+        children=[
+            Room(
+                #perimeter=Perimeter.from_corners(corners5),
+                forced_area=600,
+                min_size=15,
+                name='Habitación'),
+            Room(
+                forced_area=400,
+                min_size=10,
+                name='Lavabo')
+        ]
+    )
 
     # Represent current rooms tagged as display = True
     setup_display()

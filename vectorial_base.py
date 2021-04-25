@@ -1,6 +1,6 @@
 from typing import List, Union, Optional
 
-from scheme_display import add_frame, plot_lines, plot_everything
+from scheme_display import add_frame
 
 from functools import reduce
 
@@ -943,7 +943,7 @@ class Perimeter:
         #print('Total rectangles: ' + str(len(final_rectangles)))
 
         # Represent these rectangles as a new frame
-        plot_everything(final_rectangles)
+        add_frame(final_rectangles)
 
         return final_rectangles
 
@@ -1108,7 +1108,7 @@ class Perimeter:
                 maximum_rectangles.append(maximum_rect)
 
         # Represent these rectangles
-        plot_everything(maximum_rectangles)
+        add_frame(maximum_rectangles)
 
         return maximum_rectangles
 
