@@ -93,7 +93,8 @@ class Room:
         if not self.perimeter:
             return None
         # If there are no children then return the current perimeter rectangles
-        if len(self.children) == 0:
+        # If all children have no perimeter then return the current perimeter rectangles
+        if len(self.children) == 0 or not any([ child.perimeter for child in self.children ]):
             return self.perimeter.rects
         # Split in rectangles using the children as exclusion perimeters
         free_rects = self.perimeter.split_in_rectangles( exclusion_perimeters = [ child.perimeter for child in self.children if child.perimeter ] )
@@ -112,7 +113,8 @@ class Room:
         if not self.perimeter:
             return None
         # If there are no children then return the current perimeter rectangles
-        if len(self.children) == 0:
+        # If all children have no perimeter then return the current perimeter rectangles
+        if len(self.children) == 0 or not any([ child.perimeter for child in self.children ]):
             return self.perimeter.mrects
         # Split in rectangles using the children as exclusion perimeters
         free_mrects = self.perimeter.get_maximum_rectangles( splitted_rects = self.free_rects )
