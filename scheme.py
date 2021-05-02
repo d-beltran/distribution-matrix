@@ -117,7 +117,7 @@ class Room:
         if len(self.children) == 0 or not any([ child.perimeter for child in self.children ]):
             return self.perimeter.mrects
         # Split in rectangles using the children as exclusion perimeters
-        free_mrects = self.perimeter.get_maximum_rectangles( splitted_rects = self.free_rects )
+        free_mrects = get_maximum_rectangles( self.free_rects )
         self._free_mrects = free_mrects
         return free_mrects
 
