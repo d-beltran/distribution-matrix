@@ -253,7 +253,7 @@ class Room:
         new_x_size = x_space * sqrt(area_relation)
         new_y_size = y_space * sqrt(area_relation)
         # If any of the new sizes is shorter than the maximum size then the rectangle is valid
-        if x_space > self.max_size and y_space > self.max_size:
+        if new_x_size < self.max_size or new_y_size < self.max_size:
             maximum_rect = Rect.from_corner(corner, new_x_size, new_y_size)
             return Perimeter(maximum_rect.get_lines())
         # If both new sizes are longer than the maximum size we must find another solution
