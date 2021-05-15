@@ -50,14 +50,27 @@ def represent (queue):
 
         # Clear previous lines
         ax.lines = []
+        ax.texts = []
+
+        # Get everything to be displayed in the current frame
+        data = frames[int(slider.val)]
 
         # Draw all lines
-        data = frames[int(slider.val)]
         lines = get_lines_from_anything(data)
         for line in lines:
             xs = [line.a.x, line.b.x]
             ys = [line.a.y, line.b.y]
             ploted_lines = ax.plot(xs,ys,color=line.color)
+
+        # Draw all room names
+        rooms = [ room for room in data if hasattr(room, 'name') ]
+        for room in rooms:
+            # Find the most wide maximum free rectangle
+            # We focus in the x axis since text is horizontal
+            widest_maximum_rect = get_widest_rect(room)
+            pmin = widest_maximum_rect.pmin
+            ploted_text = ax.text(pmin.x, pmin.y, room.name, color='black')
+            #ploted_text = ax.annotate(room.name, (pmin.x, pmin.y), color='black')
         
     # Run the animation and show the plot
     anim = animation.FuncAnimation(fig, update_frame)
@@ -84,4 +97,18 @@ def get_lines_from_anything (things : list):
         # If it is a rectangle or something with a "crossing line" getter
         if hasattr(thing, 'get_crossing_line'):
             lines.append(thing.get_crossing_line())
+        # If it is a room or something with a perimeter
+        if hasattr(thing, 'perimeter'):
+            lines += thing.perimeter.lines
     return lines
+
+# Return the horizontally longest rect from a list of rects
+def get_widest_rect (room):
+    maximum_rects = room.free_mrects
+    sorted_rects = sorted(maximum_rects, key=by_x_size)
+    return sorted_rects[0]
+
+# To sort rects by its x size
+def by_x_size(rect):
+    x_size, _ = rect.get_size()
+    return x_size

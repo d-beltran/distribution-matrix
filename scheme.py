@@ -284,17 +284,17 @@ class Room:
         return root
 
     # Get all lines from this room and all children room perimeters
-    def get_lines_recuersive (self, only_children : bool = False):
-        lines = []
+    def get_rooms_recuersive (self, only_children : bool = False):
+        rooms = []
         if not only_children and self.perimeter:
-            lines += self.perimeter.lines
+            rooms.append(self)
         for room in self.children:
-            lines += room.get_lines_recuersive()
-        return lines
+            rooms.append(room)
+        return rooms
 
     # Add a new frame in the display with the current lines of this room and its children
     def update_display (self):
         # Find the root room
         root = self.get_root_room()
         if root.display:
-            add_frame(root.get_lines_recuersive())
+            add_frame(root.get_rooms_recuersive())

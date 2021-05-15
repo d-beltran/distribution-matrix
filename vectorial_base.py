@@ -427,6 +427,13 @@ class Rect:
         y_size = self.pmax.y - self.pmin.y
         return x_size, y_size
 
+    # Calculate the rectangle center
+    def get_center(self):
+        x_size, y_size = self.get_size()
+        x_position = self.pmin.x + x_size / 2
+        y_position = self.pmin.y + y_size / 2
+        return x_position, y_position
+
     # Calculate the rectangle area
     def get_area(self):
         if self._area:
