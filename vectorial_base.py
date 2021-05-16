@@ -229,6 +229,10 @@ class Line:
         sorted_points = sorted( sorted(points, key=sort_by_x), key=sort_by_y )
         return tuple(sorted_points)
 
+    # Create a new line identical to this line but with a specified color
+    def get_colored_line(self, color : str):
+        return Line(self.a, self.b, color)
+
     # Check if another line has the same direction than this line
     def same_direction_as (self, line) -> bool:
         nvector1 = self.vector.normalized()
@@ -303,16 +307,17 @@ class Line:
 # A rectangular area defined by 2 coordinates (Points): 'max' and 'min'
 class Rect:
 
-    def __init__(self, pmin : Point, pmax : Point):
+    def __init__(self, pmin : Point, pmax : Point, color : str = 'black'):
         self.pmin = pmin
         self.pmax = pmax
+        self.color = color
         self.lines = self.get_lines()
         self._area = None
 
     # Set the rect from lines
     # The new rect will contain all rects
     @classmethod
-    def from_lines(cls, lines : List[Line]):
+    def from_lines(cls, lines : List[Line], color : str = 'black'):
         # Check that there are at least 2 lines
         if len(lines) < 2:
             raise NameError('It is required at least 2 lines')
@@ -330,13 +335,13 @@ class Rect:
         # Set pmin and pmax and build the rectange
         pmin = Point(x_min, y_min)
         pmax = Point(x_max, y_max)
-        return cls(pmin, pmax)
+        return cls(pmin, pmax, color)
 
     # Set the rect from a corner (i.e. a point with 2 lines)
     # Optionally you can ask for specific x and y sizes
     # If no size is passed then the size of the original corner line is used
     @classmethod
-    def from_corner(cls, corner : Point, x_size = None, y_size = None):
+    def from_corner(cls, corner : Point, x_size = None, y_size = None, color : str = 'black'):
         # Get the two lines from the corner
         lines = corner.lines
         directions = [ line.vector.normalized() for line in lines ]
@@ -353,8 +358,7 @@ class Rect:
         # Otherwise use the original lines
         hline = Line(corner, corner + directions[hdir] * x_size) if x_size else lines[hdir]
         vline = Line(corner, corner + directions[vdir] * y_size) if y_size else lines[vdir]
-
-        return cls.from_lines([hline, vline])
+        return cls.from_lines([hline, vline], color)
 
     def __str__(self):
         return 'Min: ' + str(self.pmin) + ', Max: ' + str(self.pmax)
@@ -402,7 +406,7 @@ class Rect:
     # Return all rectangle lines in a 'perimeter-friendly' order
     def get_lines(self):
         points = self.get_points()
-        lines = [ Line(a,b) for a, b in pairwise(points, retro=True) ]
+        lines = [ Line(a, b, self.color) for a, b in pairwise(points, retro=True) ]
         return lines
 
     # Return all rectangle points in a 'perimeter-friendly' order
@@ -419,7 +423,11 @@ class Rect:
 
     # Return all rectangle lines in a 'perimeter-friendly' order
     def get_crossing_line(self):
-        return Line(self.pmin, self.pmax)
+        return Line(self.pmin, self.pmax, self.color)
+
+    # Create a new line identical to this line but with a specified color
+    def get_colored_rect(self, color : str):
+        return Rect(self.pmin, self.pmax, color)
 
     # Calculate the rectangle area
     def get_size(self):
@@ -947,9 +955,6 @@ class Perimeter:
 
         #print('Total rectangles: ' + str(len(final_rectangles)))
 
-        # Represent these rectangles as a new frame
-        add_frame(final_rectangles)
-
         return final_rectangles
 
     # Check if a rectangle fits somewhere in the perimeter
@@ -1132,8 +1137,5 @@ def get_maximum_rectangles(splitted_rects : list = []) -> list:
         # Add the new maximum rectnagle to the list if it is not there already
         if maximum_rect not in maximum_rectangles:
             maximum_rectangles.append(maximum_rect)
-
-    # Represent these rectangles
-    add_frame(maximum_rectangles)
 
     return maximum_rectangles

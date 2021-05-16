@@ -27,6 +27,7 @@ class Room:
         self._free_mrects = None
         self._perimeter = None
         # Set representation parameters
+        self.text_place = None
         self.display = display
         self.name = name
         # Set up the hierarchy of rooms
@@ -99,6 +100,10 @@ class Room:
         # Split in rectangles using the children as exclusion perimeters
         free_rects = self.perimeter.split_in_rectangles( exclusion_perimeters = [ child.perimeter for child in self.children if child.perimeter ] )
         self._free_rects = free_rects
+        # Represent the new free rectangles in red color
+        colored_rects = [ rect.get_colored_rect('red') for rect in free_rects ]
+        print('update minimums')
+        self.update_display(colored_rects)
         return free_rects
 
     # The area is treated appart since it may be an expensive calculation
@@ -119,10 +124,26 @@ class Room:
         # Split in rectangles using the children as exclusion perimeters
         free_mrects = get_maximum_rectangles( self.free_rects )
         self._free_mrects = free_mrects
+        # Represent the new free maximum rectangles
+        colored_rects = [ rect.get_colored_rect('blue') for rect in free_mrects ]
+        print('update maximums')
+        self.update_display(colored_rects)
         return free_mrects
 
     # The area is treated appart since it may be an expensive calculation
     free_mrects = property(get_free_mrects, None, None, "The maximum free are rectnagles")
+
+    # Return the horizontally longest rect from a list of rects
+    def get_widest_rect (self):
+        maximum_rects = self.free_mrects
+        sorted_rects = sorted(maximum_rects, key=by_x_size)
+        return sorted_rects[0]
+
+    # Get the most suitable place to place text in the display (e.g. the room name)
+    def set_text_place (self):
+        place = self.get_widest_rect().pmin
+        self.text_place = place
+        return place
 
     # Reset all minimum and maximum free rects
     # This must be done each time the perimeter is modified since they are not valid anymore
@@ -293,8 +314,22 @@ class Room:
         return rooms
 
     # Add a new frame in the display with the current lines of this room and its children
-    def update_display (self):
+    # Also an 'extra' argument may be passed with extra lines to be represented
+    def update_display (self, extra : list = []):
+        print('starting update')
         # Find the root room
         root = self.get_root_room()
         if root.display:
-            add_frame(root.get_rooms_recuersive())
+            elements_to_display = [ *root.get_rooms_recuersive(), *extra ]
+            for element in elements_to_display:
+                if type(element) == Room:
+                    element.set_text_place()
+            print('finishing update')
+            add_frame(elements_to_display)
+
+# Auxiliar functions
+
+# To sort rects by its x size
+def by_x_size(rect):
+    x_size, _ = rect.get_size()
+    return x_size

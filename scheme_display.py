@@ -67,9 +67,9 @@ def represent (queue):
         for room in rooms:
             # Find the most wide maximum free rectangle
             # We focus in the x axis since text is horizontal
-            widest_maximum_rect = get_widest_rect(room)
-            pmin = widest_maximum_rect.pmin
-            ploted_text = ax.text(pmin.x, pmin.y, room.name, color='black')
+            # DANI: Esta es la linea que está generando tanta mierda
+            place = room.text_place
+            ploted_text = ax.text(place.x, place.y, room.name, color='black')
             #ploted_text = ax.annotate(room.name, (pmin.x, pmin.y), color='black')
         
     # Run the animation and show the plot
@@ -99,16 +99,6 @@ def get_lines_from_anything (things : list):
             lines.append(thing.get_crossing_line())
         # If it is a room or something with a perimeter
         if hasattr(thing, 'perimeter'):
-            lines += thing.perimeter.lines
+            if thing.perimeter:
+                lines += thing.perimeter.lines
     return lines
-
-# Return the horizontally longest rect from a list of rects
-def get_widest_rect (room):
-    maximum_rects = room.free_mrects
-    sorted_rects = sorted(maximum_rects, key=by_x_size)
-    return sorted_rects[0]
-
-# To sort rects by its x size
-def by_x_size(rect):
-    x_size, _ = rect.get_size()
-    return x_size
