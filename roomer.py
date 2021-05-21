@@ -97,36 +97,42 @@ corners6 = [
 
 
 # This line is for windows to dont loop
-#if __name__ == '__main__':
+if __name__ == '__main__':
 
-# Represent current rooms tagged as display = True
-setup_display()
+    # Represent current rooms tagged as display = True
+    setup_display()
 
-distribution = Room(
-    perimeter=Perimeter.from_corners(corners3),
-    display=True,
-    name='Planta',
-    children=[
-        Room(
-            #perimeter=Perimeter.from_corners(corners5),
-            forced_area=3600,
-            min_size=15,
-            name='Comedor'),
-        Room(
-            forced_area=1600,
-            min_size=15,
-            name='Cocina'),
-        Room(
-            forced_area=1800,
-            min_size=15,
-            name='Habitación'),
-        Room(
-            forced_area=1800,
-            min_size=15,
-            name='Habitación'),
-        Room(
-            forced_area=800,
-            min_size=10,
-            name='Lavabo')
-    ]
-)
+    distribution = Room(
+        perimeter=Perimeter.from_corners(corners3),
+        display=True,
+        name='Planta',
+        fill_color='purple',
+        children=[
+            Room(
+                #perimeter=Perimeter.from_corners(corners5),
+                forced_area=3600,
+                min_size=15,
+                name='Comedor',
+                fill_color='blue'),
+            Room(
+                forced_area=1600,
+                min_size=15,
+                name='Cocina',
+                fill_color='yellow'),
+            Room(
+                forced_area=1800,
+                min_size=15,
+                name='Habitación',
+                fill_color='red'),
+            Room(
+                forced_area=1800,
+                min_size=15,
+                name='Habitación',
+                fill_color='orange'),
+            Room(
+                forced_area=800,
+                min_size=10,
+                name='Lavabo',
+                fill_color='green')
+        ]
+    )

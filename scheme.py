@@ -20,6 +20,8 @@ class Room:
         max_size : number = None,
         display : bool = False,
         name : str = 'Unnamed',
+        lines_color : str = 'black',
+        fill_color : str = 'white',
         children : list = [],
         ):
         # Set internal variables
@@ -27,9 +29,10 @@ class Room:
         self._free_mrects = None
         self._perimeter = None
         # Set representation parameters
-        self.text_place = None
         self.display = display
         self.name = name
+        self.lines_color = lines_color
+        self.fill_color = fill_color
         # Set up the hierarchy of rooms
         self.parent = None
         self.children = []
@@ -76,10 +79,10 @@ class Room:
     # Set the perimeter
     # Reset the own rects and the parent rects also
     def set_perimeter (self, value):
+        self._perimeter = value
         self.reset_rects()
         if self.parent:
             self.parent.reset_rects()
-        self._perimeter = value
 
     # The area is treated appart since it may be an expensive calculation
     perimeter = property(get_perimeter, set_perimeter, None, "The room perimeter")
@@ -99,10 +102,14 @@ class Room:
             return self.perimeter.rects
         # Split in rectangles using the children as exclusion perimeters
         free_rects = self.perimeter.split_in_rectangles( exclusion_perimeters = [ child.perimeter for child in self.children if child.perimeter ] )
+        # Apply the current room colors to all rectangles
+        for rect in free_rects:
+            print(self.fill_color)
+            rect.lines_color = self.lines_color
+            rect.fill_color = self.fill_color
         self._free_rects = free_rects
         # Represent the new free rectangles in red color
-        colored_rects = [ rect.get_colored_rect('red') for rect in free_rects ]
-        print('update minimums')
+        colored_rects = [ rect.get_colored_rect(lines_color='red') for rect in free_rects ]
         self.update_display(colored_rects)
         return free_rects
 
@@ -123,33 +130,26 @@ class Room:
             return self.perimeter.mrects
         # Split in rectangles using the children as exclusion perimeters
         free_mrects = get_maximum_rectangles( self.free_rects )
+        # Apply the current room colors to all rectangles
+        for rect in free_mrects:
+            rect.lines_color = self.lines_color
+            rect.fill_color = self.fill_color
         self._free_mrects = free_mrects
         # Represent the new free maximum rectangles
-        colored_rects = [ rect.get_colored_rect('blue') for rect in free_mrects ]
-        print('update maximums')
+        colored_rects = [ rect.get_colored_rect(lines_color='blue') for rect in free_mrects ]
         self.update_display(colored_rects)
         return free_mrects
 
     # The area is treated appart since it may be an expensive calculation
     free_mrects = property(get_free_mrects, None, None, "The maximum free are rectnagles")
 
-    # Return the horizontally longest rect from a list of rects
-    def get_widest_rect (self):
-        maximum_rects = self.free_mrects
-        sorted_rects = sorted(maximum_rects, key=by_x_size)
-        return sorted_rects[0]
-
-    # Get the most suitable place to place text in the display (e.g. the room name)
-    def set_text_place (self):
-        place = self.get_widest_rect().pmin
-        self.text_place = place
-        return place
-
     # Reset all minimum and maximum free rects
     # This must be done each time the perimeter is modified since they are not valid anymore
     def reset_rects(self):
         self._free_rects = None
         self._free_mrects = None
+        self.get_free_rects()
+        self.get_free_mrects()
 
     # Check if a rectangle fits somewhere in the perimeter
     # Iterate over all maximum rectangles and try to fit
@@ -316,20 +316,8 @@ class Room:
     # Add a new frame in the display with the current lines of this room and its children
     # Also an 'extra' argument may be passed with extra lines to be represented
     def update_display (self, extra : list = []):
-        print('starting update')
         # Find the root room
         root = self.get_root_room()
         if root.display:
             elements_to_display = [ *root.get_rooms_recuersive(), *extra ]
-            for element in elements_to_display:
-                if type(element) == Room:
-                    element.set_text_place()
-            print('finishing update')
             add_frame(elements_to_display)
-
-# Auxiliar functions
-
-# To sort rects by its x size
-def by_x_size(rect):
-    x_size, _ = rect.get_size()
-    return x_size

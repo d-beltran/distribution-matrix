@@ -13,7 +13,9 @@ queue = Queue()
 # Updater called from the system
 def add_frame (data):
     print(' [ frame ' + str(len(frames)) + ' ] ')
-    frames.append(data)
+    lines = get_lines_from_anything(data)
+    rects = get_rects_from_anything(data)
+    frames.append((lines, rects))
     queue.put(frames)
 
 # Show the heatmap
@@ -48,29 +50,27 @@ def represent (queue):
         if updated:
             slider.set_val(maximum)
 
-        # Clear previous lines
-        ax.lines = []
-        ax.texts = []
+        # Clear previous lines and rects
+        #ax.lines = []
+        ax.clear()
 
         # Get everything to be displayed in the current frame
-        data = frames[int(slider.val)]
+        lines, rects = frames[int(slider.val)]
 
         # Draw all lines
-        lines = get_lines_from_anything(data)
         for line in lines:
             xs = [line.a.x, line.b.x]
             ys = [line.a.y, line.b.y]
             ploted_lines = ax.plot(xs,ys,color=line.color)
 
-        # Draw all room names
-        rooms = [ room for room in data if hasattr(room, 'name') ]
-        for room in rooms:
-            # Find the most wide maximum free rectangle
-            # We focus in the x axis since text is horizontal
-            # DANI: Esta es la linea que está generando tanta mierda
-            place = room.text_place
-            ploted_text = ax.text(place.x, place.y, room.name, color='black')
-            #ploted_text = ax.annotate(room.name, (pmin.x, pmin.y), color='black')
+        # Draw all rect areas
+        for rect in rects:
+            pulc = rect.get_upper_left_corner()
+            pbrc = rect.get_bottom_right_corner()
+            xs = [rect.pmin.x, pulc.x, rect.pmax.x, pbrc.x]
+            ys = [rect.pmin.y, pulc.y, rect.pmax.y, pbrc.y]
+            # WARNING: Use 'facecolor' instead of 'color' to hide separation lines between fills
+            ploted_rects = ax.fill(xs, ys, facecolor=rect.fill_color or 'C0', alpha=0.1)
         
     # Run the animation and show the plot
     anim = animation.FuncAnimation(fig, update_frame)
@@ -84,7 +84,7 @@ def setup_display ():
 
 # --------------------------------------------------------------------------------------------------
 
-# Plot lines, rectangles and perimeters manually
+# Mine all possible lines from a list of different vectorial_base elements
 def get_lines_from_anything (things : list):
     lines = []
     for thing in things:
@@ -102,3 +102,19 @@ def get_lines_from_anything (things : list):
             if thing.perimeter:
                 lines += thing.perimeter.lines
     return lines
+
+# Mine all possible rectangles from a list of different vectorial_base elements
+def get_rects_from_anything (things : list):
+    rects = []
+    for thing in things:
+        # If it is a rectangle or something with pmin and pmax (i.e. something "rectanglizable")
+        if hasattr(thing, 'pmin') and hasattr(thing, 'pmax'):
+            rects.append(thing)
+        # If it is a perimeter
+        if hasattr(thing, 'rects'):
+            rects += thing.rects
+        # If it is a room
+        if hasattr(thing, 'free_rects'):
+            if thing.free_rects:
+                rects += thing.free_rects
+    return rects

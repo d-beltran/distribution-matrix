@@ -307,17 +307,18 @@ class Line:
 # A rectangular area defined by 2 coordinates (Points): 'max' and 'min'
 class Rect:
 
-    def __init__(self, pmin : Point, pmax : Point, color : str = 'black'):
+    def __init__(self, pmin : Point, pmax : Point, lines_color : str = 'black', fill_color : str = 'white'):
         self.pmin = pmin
         self.pmax = pmax
-        self.color = color
+        self.lines_color = lines_color
+        self.fill_color = fill_color
         self.lines = self.get_lines()
         self._area = None
 
     # Set the rect from lines
     # The new rect will contain all rects
     @classmethod
-    def from_lines(cls, lines : List[Line], color : str = 'black'):
+    def from_lines(cls, lines : List[Line], lines_color : str = 'black', fill_color : str = 'white'):
         # Check that there are at least 2 lines
         if len(lines) < 2:
             raise NameError('It is required at least 2 lines')
@@ -335,13 +336,13 @@ class Rect:
         # Set pmin and pmax and build the rectange
         pmin = Point(x_min, y_min)
         pmax = Point(x_max, y_max)
-        return cls(pmin, pmax, color)
+        return cls(pmin, pmax, lines_color, fill_color)
 
     # Set the rect from a corner (i.e. a point with 2 lines)
     # Optionally you can ask for specific x and y sizes
     # If no size is passed then the size of the original corner line is used
     @classmethod
-    def from_corner(cls, corner : Point, x_size = None, y_size = None, color : str = 'black'):
+    def from_corner(cls, corner : Point, x_size = None, y_size = None, lines_color : str = 'black', fill_color : str = 'white'):
         # Get the two lines from the corner
         lines = corner.lines
         directions = [ line.vector.normalized() for line in lines ]
@@ -358,7 +359,7 @@ class Rect:
         # Otherwise use the original lines
         hline = Line(corner, corner + directions[hdir] * x_size) if x_size else lines[hdir]
         vline = Line(corner, corner + directions[vdir] * y_size) if y_size else lines[vdir]
-        return cls.from_lines([hline, vline], color)
+        return cls.from_lines([hline, vline], lines_color, fill_color)
 
     def __str__(self):
         return 'Min: ' + str(self.pmin) + ', Max: ' + str(self.pmax)
@@ -406,7 +407,7 @@ class Rect:
     # Return all rectangle lines in a 'perimeter-friendly' order
     def get_lines(self):
         points = self.get_points()
-        lines = [ Line(a, b, self.color) for a, b in pairwise(points, retro=True) ]
+        lines = [ Line(a, b, self.lines_color) for a, b in pairwise(points, retro=True) ]
         return lines
 
     # Return all rectangle points in a 'perimeter-friendly' order
@@ -423,11 +424,11 @@ class Rect:
 
     # Return all rectangle lines in a 'perimeter-friendly' order
     def get_crossing_line(self):
-        return Line(self.pmin, self.pmax, self.color)
+        return Line(self.pmin, self.pmax, self.lines_color)
 
-    # Create a new line identical to this line but with a specified color
-    def get_colored_rect(self, color : str):
-        return Rect(self.pmin, self.pmax, color)
+    # Create a new rectangle identical to this rectangle but with a specified color
+    def get_colored_rect(self, lines_color : str = 'black', fill_color : str = 'white'):
+        return Rect(self.pmin, self.pmax, lines_color, fill_color)
 
     # Calculate the rectangle area
     def get_size(self):
@@ -543,8 +544,13 @@ class Rect:
 # Instead, a new perimeter must be created every time a perimeter needs to be modified
 class Perimeter:
 
-    def __init__(self, lines : list):
+    def __init__(self, lines : list, lines_color = 'black', fill_color = 'white'):
         self.lines = lines
+        self.lines_color = lines_color
+        self.fill_color = fill_color
+        # Color at this moment all lines
+        for line in lines:
+            line.color = lines_color
         # Check the perimeter is closed and lines are not diagonal
         self.check() 
         self._corners = None
@@ -606,6 +612,9 @@ class Perimeter:
             return self._rects
         # Get all rectangles which form the perimeter
         rects = self.split_in_rectangles()
+        # Apply the perimter color
+        for rect in rects:
+            rect.color = self.fill_color
         self._rects = rects
         return rects
 
