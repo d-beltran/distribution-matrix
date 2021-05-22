@@ -106,7 +106,6 @@ if __name__ == '__main__':
         perimeter=Perimeter.from_corners(corners3),
         display=True,
         name='Planta',
-        fill_color='purple',
         children=[
             Room(
                 #perimeter=Perimeter.from_corners(corners5),

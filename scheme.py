@@ -99,12 +99,12 @@ class Room:
         # If there are no children then return the current perimeter rectangles
         # If all children have no perimeter then return the current perimeter rectangles
         if len(self.children) == 0 or not any([ child.perimeter for child in self.children ]):
-            return self.perimeter.rects
-        # Split in rectangles using the children as exclusion perimeters
-        free_rects = self.perimeter.split_in_rectangles( exclusion_perimeters = [ child.perimeter for child in self.children if child.perimeter ] )
+            free_rects = self.perimeter.rects
+        # Otherwise, split in rectangles using the children as exclusion perimeters
+        else:
+            free_rects = self.perimeter.split_in_rectangles( exclusion_perimeters = [ child.perimeter for child in self.children if child.perimeter ] )
         # Apply the current room colors to all rectangles
         for rect in free_rects:
-            print(self.fill_color)
             rect.lines_color = self.lines_color
             rect.fill_color = self.fill_color
         self._free_rects = free_rects
@@ -127,9 +127,10 @@ class Room:
         # If there are no children then return the current perimeter rectangles
         # If all children have no perimeter then return the current perimeter rectangles
         if len(self.children) == 0 or not any([ child.perimeter for child in self.children ]):
-            return self.perimeter.mrects
-        # Split in rectangles using the children as exclusion perimeters
-        free_mrects = get_maximum_rectangles( self.free_rects )
+            free_mrects = self.perimeter.mrects
+        # Otherwise, split in rectangles using the children as exclusion perimeters
+        else:
+            free_mrects = get_maximum_rectangles( self.free_rects )
         # Apply the current room colors to all rectangles
         for rect in free_mrects:
             rect.lines_color = self.lines_color
