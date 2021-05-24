@@ -13,7 +13,7 @@ from math import sqrt
 # The 'min_size' and 'max_size' are the limits in both x and y axes
 # The 'name' is only a representation parameter
 class Room:
-    def __init__(self,
+    def __init__ (self,
         perimeter : Perimeter = None,
         forced_area : number = None,
         min_size : number = None,
@@ -146,7 +146,7 @@ class Room:
 
     # Reset all minimum and maximum free rects
     # This must be done each time the perimeter is modified since they are not valid anymore
-    def reset_rects(self):
+    def reset_rects (self):
         self._free_rects = None
         self._free_mrects = None
         self.get_free_rects()
@@ -178,7 +178,7 @@ class Room:
         return fit_rects
 
     # Add children rooms
-    def add_children(self, rooms : list):
+    def add_children (self, rooms : list):
         if len(rooms) == 0:
             return
         # Check areas of all children rooms to do not sum up more than the parent area
@@ -199,7 +199,7 @@ class Room:
                 raise NameError('Input error: The child room "' + room.name + '" minimum size does not fit in the parent perimeter')
 
         # Sort children rooms by minimum size, with the biggest sizes first
-        def sort_by_size(room):
+        def sort_by_size (room):
             return room.min_size
         sorted_rooms = sorted( rooms, key=sort_by_size, reverse=True )
 
@@ -213,7 +213,7 @@ class Room:
                 self.set_child_room_perimeter(room)
 
     # Check if a point is in the border of any children perimeter
-    def in_children_border(self, point : Point):
+    def in_children_border (self, point : Point):
         for room in self.children:
             for corner in room.perimeter.corners:
                 if point == corner:
@@ -224,7 +224,7 @@ class Room:
         return False
 
     # Set up a room perimeter
-    def set_child_room_perimeter(self, room):
+    def set_child_room_perimeter (self, room):
         # Find a suitable maximum free rectangle to deploy a starting base perimeter
         # The minimum base perimeter is a square with both sides as long as the room minimum size
         suitable_rects = self.get_fit(room.min_size)
@@ -241,21 +241,24 @@ class Room:
         # Try to set up the new room in all possible sites until we find one
         # Each 'site' means each corner in each suitable rectangle
         # Check each site to allow other rooms to grow
-        for rect in sorted_suitable_rects:
-            for corner in rect.get_corners():
-                #minimum_rect = Rect.from_corner(corner, room.min_size, room.min_size)
-                #room.perimeter = Perimeter(minimum_rect.get_lines())
-                initial_perimeter = room.set_maximum_initial_perimeter(corner, rect)
-                if initial_perimeter:
-                    room.perimeter = initial_perimeter
-                    self.update_display()
-                    return True
+        def set_base_perimeter():
+            for rect in sorted_suitable_rects:
+                for corner in rect.get_corners():
+                    initial_perimeter = room.set_maximum_initial_perimeter(corner, rect)
+                    if initial_perimeter:
+                        return initial_perimeter
+            return None
+        base_perimeter = set_base_perimeter()
+        # La vida
+        room.perimeter = base_perimeter
+        
+        self.update_display()
 
     # Set the initial room perimeter as the maximum possible rectangle
     # This is a shortcut to skip the difficult expansion protocol
     # It is useful to set a whole room at the begining, when there is plenty of free space
     # It is useful to set as much perimeter as possible at the start before we resolve space conflicts
-    def set_maximum_initial_perimeter(self, corner : Point, space : Rect) -> Perimeter:
+    def set_maximum_initial_perimeter (self, corner : Point, space : Rect) -> Perimeter:
         x_space, y_space = space.get_size()
         # If the room area is greater than the space then return the whole space as a permeter
         if space.area <= self.forced_area:
@@ -297,9 +300,17 @@ class Room:
         maximum_rect = Rect.from_corner(corner, new_x_size, new_y_size)
         return Perimeter(maximum_rect.get_lines())
 
+    # Search the surrounding rooms of the current room
+    # Find the most suitable space for the current room to claim
+    # If we have parent free space available then use it
+    # If not, find a neighbour room which is able to expand and use its space
+    def expand_room ():
+        # Find all surrounding rooms and their contact region
+        pass
+
 
     # Go uppwards in the hyerarchy until you reach the room which has no parent
-    def get_root_room(self):
+    def get_root_room (self):
         root = self
         while(root.parent):
             root = root.parent
