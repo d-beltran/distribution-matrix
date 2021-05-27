@@ -306,7 +306,10 @@ class Room:
     # If not, find a neighbour room which is able to expand and use its space
     def expand_room ():
         # Find all surrounding rooms and their contact region
-        pass
+        parent_room = self.parent
+        brother_rooms = [ room for room in parent.children if room is not self ]
+        for line in self.perimeter.lines:
+            pass
 
 
     # Go uppwards in the hyerarchy until you reach the room which has no parent
