@@ -311,6 +311,13 @@ class Room:
         for line in self.perimeter.lines:
             pass
 
+    # Get all overlapped lines between the current room and others
+    def get_frontiers (self, other) -> list:
+        self_lines = self.perimeter.lines
+        other_lines = other.perimeter.lines
+        for self_line in self_lines:
+            for other_line in other_lines:
+                pass
 
     # Go uppwards in the hyerarchy until you reach the room which has no parent
     def get_root_room (self):

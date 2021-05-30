@@ -263,13 +263,12 @@ class Line:
         for a, b in pairwise([self.a, *sorted_points, self.b]):
             yield Line(a, b)
 
-    # Get the intersection between two lines
+    # Get the intersection point between two lines
     # https://stackoverflow.com/questions/20677795/how-do-i-compute-the-intersection-point-of-two-lines
     # The 'in_extremis' sets if the 'a' and 'b' points which define lines are considered
     # in_extremis = 0 -> Intersections which are the 'extrem' point of any line are ignored
     # in_extremis = 1 -> Intersections which are the 'extrem' point of only one of the lines are also considered
     # in_extremis = 2 -> All interactions are considered
-    # When false, if the intersection point is one of these points then it will be ignored
     def get_intersection_point (self, line, in_extremis : int = 2) -> Optional[Point]:
         xdiff = Vector(self.a.x - self.b.x, line.a.x - line.b.x)
         ydiff = Vector(self.a.y - self.b.y, line.a.y - line.b.y)
@@ -303,6 +302,12 @@ class Line:
 
         #print(str(self) + ' / ' + str(line) + ' -> ' + str(Point(x, y)))
         return Point(x, y)
+
+    # Get the overlap line between two lines
+    def get_overlap_line (self, line, in_extremis : int = 2) -> Optional[Point]:
+        pass
+
+    # 
 
 # A rectangular area defined by 2 coordinates (Points): 'max' and 'min'
 class Rect:
