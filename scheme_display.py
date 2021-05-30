@@ -15,10 +15,10 @@ queue = Queue()
 # Updater called from the system
 def add_frame (data):
     print(' [ frame ' + str(len(frames)) + ' ] ')
-    lines = get_lines_from_anything(data)
+    segments = get_segments_from_anything(data)
     rects = get_rects_from_anything(data)
     traced = [ element for element in data if hasattr(element, 'name') ]
-    frames.append((lines, rects, traced))
+    frames.append((segments, rects, traced))
     queue.put(frames)
 
 # Show the heatmap
@@ -28,7 +28,7 @@ def represent (queue):
     fig, ax = plt.subplots()
     frames = queue.get()
 
-    # Remove top and right box lines
+    # Remove top and right box segments
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
 
@@ -52,18 +52,18 @@ def represent (queue):
         if updated:
             slider.set_val(maximum)
 
-        # Clear previous lines and rects
-        #ax.lines = []
+        # Clear previous segments and rects
+        #ax.segments = []
         ax.clear()
 
         # Get everything to be displayed in the current frame
-        lines, rects, traced = frames[int(slider.val)]
+        segments, rects, traced = frames[int(slider.val)]
 
-        # Draw all lines
-        for line in lines:
-            xs = [line.a.x, line.b.x]
-            ys = [line.a.y, line.b.y]
-            ploted_lines = ax.plot(xs,ys,color=line.color)
+        # Draw all segments
+        for segment in segments:
+            xs = [segment.a.x, segment.b.x]
+            ys = [segment.a.y, segment.b.y]
+            ploted_segments = ax.plot(xs,ys,color=segment.color)
 
         # Draw all rect areas
         for rect in rects:
@@ -71,7 +71,7 @@ def represent (queue):
             pbrc = rect.get_bottom_right_corner()
             xs = [rect.pmin.x, pulc.x, rect.pmax.x, pbrc.x]
             ys = [rect.pmin.y, pulc.y, rect.pmax.y, pbrc.y]
-            # WARNING: Use 'facecolor' instead of 'color' to hide separation lines between fills
+            # WARNING: Use 'facecolor' instead of 'color' to hide separation segments between fills
             ploted_rects = ax.fill(xs, ys, facecolor=rect.fill_color or 'C0', alpha=0.2)
 
         # Set the legend with all room names
@@ -95,24 +95,24 @@ def setup_display ():
 
 # --------------------------------------------------------------------------------------------------
 
-# Mine all possible lines from a list of different vectorial_base elements
-def get_lines_from_anything (things : list):
-    lines = []
+# Mine all possible segments from a list of different vectorial_base elements
+def get_segments_from_anything (things : list):
+    segments = []
     for thing in things:
-        # If it is a line or something with a and b (i.e. something "linealizable")
+        # If it is a segment or something with a and b (i.e. something "segmentalizable")
         if hasattr(thing, 'a') and hasattr(thing, 'b'):
-            lines.append(thing)
-        # If it is a rectangle, perimeter, or something with lines
-        if hasattr(thing, 'lines'):
-            lines += thing.lines
-        # If it is a rectangle or something with a "crossing line" getter
-        if hasattr(thing, 'get_crossing_line'):
-            lines.append(thing.get_crossing_line())
+            segments.append(thing)
+        # If it is a rectangle, perimeter, or something with segments
+        if hasattr(thing, 'segments'):
+            segments += thing.segments
+        # If it is a rectangle or something with a "crossing segment" getter
+        if hasattr(thing, 'get_crossing_segment'):
+            segments.append(thing.get_crossing_segment())
         # If it is a room or something with a perimeter
         if hasattr(thing, 'perimeter'):
             if thing.perimeter:
-                lines += thing.perimeter.lines
-    return lines
+                segments += thing.perimeter.segments
+    return segments
 
 # Mine all possible rectangles from a list of different vectorial_base elements
 def get_rects_from_anything (things : list):

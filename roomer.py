@@ -96,7 +96,7 @@ corners6 = [
 #    room('baño', 0.1, 20),
 
 
-# This line is for windows to dont loop
+# This segment is for windows to dont loop
 if __name__ == '__main__':
 
     # Represent current rooms tagged as display = True

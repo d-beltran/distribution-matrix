@@ -20,7 +20,7 @@ class Room:
         max_size : number = None,
         display : bool = False,
         name : str = 'Unnamed',
-        lines_color : str = 'black',
+        segments_color : str = 'black',
         fill_color : str = 'white',
         children : list = [],
         ):
@@ -31,13 +31,13 @@ class Room:
         # Set representation parameters
         self.display = display
         self.name = name
-        self.lines_color = lines_color
+        self.segments_color = segments_color
         self.fill_color = fill_color
         # Set up the hierarchy of rooms
         self.parent = None
         self.children = []
         # Set the perimeter and the real area
-        # If the perimeter has been forced then update the display with the initial lines
+        # If the perimeter has been forced then update the display with the initial segments
         if perimeter:
             self.perimeter = perimeter
             self.update_display()
@@ -105,11 +105,11 @@ class Room:
             free_rects = self.perimeter.split_in_rectangles( exclusion_perimeters = [ child.perimeter for child in self.children if child.perimeter ] )
         # Apply the current room colors to all rectangles
         for rect in free_rects:
-            rect.lines_color = self.lines_color
+            rect.segments_color = self.segments_color
             rect.fill_color = self.fill_color
         self._free_rects = free_rects
         # Represent the new free rectangles in red color
-        colored_rects = [ rect.get_colored_rect(lines_color='red') for rect in free_rects ]
+        colored_rects = [ rect.get_colored_rect(segments_color='red') for rect in free_rects ]
         self.update_display(colored_rects)
         return free_rects
 
@@ -133,11 +133,11 @@ class Room:
             free_mrects = get_maximum_rectangles( self.free_rects )
         # Apply the current room colors to all rectangles
         for rect in free_mrects:
-            rect.lines_color = self.lines_color
+            rect.segments_color = self.segments_color
             rect.fill_color = self.fill_color
         self._free_mrects = free_mrects
         # Represent the new free maximum rectangles
-        colored_rects = [ rect.get_colored_rect(lines_color='blue') for rect in free_mrects ]
+        colored_rects = [ rect.get_colored_rect(segments_color='blue') for rect in free_mrects ]
         self.update_display(colored_rects)
         return free_mrects
 
@@ -218,8 +218,8 @@ class Room:
             for corner in room.perimeter.corners:
                 if point == corner:
                     return True
-            for line in room.perimeter.lines:
-                if point in line:
+            for segment in room.perimeter.segments:
+                if point in segment:
                     return True
         return False
 
@@ -269,8 +269,8 @@ class Room:
                     maximum_rect = Rect.from_corner(corner, x_space, self.max_size)
                 else:
                     maximum_rect = Rect.from_corner(corner, self.max_size, y_space)
-                return Perimeter(maximum_rect.get_lines())
-            return Perimeter(space.get_lines())
+                return Perimeter(maximum_rect.get_segments())
+            return Perimeter(space.get_segments())
         # Else, fit the room in the space
         # First of all create the 3 rule rectangle from the space
         # i.e. calculate the relation of areas and apply it to the square root to both x and y sizes
@@ -280,7 +280,7 @@ class Room:
         # If any of the new sizes is shorter than the maximum size then the rectangle is valid
         if new_x_size < self.max_size or new_y_size < self.max_size:
             maximum_rect = Rect.from_corner(corner, new_x_size, new_y_size)
-            return Perimeter(maximum_rect.get_lines())
+            return Perimeter(maximum_rect.get_segments())
         # If both new sizes are longer than the maximum size we must find another solution
         # The new rectangle will have the maximum size in one of its sides
         # Calculate the other side size
@@ -298,7 +298,7 @@ class Room:
             new_x_size = min(new_min_size, new_x_size)
             new_y_size = min(new_max_size, new_y_size)
         maximum_rect = Rect.from_corner(corner, new_x_size, new_y_size)
-        return Perimeter(maximum_rect.get_lines())
+        return Perimeter(maximum_rect.get_segments())
 
     # Search the surrounding rooms of the current room
     # Find the most suitable space for the current room to claim
@@ -308,15 +308,15 @@ class Room:
         # Find all surrounding rooms and their contact region
         parent_room = self.parent
         brother_rooms = [ room for room in parent.children if room is not self ]
-        for line in self.perimeter.lines:
+        for segment in self.perimeter.segments:
             pass
 
-    # Get all overlapped lines between the current room and others
+    # Get all overlapped segments between the current room and others
     def get_frontiers (self, other) -> list:
-        self_lines = self.perimeter.lines
-        other_lines = other.perimeter.lines
-        for self_line in self_lines:
-            for other_line in other_lines:
+        self_segments = self.perimeter.segments
+        other_segments = other.perimeter.segments
+        for self_segment in self_segments:
+            for other_segment in other_segments:
                 pass
 
     # Go uppwards in the hyerarchy until you reach the room which has no parent
@@ -326,7 +326,7 @@ class Room:
             root = root.parent
         return root
 
-    # Get all lines from this room and all children room perimeters
+    # Get all segments from this room and all children room perimeters
     def get_rooms_recuersive (self, only_children : bool = False):
         rooms = []
         if not only_children and self.perimeter:
@@ -335,8 +335,8 @@ class Room:
             rooms.append(room)
         return rooms
 
-    # Add a new frame in the display with the current lines of this room and its children
-    # Also an 'extra' argument may be passed with extra lines to be represented
+    # Add a new frame in the display with the current segments of this room and its children
+    # Also an 'extra' argument may be passed with extra segments to be represented
     def update_display (self, extra : list = []):
         # Find the root room
         root = self.get_root_room()

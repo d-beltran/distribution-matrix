@@ -160,24 +160,24 @@ class Vector:
             return True
         return False
 
-    # Find out if the line is totally horizontal
+    # Find out if the segment is totally horizontal
     def is_horizontal(self):
         if self.y == 0:
             return True
         return False
 
-    # Find out if the line is diagonal
+    # Find out if the segment is diagonal
     def is_diagonal(self):
         if self.is_vertical() or self.is_horizontal():
             return False
         return True
         
 # A segment defined by 2 coordinates (Points): 'a' and 'b'
-class Line:
+class Segment:
 
     def __init__(self, a : Point, b : Point, color : str = 'black'):
         if a == b:
-            raise NameError('ERROR: Inexistent line. Points "a" and "b" must be different: ' + str(a))
+            raise NameError('ERROR: Inexistent segment. Points "a" and "b" must be different: ' + str(a))
         self.a = a
         self.b = b
         self.color = color
@@ -205,15 +205,15 @@ class Line:
             return resolute(distance1 + distance2) == resolute(self.length)
         return False
 
-    # Find out if the line is totally vertical
+    # Find out if the segment is totally vertical
     def is_vertical(self):
         return self.vector.is_vertical()
 
-    # Find out if the line is totally horizontal
+    # Find out if the segment is totally horizontal
     def is_horizontal(self):
         return self.vector.is_horizontal()
 
-    # Find out if the line is diagonal
+    # Find out if the segment is diagonal
     def is_diagonal(self):
         if self.is_vertical() or self.is_horizontal():
             return False
@@ -229,82 +229,82 @@ class Line:
         sorted_points = sorted( sorted(points, key=sort_by_x), key=sort_by_y )
         return tuple(sorted_points)
 
-    # Create a new line identical to this line but with a specified color
-    def get_colored_line(self, color : str):
-        return Line(self.a, self.b, color)
+    # Create a new segment identical to this segment but with a specified color
+    def get_colored_segment(self, color : str):
+        return Segment(self.a, self.b, color)
 
-    # Check if another line has the same direction than this line
-    def same_direction_as (self, line) -> bool:
+    # Check if another segment has the same direction than this segment
+    def same_direction_as (self, segment) -> bool:
         nvector1 = self.vector.normalized()
-        nvector2 = line.vector.normalized()
+        nvector2 = segment.vector.normalized()
         return nvector1 == nvector2 or nvector1 == -nvector2
 
-    # Check if two lines form a corner
-    # i.e. only one of their points is the same and both lines have different direction
-    def makes_corner_with(self, line):
-        if self == line:
+    # Check if two segments form a corner
+    # i.e. only one of their points is the same and both segments have different direction
+    def makes_corner_with(self, segment):
+        if self == segment:
             return False
-        if self.same_direction_as(line):
+        if self.same_direction_as(segment):
             return False
-        return line.a == self.a or line.b == self.a or line.a == self.b or line.b == self.b
+        return segment.a == self.a or segment.b == self.a or segment.a == self.b or segment.b == self.b
 
     def split_at_points(self, points : List[Point]) -> list:
-        # Get only thouse points which are cutting the line
+        # Get only thouse points which are cutting the segment
         cutting_points = [ point for point in points if point in self and point != self.a and point != self.b ]
-        # If no points are cutting the line then return only the intact line
+        # If no points are cutting the segment then return only the intact segment
         if len(cutting_points) == 0:
             yield self
             return
-        # Sort points by distance with the line 'a' point
+        # Sort points by distance with the segment 'a' point
         def by_distance(point):
             return self.a.get_distance(point)
         sorted_points = sorted(cutting_points, key=by_distance)
-        # Nex create all possible lines with these points
+        # Nex create all possible segments with these points
         for a, b in pairwise([self.a, *sorted_points, self.b]):
-            yield Line(a, b)
+            yield Segment(a, b)
 
-    # Get the intersection point between two lines
-    # https://stackoverflow.com/questions/20677795/how-do-i-compute-the-intersection-point-of-two-lines
-    # The 'in_extremis' sets if the 'a' and 'b' points which define lines are considered
-    # in_extremis = 0 -> Intersections which are the 'extrem' point of any line are ignored
-    # in_extremis = 1 -> Intersections which are the 'extrem' point of only one of the lines are also considered
+    # Get the intersection point between two segments
+    # https://stackoverflow.com/questions/20677795/how-do-i-compute-the-intersection-point-of-two-segments
+    # The 'in_extremis' sets if the 'a' and 'b' points which define segments are considered
+    # in_extremis = 0 -> Intersections which are the 'extrem' point of any segment are ignored
+    # in_extremis = 1 -> Intersections which are the 'extrem' point of only one of the segments are also considered
     # in_extremis = 2 -> All interactions are considered
-    def get_intersection_point (self, line, in_extremis : int = 2) -> Optional[Point]:
-        xdiff = Vector(self.a.x - self.b.x, line.a.x - line.b.x)
-        ydiff = Vector(self.a.y - self.b.y, line.a.y - line.b.y)
+    def get_intersection_point (self, segment, in_extremis : int = 2) -> Optional[Point]:
+        xdiff = Vector(self.a.x - self.b.x, segment.a.x - segment.b.x)
+        ydiff = Vector(self.a.y - self.b.y, segment.a.y - segment.b.y)
 
         def det(a, b):
             return a.x * b.y - a.y * b.x
 
         div = det(xdiff, ydiff)
-        # Lines are paralel
+        # segments are paralel
         if div == 0:
             return None
 
-        d = Vector(det(self.a, self.b), det(line.a, line.b))
+        d = Vector(det(self.a, self.b), det(segment.a, segment.b))
         x = det(d, xdiff) / div
         y = det(d, ydiff) / div
         intersection_point = Point(x, y)
 
-        # WARNING: Till this point, we have taken lines as infinite lines, not segments
-        # WARNING: Two lines may not intersect, but this function will return the hipotetic intersection point if both lines where infinite
-        # Now we must verify that the intersection point is in both lines
-        if not intersection_point in self or not intersection_point in line:
+        # WARNING: Till this point, we have taken segments as infinite segments, not segments
+        # WARNING: Two segments may not intersect, but this function will return the hipotetic intersection point if both segments where infinite
+        # Now we must verify that the intersection point is in both segments
+        if not intersection_point in self or not intersection_point in segment:
             return None
 
-        # In case the 'in_extremis' argument is 0 check the intersection point to not be one of the 'a' or 'b' points from any line
-        if in_extremis == 0 and intersection_point in [ self.a, self.b, line.a, line.b ]:
+        # In case the 'in_extremis' argument is 0 check the intersection point to not be one of the 'a' or 'b' points from any segment
+        if in_extremis == 0 and intersection_point in [ self.a, self.b, segment.a, segment.b ]:
             return None
 
-         # In case the 'in_extremis' argument is 1 check the intersection point to not be one of the 'a' or 'b' points from both lines
-        if in_extremis == 1 and intersection_point in [ self.a, self.b ] and intersection_point in [ line.a, line.b ]:
+         # In case the 'in_extremis' argument is 1 check the intersection point to not be one of the 'a' or 'b' points from both segments
+        if in_extremis == 1 and intersection_point in [ self.a, self.b ] and intersection_point in [ segment.a, segment.b ]:
             return None
 
-        #print(str(self) + ' / ' + str(line) + ' -> ' + str(Point(x, y)))
+        #print(str(self) + ' / ' + str(segment) + ' -> ' + str(Point(x, y)))
         return Point(x, y)
 
-    # Get the overlap line between two lines
-    def get_overlap_line (self, line, in_extremis : int = 2) -> Optional[Point]:
+    # Get the overlap segment between two segments
+    def get_overlap_segment (self, segment, in_extremis : int = 2) -> Optional[Point]:
         pass
 
     # 
@@ -312,23 +312,23 @@ class Line:
 # A rectangular area defined by 2 coordinates (Points): 'max' and 'min'
 class Rect:
 
-    def __init__(self, pmin : Point, pmax : Point, lines_color : str = 'black', fill_color : str = 'white'):
+    def __init__(self, pmin : Point, pmax : Point, segments_color : str = 'black', fill_color : str = 'white'):
         self.pmin = pmin
         self.pmax = pmax
-        self.lines_color = lines_color
+        self.segments_color = segments_color
         self.fill_color = fill_color
-        self.lines = self.get_lines()
+        self.segments = self.get_segments()
         self._area = None
 
-    # Set the rect from lines
+    # Set the rect from segments
     # The new rect will contain all rects
     @classmethod
-    def from_lines(cls, lines : List[Line], lines_color : str = 'black', fill_color : str = 'white'):
-        # Check that there are at least 2 lines
-        if len(lines) < 2:
-            raise NameError('It is required at least 2 lines')
-        # Get all line points and find the minimum and maximum x and y values of all those points
-        points = [ point for line in lines for point in (line.a, line.b) ]
+    def from_segments(cls, segments : List[Segment], segments_color : str = 'black', fill_color : str = 'white'):
+        # Check that there are at least 2 segments
+        if len(segments) < 2:
+            raise NameError('It is required at least 2 segments')
+        # Get all segment points and find the minimum and maximum x and y values of all those points
+        points = [ point for segment in segments for point in (segment.a, segment.b) ]
         x_coords = [ point.x for point in points ]
         x_min = min(x_coords)
         x_max = max(x_coords)
@@ -341,30 +341,30 @@ class Rect:
         # Set pmin and pmax and build the rectange
         pmin = Point(x_min, y_min)
         pmax = Point(x_max, y_max)
-        return cls(pmin, pmax, lines_color, fill_color)
+        return cls(pmin, pmax, segments_color, fill_color)
 
-    # Set the rect from a corner (i.e. a point with 2 lines)
+    # Set the rect from a corner (i.e. a point with 2 segments)
     # Optionally you can ask for specific x and y sizes
-    # If no size is passed then the size of the original corner line is used
+    # If no size is passed then the size of the original corner segment is used
     @classmethod
-    def from_corner(cls, corner : Point, x_size = None, y_size = None, lines_color : str = 'black', fill_color : str = 'white'):
-        # Get the two lines from the corner
-        lines = corner.lines
-        directions = [ line.vector.normalized() for line in lines ]
-        # NEVER FORGET: The first direction is the 'entring' line so its vector points from away to the corner
-        # NEVER FORGET: The second direction is the 'exiting' line so its vector points from the corner to away
+    def from_corner(cls, corner : Point, x_size = None, y_size = None, segments_color : str = 'black', fill_color : str = 'white'):
+        # Get the two segments from the corner
+        segments = corner.segments
+        directions = [ segment.vector.normalized() for segment in segments ]
+        # NEVER FORGET: The first direction is the 'entring' segment so its vector points from away to the corner
+        # NEVER FORGET: The second direction is the 'exiting' segment so its vector points from the corner to away
         # We want both directions 'exiting', so we change the direction of the first vector
         directions[0] = -directions[0]
         # Find out which is the horizontal and which is the vertical direction
-        # If some of these steps fail it means there is no horizontal or/and vertical lines
+        # If some of these steps fail it means there is no horizontal or/and vertical segments
         hdir = next( d for d, direction in enumerate(directions) if direction.is_horizontal() )
         vdir = next( d for d, direction in enumerate(directions) if direction.is_vertical() )
-        # Finally set the rectangle lines
-        # If the size of any direction is forced then use the vector to build a new lines
-        # Otherwise use the original lines
-        hline = Line(corner, corner + directions[hdir] * x_size) if x_size else lines[hdir]
-        vline = Line(corner, corner + directions[vdir] * y_size) if y_size else lines[vdir]
-        return cls.from_lines([hline, vline], lines_color, fill_color)
+        # Finally set the rectangle segments
+        # If the size of any direction is forced then use the vector to build a new segments
+        # Otherwise use the original segments
+        hsegment = Segment(corner, corner + directions[hdir] * x_size) if x_size else segments[hdir]
+        vsegment = Segment(corner, corner + directions[vdir] * y_size) if y_size else segments[vdir]
+        return cls.from_segments([hsegment, vsegment], segments_color, fill_color)
 
     def __str__(self):
         return 'Min: ' + str(self.pmin) + ', Max: ' + str(self.pmax)
@@ -385,7 +385,7 @@ class Rect:
             in_x = other.x >= self.pmin.x and other.x <= self.pmax.x
             in_y = other.y >= self.pmin.y and other.y <= self.pmax.y
             return in_x and in_y
-        if isinstance(other, Line):
+        if isinstance(other, Segment):
             in_a = other.a in self
             in_b = other.b in self
             return in_a and in_b
@@ -409,31 +409,31 @@ class Rect:
         point4 = self.get_bottom_right_corner()
         return [ point1, point2, point3, point4 ]
 
-    # Return all rectangle lines in a 'perimeter-friendly' order
-    def get_lines(self):
+    # Return all rectangle segments in a 'perimeter-friendly' order
+    def get_segments(self):
         points = self.get_points()
-        lines = [ Line(a, b, self.lines_color) for a, b in pairwise(points, retro=True) ]
-        return lines
+        segments = [ Segment(a, b, self.segments_color) for a, b in pairwise(points, retro=True) ]
+        return segments
 
     # Return all rectangle points in a 'perimeter-friendly' order
-    # Each point contains its two adjacent liNes
+    # Each point contains its two adjacent segments
     def get_corners(self):
         points = self.get_points()
-        lines = [ Line(a,b) for a, b in pairwise(points, retro=True) ]
-        line_pairs = list(pairwise(lines, retro=True))
+        segments = [ Segment(a,b) for a, b in pairwise(points, retro=True) ]
+        segment_pairs = list(pairwise(segments, retro=True))
         # Place the last element as the first
-        line_pairs = [ line_pairs[-1] ] + line_pairs[0:-1]
+        segment_pairs = [ segment_pairs[-1] ] + segment_pairs[0:-1]
         for p, point in enumerate(points):
-            point.lines = line_pairs[p]
+            point.segments = segment_pairs[p]
         return points
 
-    # Return all rectangle lines in a 'perimeter-friendly' order
-    def get_crossing_line(self):
-        return Line(self.pmin, self.pmax, self.lines_color)
+    # Return all rectangle segments in a 'perimeter-friendly' order
+    def get_crossing_segment(self):
+        return Segment(self.pmin, self.pmax, self.segments_color)
 
     # Create a new rectangle identical to this rectangle but with a specified color
-    def get_colored_rect(self, lines_color : str = 'black', fill_color : str = 'white'):
-        return Rect(self.pmin, self.pmax, lines_color, fill_color)
+    def get_colored_rect(self, segments_color : str = 'black', fill_color : str = 'white'):
+        return Rect(self.pmin, self.pmax, segments_color, fill_color)
 
     # Calculate the rectangle area
     def get_size(self):
@@ -544,19 +544,19 @@ class Rect:
         rects = [ rect for rect in list(split) if rect != overlap ]
         return rects
 
-# A perimeter defined by several lines
+# A perimeter defined by several segments
 # The perimeter parameters must never be modified
 # Instead, a new perimeter must be created every time a perimeter needs to be modified
 class Perimeter:
 
-    def __init__(self, lines : list, lines_color = 'black', fill_color = 'white'):
-        self.lines = lines
-        self.lines_color = lines_color
+    def __init__(self, segments : list, segments_color = 'black', fill_color = 'white'):
+        self.segments = segments
+        self.segments_color = segments_color
         self.fill_color = fill_color
-        # Color at this moment all lines
-        for line in lines:
-            line.color = lines_color
-        # Check the perimeter is closed and lines are not diagonal
+        # Color at this moment all segments
+        for segment in segments:
+            segment.color = segments_color
+        # Check the perimeter is closed and segments are not diagonal
         self.check() 
         self._corners = None
         self._rects = None
@@ -570,16 +570,16 @@ class Perimeter:
         # Check that there are at least 4 points
         if len(corners) < 4:
             raise NameError('It is required at least 4 points')
-        # Set the line between each pair of points
-        lines = []
+        # Set the segment between each pair of points
+        segments = []
         for a,b in pairwise(corners, retro=True):
-            new_line = Line(a,b)
-            lines.append(new_line)
+            new_segment = Segment(a,b)
+            segments.append(new_segment)
         # Build the rectangle
-        return cls(lines)
+        return cls(segments)
 
     def __str__(self):
-        return ', '.join([str(line) for line in self.lines])
+        return ', '.join([str(segment) for segment in self.segments])
 
     def __contains__(self, other):
         if isinstance(other, Point):
@@ -587,12 +587,12 @@ class Perimeter:
                 if other in rect:
                     return True
             return False
-        if isinstance(other, Line):
+        if isinstance(other, Segment):
             in_a = other.a in self
-            cross_any_line = any([ other.get_intersection_point(line, in_extremis=0) for line in self.lines ])
-            return in_a and not cross_any_line
+            cross_any_segment = any([ other.get_intersection_point(segment, in_extremis=0) for segment in self.segments ])
+            return in_a and not cross_any_segment
         if isinstance(other, Rect):
-            return all([ line in self for line in other.get_lines() ])
+            return all([ segment in self for segment in other.get_segments() ])
         if isinstance(other, self.__class__):
             return all([ rect in self for rect in other.rects ])
         return False
@@ -655,10 +655,10 @@ class Perimeter:
     # The area is treated appart since it may be an expensive calculation
     area = property(get_area, None, None, "The area inside the perimeter")
 
-    # Check if the current lines create a closed perimeter or if it is open
+    # Check if the current segments create a closed perimeter or if it is open
     def is_closed(self):
-        # Check that each line ends in the same point that the next line starts
-        for current, nextone in pairwise(self.lines, retro=True):
+        # Check that each segment ends in the same point that the next segment starts
+        for current, nextone in pairwise(self.segments, retro=True):
             if current.b != nextone.a:
                 return False
         return True
@@ -667,28 +667,28 @@ class Perimeter:
     # Otherwise return an error, since not closed perimeters are not supported
     # DANI: En principio los perímetros no cerrados no tendrán soporte nunca porque no tienen mucho sentido o no les veo la utilidad
     # DANI: Esto es para el desarrollo. Una vez esté comprobado que los perímteros son estables quitaré esto porque retrasa el cálculo
-    # Check each perimeter line to not be diagonal
-    # Otherwise return an error, since perimeters with diagonal lines are not yet supported
+    # Check each perimeter segment to not be diagonal
+    # Otherwise return an error, since perimeters with diagonal segments are not yet supported
     # DANI: En principio algun día se podría hacer esto
     def check(self):
         if not self.is_closed():
             raise NameError('The perimeter is not closed')
-        for line in self.lines:
-            if line.is_diagonal():
-                raise NameError('The perimeter has diagonal lines')
+        for segment in self.segments:
+            if segment.is_diagonal():
+                raise NameError('The perimeter has diagonal segments')
 
     # Set the perimeter corners as points with additional stored values
-    # The 'lines' variable defines the two lines of the perimeter which form the corner itself
+    # The 'segments' variable defines the two segments of the perimeter which form the corner itself
     # The 'inside' variable defines if the corner is "pointing" to the inside of the perimeter
     # (e.g. rectangles have no inside corners while an 'L' has one inside corner)
     def set_corners(self):
-        # For each line, save the end point and if the direction of the next line is left
+        # For each segment, save the end point and if the direction of the next segment is left
         # Count how many corners are there in one direction (left in this case)
         precorners = []
         left_count = 0
-        for current, nextone in pairwise(self.lines, retro=True):
+        for current, nextone in pairwise(self.segments, retro=True):
             point = current.b
-            # Given two continue lines which inevitably form a corner, set if the second line goes "left" (true) or "right" (false) relative to the first line
+            # Given two continue segments which inevitably form a corner, set if the second segment goes "left" (true) or "right" (false) relative to the first segment
             # https://stackoverflow.com/questions/13221873/determining-if-one-2d-vector-is-to-the-right-or-left-of-another
             a = current.vector
             b = nextone.vector
@@ -713,10 +713,10 @@ class Perimeter:
         corners = []
         for precorner in precorners:
             point = precorner[0]
-            lines = precorner[1]
+            segments = precorner[1]
             lefted_corner = precorner[2]
             inside = lefted_corner != lefted_perimeter
-            point.lines = lines
+            point.segments = segments
             point.inside = inside
             corners.append(point)
         return corners
@@ -724,7 +724,7 @@ class Perimeter:
     # Get all perimeter points
     # DANI: Obsoleto
     def get_points(self):
-        return [ line.a for line in self.lines ]
+        return [ segment.a for segment in self.segments ]
 
     # Get a rectangle which contains the whole perimeter
     def get_box(self):
@@ -739,128 +739,128 @@ class Perimeter:
         pmax = Point(x_max, y_max)
         return Rect(pmin, pmax)
 
-    # Find out if a point is in the border of the perimeter (lines and corners)
+    # Find out if a point is in the border of the perimeter (segments and corners)
     def in_border(self, point : Point):
         for corner in self.corners:
             if point == corner:
                 return True
-        for line in self.lines:
-            if point in line:
+        for segment in self.segments:
+            if point in segment:
                 return True
         return False
 
-    # Return all points in the perimeter lines which intersect with a given line
-    # Points are sorted according to their distance with the 'a' point of the line (from less to more distance)
-    # WARNING: Intersection of paralel (overlapping) lines is not detected
-    # WARNING: If the origen point is in a corner/line it may return or not the origen as intersection point
+    # Return all points in the perimeter segments which intersect with a given segment
+    # Points are sorted according to their distance with the 'a' point of the segment (from less to more distance)
+    # WARNING: Intersection of paralel (overlapping) segments is not detected
+    # WARNING: If the origen point is in a corner/segment it may return or not the origen as intersection point
     # DANI: No se ha probado a fondo
     # DANI: Actualmente NO está en uso
-    def get_line_intersection_points(self, line : Line) -> Optional[list]:
-        # Get the intersection point of the specfied line with each perimeter limit
+    def get_segment_intersection_points(self, segment : Segment) -> Optional[list]:
+        # Get the intersection point of the specfied segment with each perimeter limit
         intersection_points = []
-        for limit in self.lines:
-            point = limit.get_intersection_point(line)
+        for limit in self.segments:
+            point = limit.get_intersection_point(segment)
             if point:
                 intersection_points.append(point)
-        # Find out also if the lines intersects any corner
+        # Find out also if the segments intersects any corner
         for corner in self.corners:
-            if corner in line:
+            if corner in segment:
                 intersection_points.append(corner)
         # If no points are found return None
         if len(intersection_points) == 0:
             return None
         # Sort the points
         def by_distance(point):
-            return line.a.get_distance(point)
+            return segment.a.get_distance(point)
         sorted_points = sorted(intersection_points, key=by_distance)
         return sorted_points
 
-    # Return all lines inside the perimeter which intersect with a given line
-    # Lines are sorted according to their distance with the 'a' point of the line (from less to more distance)
-    # WARNING: Intersection of paralel (overlapping) lines is not detected
+    # Return all segments inside the perimeter which intersect with a given segment
+    # segments are sorted according to their distance with the 'a' point of the segment (from less to more distance)
+    # WARNING: Intersection of paralel (overlapping) segments is not detected
     # DANI: No se ha probado
-    # DANI: No está acabado. No se contempla la posibilidad de que la linea que intersecta empieze dentro del perímetro
+    # DANI: No está acabado. No se contempla la posibilidad de que la segmenta que intersecta empieze dentro del perímetro
     # DANI: Actualmente NO está en uso
-    def get_line_intersection_lines(self, line : Line) -> Optional[list]:
+    def get_segment_intersection_segments(self, segment : Segment) -> Optional[list]:
         # Get the intersection points
-        sorted_points = self.get_line_intersection_points(line)
+        sorted_points = self.get_segment_intersection_points(segment)
         # If no points are found return None
         points_count = len(sorted_points)
         if points_count == 0:
             return None
-        # Create new lines with the intersecting points
-        intersecting_lines = []
+        # Create new segments with the intersecting points
+        intersecting_segments = []
         for a, b in pairwise(sorted_points):
-            intersecting_lines.append(Line(a,b))
-        # If the last intersecting point has no pair then use the line 'b' point a the end of the last intersecting line
+            intersecting_segments.append(Segment(a,b))
+        # If the last intersecting point has no pair then use the segment 'b' point a the end of the last intersecting segment
         if points_count % 2 == 1:
             last_intersection_point = sorted_points[-1]
-            last_line_point = line.b
-            last_intersection_line = Line(last_intersection_point, last_line_point)
-            intersecting_lines.append(last_intersection_line)
-        return intersecting_lines
+            last_segment_point = segment.b
+            last_intersection_segment = Segment(last_intersection_point, last_segment_point)
+            intersecting_segments.append(last_intersection_segment)
+        return intersecting_segments
 
     # Given a perimeter corner which is pointing inside,
-    # Create two lines opposed to the corner lines but as long as required to cut the perimeter at onther line or corner
-    # This two lines will always be inside the perimeter
-    def get_corner_insider_lines(self, corner : Point, limit_points : list = [], limit_lines : list = []) -> list:
+    # Create two segments opposed to the corner segments but as long as required to cut the perimeter at onther segment or corner
+    # This two segments will always be inside the perimeter
+    def get_corner_insider_segments(self, corner : Point, limit_points : list = [], limit_segments : list = []) -> list:
 
-        # Get the length of the most large possible line in the perimeter
-        max_length = self.get_box().get_crossing_line().length
+        # Get the length of the most large possible segment in the perimeter
+        max_length = self.get_box().get_crossing_segment().length
 
-        # Get the oppoiste lines to the corner lines but as long as the max_length
-        # NEVER FORGET: The corner point is the entry line 'b' point and the exit line 'a' point
-        entry_line, exit_line = corner.lines
-        tracing1 = Line(corner, corner + entry_line.vector.normalized() * max_length, color='green')
-        tracing2 = Line(corner, corner + (-exit_line.vector.normalized()) * max_length, color='green')
+        # Get the oppoiste segments to the corner segments but as long as the max_length
+        # NEVER FORGET: The corner point is the entry segment 'b' point and the exit segment 'a' point
+        entry_segment, exit_segment = corner.segments
+        tracing1 = Segment(corner, corner + entry_segment.vector.normalized() * max_length, color='green')
+        tracing2 = Segment(corner, corner + (-exit_segment.vector.normalized()) * max_length, color='green')
 
         # Set the limits if they were not passed
         if not limit_points or len(limit_points) == 0:
             limit_points = self.corners
-        if not limit_lines or len(limit_lines) == 0:
-            limit_lines = self.lines
+        if not limit_segments or len(limit_segments) == 0:
+            limit_segments = self.segments
 
-        insider_lines = []
-        for line in [tracing1, tracing2]:
+        insider_segments = []
+        for segment in [tracing1, tracing2]:
 
-            # Get the intersection point of the specfied line with each perimeter limit
+            # Get the intersection point of the specfied segment with each perimeter limit
             intersection_points = []
-            for limit_line in limit_lines:
-                # Skip the lines of the main corner
-                if limit_line in corner.lines:
+            for limit_segment in limit_segments:
+                # Skip the segments of the main corner
+                if limit_segment in corner.segments:
                     continue
-                point = limit_line.get_intersection_point(line)
+                point = limit_segment.get_intersection_point(segment)
                 if point:
-                    # Intersection point may be the corner even ignoring corner lines
-                    # This happens when one of the corner lines has been splited
+                    # Intersection point may be the corner even ignoring corner segments
+                    # This happens when one of the corner segments has been splited
                     if point == corner:
                         continue
                     intersection_points.append(point)
-            # Find out also if the line intersects any corner
+            # Find out also if the segment intersects any corner
             for limit_point in limit_points:
                 # Skip the main corner
                 if limit_point == corner:
                     continue
-                if limit_point in line:
+                if limit_point in segment:
                     intersection_points.append(limit_point)
 
             # There should be always at least 1 intersection
             if len(intersection_points) == 0:
-                raise NameError('An inside line has no intersection point: ' + str(line))
+                raise NameError('An inside segment has no intersection point: ' + str(segment))
 
             # Sort the points by distance
             def by_distance(point):
-                return line.a.get_distance(point)
+                return segment.a.get_distance(point)
             sorted_points = sorted(intersection_points, key=by_distance)
 
             # The closest point will be the first point
-            cut_point = sorted_points[0] # DANI: Me quedé aquí. Parece que una linea no corta, hay que chequear
+            cut_point = sorted_points[0] # DANI: Me quedé aquí. Parece que una segmenta no corta, hay que chequear
 
-            insider_line = Line(line.a, cut_point, color='red')
-            insider_lines.append(insider_line)
+            insider_segment = Segment(segment.a, cut_point, color='red')
+            insider_segments.append(insider_segment)
 
         #return [tracing1, tracing2]
-        return insider_lines
+        return insider_segments
 
     # Split the current perimeter in a list of rectangles
     # The exclusion perimeters are those perimeters inside the current perimeter which are not considered
@@ -891,36 +891,36 @@ class Perimeter:
             if count == 1:
                 limit_points.append(corner)
 
-        # Limit lines are both parent and children lines
-        limit_lines = []
+        # Limit segments are both parent and children segments
+        limit_segments = []
         for perimeter in limits:
-            limit_lines += perimeter.lines
+            limit_segments += perimeter.segments
 
         # WARNING: If there are no inside corners at this point it means our perimeter/s are made only by single rectangles
-        # However those rectangles may be formed by lines longer than the rectangle size, so they may require splitting
+        # However those rectangles may be formed by segments longer than the rectangle size, so they may require splitting
 
-        # Get all inside separator lines
+        # Get all inside separator segments
         inside_separators = []
         for corner in limit_points:
-            for line in self.get_corner_insider_lines(corner, limit_points, limit_lines):
-                inside_separators.append(line)
+            for segment in self.get_corner_insider_segments(corner, limit_points, limit_segments):
+                inside_separators.append(segment)
 
         # Remove duplicates
         inside_separators = list(set(inside_separators))
 
-        # Join all inside lines with the perimeter limits in a single list
-        # WARNING: inside lines MUST be before limit lines
-        all_lines = [ *inside_separators, *limit_lines ]
+        # Join all inside segments with the perimeter limits in a single list
+        # WARNING: inside segments MUST be before limit segments
+        all_segments = [ *inside_separators, *limit_segments ]
 
-        # DANI: Usa esto para ver los perímetros en negro y las lineas interiores en rojo
-        #add_frame(all_lines)
+        # DANI: Usa esto para ver los perímetros en negro y las segmentas interiores en rojo
+        #add_frame(all_segments)
 
-        # Find all points where the inside separator lines intersect each other
+        # Find all points where the inside separator segments intersect each other
         all_intersections = []
-        for line1, line2 in itertools.combinations(all_lines, 2):
-            # All inside corners would be found as intersection points, since their 2 lines intersect
+        for segment1, segment2 in itertools.combinations(all_segments, 2):
+            # All inside corners would be found as intersection points, since their 2 segments intersect
             # For this reason, we set 'in_extremis' as false
-            intersection = line1.get_intersection_point(line2)
+            intersection = segment1.get_intersection_point(segment2)
             if not intersection:
                 continue
             all_intersections.append(intersection)
@@ -928,36 +928,36 @@ class Perimeter:
         # Remove duplicates
         all_intersections = list(set(all_intersections))
 
-        # Split the inside separator lines at the intersection points
-        all_splitted_lines = []
-        for line in all_lines:
-            splitted_lines = line.split_at_points(all_intersections)
-            all_splitted_lines += list(splitted_lines)
-        #print('All lines: ' + str(len(all_splitted_lines)))
+        # Split the inside separator segments at the intersection points
+        all_splitted_segments = []
+        for segment in all_segments:
+            splitted_segments = segment.split_at_points(all_intersections)
+            all_splitted_segments += list(splitted_segments)
+        #print('All segments: ' + str(len(all_splitted_segments)))
 
-        # Finally, for each line, try to find 2 rectangles
-        # Each line will be connected to exactly 1 or 2 rectangles
+        # Finally, for each segment, try to find 2 rectangles
+        # Each segment will be connected to exactly 1 or 2 rectangles
         final_rectangles = []
-        for line in all_splitted_lines:
-            this_line_rects = [] # Max 2
+        for segment in all_splitted_segments:
+            this_segment_rects = [] # Max 2
             count = 0
-            for other_line in all_splitted_lines:
-                # If 2 lines are connected making a corner there may be a rectangle
-                if line.makes_corner_with(other_line):
-                    # Create the rect that the two previous lines would make
-                    new_rect = Rect.from_lines([ line, other_line ])
-                    # Must check that the other 2 lines which would complete the rectangle do exist
-                    other_lines = [ rect_line for rect_line in new_rect.lines if rect_line not in [ line, other_line ] ]
-                    if other_lines[0] not in all_splitted_lines or other_lines[1] not in all_splitted_lines:
+            for other_segment in all_splitted_segments:
+                # If 2 segments are connected making a corner there may be a rectangle
+                if segment.makes_corner_with(other_segment):
+                    # Create the rect that the two previous segments would make
+                    new_rect = Rect.from_segments([ segment, other_segment ])
+                    # Must check that the other 2 segments which would complete the rectangle do exist
+                    other_segments = [ rect_segment for rect_segment in new_rect.segments if rect_segment not in [ segment, other_segment ] ]
+                    if other_segments[0] not in all_splitted_segments or other_segments[1] not in all_splitted_segments:
                         continue
-                    if new_rect not in this_line_rects:
-                        #print(str(line) + ' / ' + str(other_line) + ' -> ' + str(count) + ': ' + str(new_rect))
+                    if new_rect not in this_segment_rects:
+                        #print(str(segment) + ' / ' + str(other_segment) + ' -> ' + str(count) + ': ' + str(new_rect))
                         count += 1
-                        this_line_rects.append(new_rect)
+                        this_segment_rects.append(new_rect)
                     if count == 2:
                         break
-            #print(str(line) + ' -> ' + str(this_line_rects[0]) + ' / ' + str(this_line_rects[1]))
-            final_rectangles += this_line_rects
+            #print(str(segment) + ' -> ' + str(this_segment_rects[0]) + ' / ' + str(this_segment_rects[1]))
+            final_rectangles += this_segment_rects
 
         # Remove duplicates
         final_rectangles = list(set(final_rectangles))
