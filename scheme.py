@@ -315,9 +315,13 @@ class Room:
     def get_frontiers (self, other) -> list:
         self_segments = self.perimeter.segments
         other_segments = other.perimeter.segments
+        overlap_segments = []
         for self_segment in self_segments:
             for other_segment in other_segments:
-                pass
+                overlap_segment = self_segment.get_overlap_segment(other_segment)
+                if overlap_segment:
+                    overlap_segments.append(overlap_segment)
+        return overlap_segments
 
     # Go uppwards in the hyerarchy until you reach the room which has no parent
     def get_root_room (self):

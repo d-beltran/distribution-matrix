@@ -2,99 +2,8 @@ from vectorial_base import *
 from scheme import *
 from scheme_display import setup_display
 
-# Represent current rooms tagged as display = True
-# DANI: Es posible que esto falle en windows
-#setup_display()
-        
-# INPUTS ------------------------------------------------------------
-
-corners0 = [
-    Point(-60,-60),
-    Point(-60,+60),
-    Point(+60,+60),
-    Point(+60,-40),
-    Point(+20,-40),
-    Point(+20,-60)
-]
-
-corners1 = [
-    Point(-60,-60),
-    Point(-60,+40),
-    Point(-40,+40),
-    Point(-40,+60),
-    Point(+60,+60),
-    Point(+60,-40),
-    Point(+20,-40),
-    Point(+20,-60)
-]
-
-corners2 = [
-    Point(-60,-60),
-    Point(-60,+20),
-    Point(-20,+20),
-    Point(-20,+60),
-    Point(+20,+60),
-    Point(+20,-20),
-    Point(+60,-20),
-    Point(+60,-60),
-]
-
-corners3 = [
-    Point(-60,-20),
-    Point(-60,+20),
-    Point(-40,+20),
-    Point(-40,+40),
-    Point(-20,+40),
-    Point(-20,+60),
-    Point(+20,+60),
-    Point(+20,+40),
-    Point(+40,+40),
-    Point(+40,+20),
-    Point(+60,+20),
-    Point(+60,-20),
-    Point(+40,-20),
-    Point(+40,-40),
-    Point(+20,-40),
-    Point(+20,-60),
-    Point(-20,-60),
-    Point(-20,-40),
-    Point(-40,-40),
-    Point(-40,-20),
-]
-
-corners4 = [
-    Point(-60,-60),
-    Point(-60,+60),
-    Point(-20,+60),
-    Point(-20,-20),
-    Point(+20,-20),
-    Point(+20,+20),
-    Point(+60,+20),
-    Point(+60,-60),
-]
-
-corners5 = [
-    Point(-40,-40),
-    Point(-40,+0),
-    Point(0,0),
-    Point(0,-40),
-]
-
-corners6 = [
-    Point(-80,-80),
-    Point(-80,-40),
-    Point(-40,-40),
-    Point(-40,-80),
-]
-
-#door = Point(-60,0),
-#parentRoom = Room('pasillo', 0.1, 15, maxWidth=15, priorizeBorder=-1, childRooms=[
-#    room('comedor', 0.25, 30),
-#    room('cocina', 0.15, 30),
-#    room('habitacion1', 0.2, 30),
-#    room('habitacion2', 0.2, 30),
-#    room('baño', 0.1, 20),
-
+# Import some predefined test perimeters
+from test_perimeters import *
 
 # This segment is for windows to dont loop
 if __name__ == '__main__':
@@ -103,12 +12,12 @@ if __name__ == '__main__':
     setup_display()
 
     distribution = Room(
-        perimeter=Perimeter.from_corners(corners3),
+        perimeter=Perimeter.from_corners(test_perimeter_4),
         display=True,
         name='Planta',
         children=[
             Room(
-                #perimeter=Perimeter.from_corners(corners5),
+                #perimeter=Perimeter.from_corners(test_perimeter_6),
                 forced_area=3600,
                 min_size=15,
                 name='Comedor',

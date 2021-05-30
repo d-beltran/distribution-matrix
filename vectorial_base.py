@@ -171,6 +171,66 @@ class Vector:
         if self.is_vertical() or self.is_horizontal():
             return False
         return True
+
+# A line defined by a slope and an intercept
+class Line:
+
+    def __init__(self, slope : number, y_intercept : number, x_intercept : number = None):
+        self.slope = slope
+        self.y_intercept = y_intercept
+        self.x_intercept = x_intercept
+        self.vector = self.get_vector()
+
+    # Set the line from the x intercept in case it is a vertical line
+    @classmethod
+    def vertical(cls, x_intercept : number):
+        return cls(None, None, x_intercept)
+
+    def __str__(self):
+        if self.is_vertical():
+            return 'x = ' + str(self.x_intercept)
+        else:
+            return 'y = ' + str(self.slope) + 'x + ' + str(self.y_intercept)
+
+    def __repr__(self):
+        if self.is_vertical():
+            return 'x = ' + str(self.x_intercept)
+        else:
+            return 'y = ' + str(self.slope) + 'x + ' + str(self.y_intercept)
+
+    def __eq__(self, other):
+        if isinstance(other, self.__class__):
+            return self.slope == other.slope and self.y_intercept == other.y_intercept and self.x_intercept == other.x_intercept
+        return False
+
+    def __contains__(self, other):
+        if isinstance(other, Segment):
+            return other.get_line() == self
+        return False
+
+    # Get the vector from the line
+    def get_vector(self):
+        if self.is_vertical():
+            normalized_vector = Vector(0,1)
+        else:
+            y, x = self.slope.as_integer_ratio()
+            vector = Vector(x,y)
+            normalized_vector = vector.normalized()
+        return normalized_vector
+
+    # Find out if the segment is totally vertical
+    def is_vertical(self):
+        return self.slope == None
+
+    # Find out if the segment is totally horizontal
+    def is_horizontal(self):
+        return self.slope == 0
+
+    # Find out if the segment is diagonal
+    def is_diagonal(self):
+        if self.is_vertical() or self.is_horizontal():
+            return False
+        return True
         
 # A segment defined by 2 coordinates (Points): 'a' and 'b'
 class Segment:
@@ -228,6 +288,17 @@ class Segment:
         points = [self.a, self.b]
         sorted_points = sorted( sorted(points, key=sort_by_x), key=sort_by_y )
         return tuple(sorted_points)
+
+    # Get the segment line by finding the slope and the y intercept or the x intercept in case it is a vertical line
+    def get_line(self):
+        x_diff = self.b.x - self.a.x
+        if x_diff == 0:
+            x_intercept = self.a.x
+            return Line.vertical(x_intercept)
+        y_diff = self.b.y - self.a.y
+        slope = y_diff / x_diff
+        y_intercept = self.a.y - slope * self.a.x
+        return Line(slope, y_intercept)
 
     # Create a new segment identical to this segment but with a specified color
     def get_colored_segment(self, color : str):
@@ -304,10 +375,36 @@ class Segment:
         return Point(x, y)
 
     # Get the overlap segment between two segments
-    def get_overlap_segment (self, segment, in_extremis : int = 2) -> Optional[Point]:
-        pass
-
-    # 
+    # WARNING: This function will return None if segments are not in the same line
+    def get_overlap_segment (self, other) -> Optional['Segment']:
+        # If both segments are not in the same line then there is no overlap
+        if self.get_line() != other.get_line():
+            return None
+        # Otherwise, order the segment points and check they alternate
+        self_points = [self.a, self.b]
+        other_points = [other.a, other.b]
+        points = list(set(self_points + other_points))
+        def sort_by_x(point):
+            return point.x
+        def sort_by_y(point):
+            return point.y
+        sorted_points = sorted( sorted( points, key=sort_by_x, reverse=True ), key=sort_by_y, reverse=True)
+        # Track from which point both lines are in, if any
+        # If both lines are in from 1 point then the overlap segment goes from this point to the next
+        in_self = False
+        in_other = False
+        first_point = None
+        for point in sorted_points:
+            if point in self_points:
+                in_self = not in_self
+            if point in other_points:
+                in_other = not in_other
+            if first_point:
+                return Segment(first_point, point)
+            if in_self and in_other:
+                first_point = point
+        # If segments do not overlap at any moment then return None
+        return None
 
 # A rectangular area defined by 2 coordinates (Points): 'max' and 'min'
 class Rect:
