@@ -306,10 +306,19 @@ class Room:
     # If not, find a neighbour room which is able to expand and use its space
     def expand_room ():
         # Find all surrounding rooms and their contact region
+        # The parent limits are not allowed for expansion
         parent_room = self.parent
+        restricted_frontiers = self.get_frontiers(parent_room)
+        # Other rooms inside the same parent may be displaced if there is no free space available
         brother_rooms = [ room for room in parent.children if room is not self ]
-        for segment in self.perimeter.segments:
-            pass
+        conflict_frontiers = []
+        for room in brother_rooms:
+            frontiers = self.get_frontiers(room)
+            if frontiers:
+                conflict_frontiers.append(frontiers)
+        # The prefered limits to expand are those connected to free space inside the current parent
+
+
 
     # Get all overlapped segments between the current room and others
     def get_frontiers (self, other) -> list:

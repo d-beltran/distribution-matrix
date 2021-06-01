@@ -151,8 +151,16 @@ class Vector:
         magnitude = self.get_magnitude()
         return self / magnitude
 
-    def get_direction(self) -> number:
-        return sqrt( self.x**2 + self.y**2 )
+    # Remove sense
+    # Two vectors with same direction but opposite sense will return the same 'non sense' vector
+    def non_sense(self) -> 'Vector':
+        x = self.x
+        y = self.y
+        if (x >= 0) == (y >= 0):
+            return Vector(x, y)
+        else:
+            return Vector(x, -y)
+        return 
 
     # Find out if the vector is totally vertical
     def is_vertical(self):
@@ -172,35 +180,29 @@ class Vector:
             return False
         return True
 
-# A line defined by a slope and an intercept
+# A line defined by a point and a directional vector
 class Line:
 
-    def __init__(self, slope : number, y_intercept : number, x_intercept : number = None):
-        self.slope = slope
-        self.y_intercept = y_intercept
-        self.x_intercept = x_intercept
-        self.vector = self.get_vector()
-
-    # Set the line from the x intercept in case it is a vertical line
-    @classmethod
-    def vertical(cls, x_intercept : number):
-        return cls(None, None, x_intercept)
+    def __init__(self, point : Point, direction : Vector):
+        self.point = point
+        self.direction = direction
 
     def __str__(self):
-        if self.is_vertical():
-            return 'x = ' + str(self.x_intercept)
-        else:
-            return 'y = ' + str(self.slope) + 'x + ' + str(self.y_intercept)
+        return 'x,y = ' + str(self.point) + ' + t' + str(self.direction)
 
     def __repr__(self):
-        if self.is_vertical():
-            return 'x = ' + str(self.x_intercept)
-        else:
-            return 'y = ' + str(self.slope) + 'x + ' + str(self.y_intercept)
+        return 'x,y = ' + str(self.point) + ' + t' + str(self.direction)
 
+    # In order to compare lines we must use the slope and the y intercept
+    # This is because lines with different points and vectors may be the same line
     def __eq__(self, other):
         if isinstance(other, self.__class__):
-            return self.slope == other.slope and self.y_intercept == other.y_intercept and self.x_intercept == other.x_intercept
+            normalized_self = self.normalized()
+            normalized_other = other.normalized()
+            same_point = normalized_self.point == normalized_other.point
+            # WARNING: Compare the direction of the vector, since the sense of the vector does not matter
+            same_direction = normalized_self.direction.non_sense() == normalized_other.direction.non_sense()
+            return same_point and same_direction
         return False
 
     def __contains__(self, other):
@@ -208,23 +210,58 @@ class Line:
             return other.get_line() == self
         return False
 
+    # Modify the point and the directional vector to a normalized value
+    # Equal lines will return identical point and directional vectors
+    # The normalized point is the y intercept (or the x intercept in case it is a vertical line)
+    # The normalized direction vector is just the normalized vector
+    def normalized(self):
+        normalized_position = Point(0, self.get_y_intercept()) if not self.is_vertical() else Point(self.get_x_intercept(), 0)
+        normalized_direction = self.direction.normalized()
+        return Line(normalized_position, normalized_direction)   
+
     # Get the vector from the line
-    def get_vector(self):
-        if self.is_vertical():
-            normalized_vector = Vector(0,1)
-        else:
-            y, x = self.slope.as_integer_ratio()
-            vector = Vector(x,y)
-            normalized_vector = vector.normalized()
-        return normalized_vector
+    # Return None in case the line is vertical
+    def get_slope(self) -> int:
+        direction = self.direction
+        if direction.x == 0:
+            return None
+        return direction.y / direction.x
+
+    # NEVER FORGET: Obtener el vector (x,y) a partir del slope sería así
+    # y, x = slope.as_integer_ratio()
+
+    # Get the line y intercept
+    # i.e. the y coordinate from the point in the vertical line x = 0 where this line cuts
+    # Return None in case the line is vertical
+    def get_y_intercept(self) -> int:
+        slope = self.get_slope()
+        if slope == None:
+            return None
+        point = self.point
+        y_intercept = point.y - slope * point.x
+        return y_intercept
+
+    # Get the line x intercept
+    # i.e. the x coordinate from the point in the horizontal line y = 0 where this line cuts
+    # Return None in case the line is horizontal
+    def get_x_intercept(self) -> int:
+        slope = self.get_slope()
+        if slope == 0:
+            return None
+        point = self.point
+        if slope == None:
+            return point.x
+        y_intercept = self.get_y_intercept()
+        x_intercept = - y_intercept / slope
+        return x_intercept
 
     # Find out if the segment is totally vertical
     def is_vertical(self):
-        return self.slope == None
+        return self.direction.is_vertical()
 
     # Find out if the segment is totally horizontal
     def is_horizontal(self):
-        return self.slope == 0
+        return self.direction.is_horizontal()
 
     # Find out if the segment is diagonal
     def is_diagonal(self):
@@ -289,16 +326,9 @@ class Segment:
         sorted_points = sorted( sorted(points, key=sort_by_x), key=sort_by_y )
         return tuple(sorted_points)
 
-    # Get the segment line by finding the slope and the y intercept or the x intercept in case it is a vertical line
+    # Get the segment line by using the point 'a' as the line point
     def get_line(self):
-        x_diff = self.b.x - self.a.x
-        if x_diff == 0:
-            x_intercept = self.a.x
-            return Line.vertical(x_intercept)
-        y_diff = self.b.y - self.a.y
-        slope = y_diff / x_diff
-        y_intercept = self.a.y - slope * self.a.x
-        return Line(slope, y_intercept)
+        return Line(self.a, self.vector)
 
     # Create a new segment identical to this segment but with a specified color
     def get_colored_segment(self, color : str):
