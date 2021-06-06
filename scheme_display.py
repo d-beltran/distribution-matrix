@@ -67,8 +67,8 @@ def represent (queue):
 
         # Draw all rect areas
         for rect in rects:
-            pulc = rect.get_upper_left_corner()
-            pbrc = rect.get_bottom_right_corner()
+            pulc = rect.get_upper_left_point()
+            pbrc = rect.get_bottom_right_point()
             xs = [rect.pmin.x, pulc.x, rect.pmax.x, pbrc.x]
             ys = [rect.pmin.y, pulc.y, rect.pmax.y, pbrc.y]
             # WARNING: Use 'facecolor' instead of 'color' to hide separation segments between fills

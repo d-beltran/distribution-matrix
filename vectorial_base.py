@@ -44,6 +44,8 @@ class Point:
         # Save the coordinates in Decimal format applying the precision limit
         self.x = resolute(x)
         self.y = resolute(y)
+        # Save both coordinates as a tuple
+        self.coords = self.x, self.y
 
     def __str__(self):
         return '(x: ' + str(self.x) + ', y: ' + str(self.y) + ')'
@@ -52,7 +54,8 @@ class Point:
         return '(x: ' + str(self.x) + ', y: ' + str(self.y) + ')'
 
     def __eq__(self, other):
-        if isinstance(other, self.__class__):
+        # We also check if the instance belongs to parent classes since this function is inherited by Corner
+        if isinstance(other, (self.__class__, *type(self).__bases__)):
             return self.x == other.x and self.y == other.y
         return False
 
@@ -333,12 +336,17 @@ class Segment(Line):
     def get_colored_segment(self, color : str):
         return Segment(self.a, self.b, color)
 
+    # Check if two segments have a point in common
+    # WARNING: They may be overlapped
+    def is_connected_with(self, other : 'Segment') -> bool:
+        return other.a == self.a or other.b == self.a or other.a == self.b or other.b == self.b
+
     # Check if two segments form a corner
-    # i.e. only one of their points is the same and both segments are not paralel
-    def makes_corner_with(self, segment) -> bool:
-        if self.is_paralel_to(segment):
+    # i.e. they have a point in common and both segments are not paralel
+    def makes_corner_with(self, other : 'Segment') -> bool:
+        if self.is_paralel_to(other):
             return False
-        return segment.a == self.a or segment.b == self.a or segment.a == self.b or segment.b == self.b
+        return self.is_connected_with(other)
 
     def split_at_points(self, points : List[Point]) -> list:
         # Get only thouse points which are cutting the segment
@@ -462,6 +470,22 @@ class Segment(Line):
                 first_point = point
         return result_segments
 
+# A corner is a point where 2 non-paralel segments are connected
+# i.e. both segments have this point ('a' or 'b') in common
+# IMPORTANT: It is a standard that the first segment enters the corner while the second exits the corner
+# i.e. first segment is 'a' -> (corner) and second segment is (corner) -> 'b'
+# The inside argument is refered to if this corner points towards the 'inside' of the perimeter which belongs
+class Corner(Point):
+
+    def __init__(self, x : number, y : number, in_segment : Segment, out_segment : Segment, inside : bool = None):
+        super().__init__(x, y)
+        self.in_segment = in_segment
+        self.out_segment = out_segment
+        # Save also both segments as a tupleZ
+        self.segments = self.in_segment, self.out_segment
+        self.inside = inside
+
+
 # A rectangular area defined by 2 coordinates (Points): 'max' and 'min'
 class Rect:
 
@@ -490,6 +514,7 @@ class Rect:
         y_max = max(y_coords)
         # If any minimum and maximum values match then the rectangle has no area
         if x_min == x_max or y_min == y_max:
+            print(segments)
             raise NameError('The rectangle has no area')
         # Set pmin and pmax and build the rectange
         pmin = Point(x_min, y_min)
@@ -500,7 +525,7 @@ class Rect:
     # Optionally you can ask for specific x and y sizes
     # If no size is passed then the size of the original corner segment is used
     @classmethod
-    def from_corner(cls, corner : Point, x_size = None, y_size = None, segments_color : str = 'black', fill_color : str = 'white'):
+    def from_corner(cls, corner : Corner, x_size = None, y_size = None, segments_color : str = 'black', fill_color : str = 'white'):
         # Get the two segments from the corner
         segments = corner.segments
         directions = [ segment.vector.normalized() for segment in segments ]
@@ -548,18 +573,18 @@ class Rect:
             return in_pmin and in_pmax
         return False
 
-    # Get rectangle corners appart from pmin and pmax
-    def get_upper_left_corner (self) -> Point:
+    # Get rectangle points appart from pmin and pmax
+    def get_upper_left_point (self) -> Point:
         return Point(self.pmin.x, self.pmax.y)
-    def get_bottom_right_corner (self) -> Point:
+    def get_bottom_right_point (self) -> Point:
         return Point(self.pmax.x, self.pmin.y)
 
     # Return all rectangle points in a 'perimeter-friendly' order
     def get_points(self) -> list:
         point1 = self.pmin
-        point2 = self.get_upper_left_corner()
+        point2 = self.get_upper_left_point()
         point3 = self.pmax
-        point4 = self.get_bottom_right_corner()
+        point4 = self.get_bottom_right_point()
         return [ point1, point2, point3, point4 ]
 
     # Return all rectangle segments in a 'perimeter-friendly' order
@@ -576,9 +601,12 @@ class Rect:
         segment_pairs = list(pairwise(segments, retro=True))
         # Place the last element as the first
         segment_pairs = [ segment_pairs[-1] ] + segment_pairs[0:-1]
+        corners = []
         for p, point in enumerate(points):
-            point.segments = segment_pairs[p]
-        return points
+            corner = Corner(*point.coords, *segment_pairs[p])
+            corners.append(corner)
+            #point.segments = segment_pairs[p]
+        return corners
 
     # Return all rectangle segments in a 'perimeter-friendly' order
     def get_crossing_segment(self) -> Segment:
@@ -719,7 +747,7 @@ class Perimeter:
     # Set the perimeter from its corners
     # The new rect will contain all rects
     @classmethod
-    def from_corners(cls, corners : List[Point]):
+    def from_corners(cls, corners : List[Corner]):
         # Check that there are at least 4 points
         if len(corners) < 4:
             raise NameError('It is required at least 4 points')
@@ -865,13 +893,10 @@ class Perimeter:
         # Corners with the minoritarian direction will be set as 'inside = True'
         corners = []
         for precorner in precorners:
-            point = precorner[0]
-            segments = precorner[1]
-            lefted_corner = precorner[2]
+            point, segments, lefted_corner = precorner
             inside = lefted_corner != lefted_perimeter
-            point.segments = segments
-            point.inside = inside
-            corners.append(point)
+            corner = Corner(*point.coords, *segments, inside)
+            corners.append(corner)
         return corners
 
     # Get all perimeter points
@@ -956,7 +981,7 @@ class Perimeter:
     # Given a perimeter corner which is pointing inside,
     # Create two segments opposed to the corner segments but as long as required to cut the perimeter at onther segment or corner
     # This two segments will always be inside the perimeter
-    def get_corner_insider_segments(self, corner : Point, limit_points : list = [], limit_segments : list = []) -> list:
+    def get_corner_insider_segments(self, corner : Corner, limit_points : list = [], limit_segments : list = []) -> list:
 
         # Get the length of the most large possible segment in the perimeter
         max_length = self.get_box().get_crossing_segment().length
@@ -1021,10 +1046,10 @@ class Perimeter:
     def split_in_rectangles(self, exclusion_perimeters : list = []) -> list:
 
         # Inside corners are the parent perimeter inside corners and the children perimeters outside corners
-        parent_inside_corners = [ corner for corner in self.corners if corner.inside ]
+        parent_inside_corners = [ corner for corner in self.corners if corner.inside == True ]
         children_inside_corners = []
         for perimeter in exclusion_perimeters:
-            child_inside_corners = [ corner for corner in perimeter.corners if not corner.inside ]
+            child_inside_corners = [ corner for corner in perimeter.corners if corner.inside == False ]
             children_inside_corners += child_inside_corners
         inside_corners = parent_inside_corners + children_inside_corners
 
@@ -1160,25 +1185,25 @@ def get_maximum_rectangles(splitted_rects : list = []) -> list:
 
     # First, some functions are defined to find colliding rects
     def get_left_rect (rect : Rect):
-        pmax = rect.get_upper_left_corner()
+        pmax = rect.get_upper_left_point()
         for r in splitted_rects:
             if r.pmax == pmax:
                 return r
         return None
     def get_right_rect (rect : Rect):
-        pmin = rect.get_bottom_right_corner()
+        pmin = rect.get_bottom_right_point()
         for r in splitted_rects:
             if r.pmin == pmin:
                 return r
         return None
     def get_upper_rect (rect : Rect):
-        pmin = rect.get_upper_left_corner()
+        pmin = rect.get_upper_left_point()
         for r in splitted_rects:
             if r.pmin == pmin:
                 return r
         return None
     def get_bottom_rect (rect : Rect):
-        pmax = rect.get_bottom_right_corner()
+        pmax = rect.get_bottom_right_point()
         for r in splitted_rects:
             if r.pmax == pmax:
                 return r
