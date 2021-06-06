@@ -316,10 +316,12 @@ class Segment(Line):
         return hash(self.get_hash())
 
     def __contains__(self, other):
-        if hasattr(other, 'x') and hasattr(other, 'y'):
+        if isinstance(other, Point):
             distance1 = self.a.get_distance_to(other)
             distance2 = self.b.get_distance_to(other)
             return resolute(distance1 + distance2) == resolute(self.length)
+        if isinstance(other, self.__class__):
+            return other.a in self and other.b in self
         return False
 
     # Get a value which is always the same no matter the order of a and b
@@ -484,6 +486,24 @@ class Corner(Point):
         # Save also both segments as a tupleZ
         self.segments = self.in_segment, self.out_segment
         self.inside = inside
+
+    # Find out if this corner is connected with other corner
+    # i.e. it is in the same point and shares 1 (and only 1) of their segment directions
+    # DANI: No es correcto -> Las direcciones podrían ser iguales en segmentos no solapados
+    def is_connected_with(self, other):
+        if other != self:
+            return False
+        self_directions = [ segment.vector.normalized() for segment in self.segments ]
+        other_directions = [ segment.vector.normalized() for segment in other.segments ]
+        self_different = [ direction for direction in self_directions if direction not in other_directions ]
+        if len(self_different) != 1:
+            return False
+        return True
+
+    # Find out if this corner is continuous with other corner
+    # Is so, return the merge of both continuous segments
+    def get_continuous_segment_with(self, other):
+        return None
 
 
 # A rectangular area defined by 2 coordinates (Points): 'max' and 'min'
@@ -918,7 +938,7 @@ class Perimeter:
         return Rect(pmin, pmax)
 
     # Find out if a point is in the border of the perimeter (segments and corners)
-    def in_border(self, point : Point):
+    def in_border(self, point : Point) -> bool:
         for corner in self.corners:
             if point == corner:
                 return True
@@ -926,6 +946,16 @@ class Perimeter:
             if point in segment:
                 return True
         return False
+
+    # Get a specific perimeter corner or segment by specifying a point that matches this element
+    def get_border_element (self, point : Point):
+        for corner in self.corners:
+            if point == corner:
+                return corner
+        for segment in self.segments:
+            if point in segment:
+                return segment
+        return None
 
     # Return all points in the perimeter segments which intersect with a given segment
     # Points are sorted according to their distance with the 'a' point of the segment (from less to more distance)
@@ -1056,21 +1086,30 @@ class Perimeter:
         # Limits are the current perimeter and all exclusion perimeters
         limits = [ self, *exclusion_perimeters ]
 
-        # Limit points are 'inside corners' which are not overlapped with child perimeters
+        # Limit points are 'inside corners' which are not overlapped with any other perimeters
         limit_points = []
-        for corner in inside_corners:
-            count = 0
-            for perimeter in limits:
-                if perimeter.in_border(corner):
-                    count += 1
-                    if count > 1:
-                        break
-            # If this corner was found in more than 1 perimeter then skip it
-            if count == 1:
-                limit_points.append(corner)
-
         # Limit segments are both parent and children segments
         limit_segments = []
+        for corner in inside_corners:
+            count = 0
+            overlapped_corners = []
+            for perimeter in limits:
+                element = perimeter.get_border_element(corner)
+                if element:
+                    count += 1
+                    # In case it is a corner
+                    if type(element) == Corner:
+                        overlapped_corners.append(element)
+            # Include this corner only if after all searches it was found only 1 time
+            if count == 1:
+                limit_points.append(corner)
+            # In case there are overlapped corners check if they are continuous corners (explained in Corner class)
+            # If so, merge their continuous segments and append it to the limit segments list
+            for corner_1, corner_2 in itertools.combinations(overlapped_corners, 2):
+                continuous_segment = corner_1.get_continuous_segment_with(corner_2)
+                if continuous_segment:
+                    limit_segments.append(continuous_segment)
+
         for perimeter in limits:
             limit_segments += perimeter.segments
 
