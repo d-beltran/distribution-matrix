@@ -86,7 +86,7 @@ test_perimeter_7 = [
     Point(-40,-80),
 ]
 
-# Rectángulo 1
+# Rectángulo 3
 test_perimeter_8 = [
     Point(-40,-80),
     Point(-40, 0),

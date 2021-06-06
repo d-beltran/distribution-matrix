@@ -251,6 +251,9 @@ class Room:
         base_perimeter = set_base_perimeter()
         # La vida
         room.perimeter = base_perimeter
+
+        # Procedd with the expansion of this child room until it reaches its forced area
+        room.expand_room()
         
         self.update_display()
 
@@ -304,20 +307,29 @@ class Room:
     # Find the most suitable space for the current room to claim
     # If we have parent free space available then use it
     # If not, find a neighbour room which is able to expand and use its space
-    def expand_room ():
+    def expand_room (self):
         # Find all surrounding rooms and their contact region
         # The parent limits are not allowed for expansion
         parent_room = self.parent
         restricted_frontiers = self.get_frontiers(parent_room)
         # Other rooms inside the same parent may be displaced if there is no free space available
-        brother_rooms = [ room for room in parent.children if room is not self ]
+        brother_rooms = [ room for room in parent_room.children if room is not self ]
         conflict_frontiers = []
         for room in brother_rooms:
             frontiers = self.get_frontiers(room)
             if frontiers:
                 conflict_frontiers.append(frontiers)
         # The prefered limits to expand are those connected to free space inside the current parent
-
+        # First of all get all already found frontier segments
+        all_frontiers = [restricted_frontiers, *conflict_frontiers]
+        all_frontier_segments = []
+        for frontier in all_frontiers:
+            all_frontier_segments += frontier
+        # Now susbstract all frontier segments to each room perimeter segments to find free frontiers
+        free_frontiers = []
+        for segment in self.perimeter.segments:
+            free_frontiers += segment.substract_segments(all_frontier_segments)
+        #print(free_frontiers)
 
 
     # Get all overlapped segments between the current room and others

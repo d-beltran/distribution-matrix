@@ -12,7 +12,7 @@ if __name__ == '__main__':
     setup_display()
 
     distribution = Room(
-        perimeter=Perimeter.from_corners(test_perimeter_4),
+        perimeter=Perimeter.from_corners(test_perimeter_2),
         display=True,
         name='Planta',
         children=[
@@ -44,18 +44,3 @@ if __name__ == '__main__':
                 fill_color='green')
         ]
     )
-
-    # room_1 = Room(
-    #     perimeter=Perimeter.from_corners(test_perimeter_7),
-    #     forced_area=3600,
-    #     min_size=15,
-    #     name='Comedor',
-    #     fill_color='blue')
-    # room_2 = Room(
-    #     perimeter=Perimeter.from_corners(test_perimeter_8),
-    #     forced_area=1600,
-    #     min_size=15,
-    #     name='Cocina',
-    #     fill_color='yellow')
-
-    # print(room_1.get_frontiers(room_2))
