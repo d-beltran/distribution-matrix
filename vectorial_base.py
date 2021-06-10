@@ -481,30 +481,51 @@ class Corner(Point):
 
     def __init__(self, x : number, y : number, in_segment : Segment, out_segment : Segment, inside : bool = None):
         super().__init__(x, y)
+        if in_segment.b != self or out_segment.a != self:
+            raise NameError('The corner does not follow the standard')
         self.in_segment = in_segment
         self.out_segment = out_segment
-        # Save also both segments as a tupleZ
+        # Save also both segments as a tuple
         self.segments = self.in_segment, self.out_segment
+        # Save in addition the extreme points of segments
+        # i.e. the in segment 'a' point and the out segment 'b' point
+        self.in_point = in_segment.a
+        self.out_point = out_segment.b
+        # Save also both points as a tuple
+        self.points = self.in_point, self.out_point
         self.inside = inside
-
-    # Find out if this corner is connected with other corner
-    # i.e. it is in the same point and shares 1 (and only 1) of their segment directions
-    # DANI: No es correcto -> Las direcciones podrían ser iguales en segmentos no solapados
-    def is_connected_with(self, other):
-        if other != self:
-            return False
-        self_directions = [ segment.vector.normalized() for segment in self.segments ]
-        other_directions = [ segment.vector.normalized() for segment in other.segments ]
-        self_different = [ direction for direction in self_directions if direction not in other_directions ]
-        if len(self_different) != 1:
-            return False
-        return True
 
     # Find out if this corner is continuous with other corner
     # Is so, return the merge of both continuous segments
     def get_continuous_segment_with(self, other):
-        return None
-
+        # If the corner point is not the same we are over
+        if other != self:
+            return None
+        # Calculate the normalized a (from in) and b (from out) points
+        # i.e. the a and b points if both segments length was 1
+        # Segments which overlap will return identical points
+        self_normalized_a = self - self.in_segment.vector.normalized()
+        self_normalized_b = self + self.out_segment.vector.normalized()
+        self_points = [ self_normalized_a, self_normalized_b ]
+        other_normalized_a = other - other.in_segment.vector.normalized()
+        other_normalized_b = other + other.out_segment.vector.normalized()
+        other_points = [ other_normalized_a, other_normalized_b ]
+        # Find self points which do not match any other point
+        self_different = [ p for p, point in enumerate(self_points) if point not in other_points ]
+        # If there are no identical points or both are identical we are over
+        if len(self_different) != 1:
+            return None
+        # Now we must find the other different point
+        # It must be always only 1
+        other_different = [ p for p, point in enumerate(other_points) if point not in self_points ]
+        # And finally we check that both different points belong to aligned segments
+        # For this we just check if the corner point is between them
+        self_different_point = self.points[self_different[0]]
+        other_different_point = other.points[other_different[0]]
+        continuous_segment = Segment(self_different_point, other_different_point)
+        if self not in continuous_segment:
+            return None
+        return continuous_segment
 
 # A rectangular area defined by 2 coordinates (Points): 'max' and 'min'
 class Rect:
