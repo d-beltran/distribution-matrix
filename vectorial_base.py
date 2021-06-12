@@ -350,6 +350,13 @@ class Segment(Line):
             return False
         return self.is_connected_with(other)
 
+    # Check if a line is fully covered by a list of segments
+    # i.e. substract all segments from self and if there is still a remaining segment it is not covered
+    def is_covered_by(self, segments : List['Segment']) -> bool:
+        remaining_segments = self.substract_segments(segments)
+        return len(remaining_segments) == 0
+
+
     def split_at_points(self, points : List[Point]) -> list:
         # Get only thouse points which are cutting the segment
         cutting_points = [ point for point in points if point in self and point != self.a and point != self.b ]
@@ -407,7 +414,7 @@ class Segment(Line):
 
     # Get the overlap segment between two segments
     # Return None if segments are not in the same line
-    def get_overlap_segment (self, other) -> Optional['Segment']:
+    def get_overlap_segment (self, other : 'Segment') -> Optional['Segment']:
         # If both segments are not in the same line then there is no overlap
         if not self.same_line_as(other):
             return None
@@ -453,23 +460,16 @@ class Segment(Line):
         def sort_by_y(point):
             return point.y
         sorted_points = sorted( sorted( points, key=sort_by_x), key=sort_by_y)
-        # Track from which point self is in but not other
-        # From this point to the next the segment is valid (i.e. not substracted)
-        in_self = False
-        in_other = False
-        first_point = None
+        # Create new segments between each pair of sorted points
+        splitted_segments = [ Segment(a,b) for a, b in pairwise(sorted_points) ]
+        # Get only segments which are in self and are not in others
         result_segments = []
-        for point in sorted_points:
-            if point in self_points:
-                in_self = not in_self
-            if point in other_points:
-                in_other = not in_other
-            if first_point:
-                result_segments.append(Segment(first_point, point))
-                first_point = None
+        for segment in splitted_segments:
+            if segment not in self:
                 continue
-            if in_self and not in_other:
-                first_point = point
+            if any(segment in other for other in others):
+                continue
+            result_segments.append(segment)
         return result_segments
 
 # A corner is a point where 2 non-paralel segments are connected
@@ -1109,28 +1109,18 @@ class Perimeter:
 
         # Limit points are 'inside corners' which are not overlapped with any other perimeters
         limit_points = []
-        # Limit segments are both parent and children segments
-        limit_segments = []
         for corner in inside_corners:
             count = 0
-            overlapped_corners = []
             for perimeter in limits:
                 element = perimeter.get_border_element(corner)
                 if element:
                     count += 1
-                    # In case it is a corner
-                    if type(element) == Corner:
-                        overlapped_corners.append(element)
             # Include this corner only if after all searches it was found only 1 time
             if count == 1:
                 limit_points.append(corner)
-            # In case there are overlapped corners check if they are continuous corners (explained in Corner class)
-            # If so, merge their continuous segments and append it to the limit segments list
-            for corner_1, corner_2 in itertools.combinations(overlapped_corners, 2):
-                continuous_segment = corner_1.get_continuous_segment_with(corner_2)
-                if continuous_segment:
-                    limit_segments.append(continuous_segment)
 
+        # Limit segments are both parent and children segments
+        limit_segments = []
         for perimeter in limits:
             limit_segments += perimeter.segments
 
@@ -1185,9 +1175,10 @@ class Perimeter:
                     # Create the rect that the two previous segments would make
                     new_rect = Rect.from_segments([ segment, other_segment ])
                     #print('New rect: ' + str(segment) + ' / ' + str(other_segment) + ' -> ' + str(count) + ': ' + str(new_rect))
-                    # Must check that the other 2 segments which would complete the rectangle do exist
-                    other_segments = [ rect_segment for rect_segment in new_rect.segments if rect_segment not in [ segment, other_segment ] ]
-                    if other_segments[0] not in all_splitted_segments or other_segments[1] not in all_splitted_segments:
+                    # Must check that the other 2 segments which would close (complete) the rectangle do exist
+                    # Actually they may be splitted is several segments, so we must check that they are covered
+                    closing_segments = [ rect_segment for rect_segment in new_rect.segments if rect_segment not in [ segment, other_segment ] ]
+                    if not all([ segment.is_covered_by(all_splitted_segments) for segment in closing_segments ]):
                         continue
                     if new_rect not in this_segment_rects:
                         count += 1

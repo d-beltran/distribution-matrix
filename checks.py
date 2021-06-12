@@ -25,3 +25,14 @@ segment_1 = Segment(Point(0,1), Point(0,5))
 segment_2 = Segment(Point(0,2), Point(0,4))
 
 print(segment_1.substract_segments([segment_2]))
+
+segment_1 = Segment(Point(-40,-40), Point(-40,40))
+segment_2 = Segment(Point(-40,40), Point(-40,-40))
+
+print(segment_1.substract_segments([segment_2]))
+
+segment_1 = Segment(Point(-40,-40), Point(-40,40))
+segment_2 = Segment(Point(-40,40), Point(-40,-40))
+segment_3 = Segment(Point(-40,-40), Point(-40,-60)) # Este segmento hace que falle
+
+print(segment_1.substract_segments([segment_2, segment_3]))
