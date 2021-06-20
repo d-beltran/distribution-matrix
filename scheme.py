@@ -303,25 +303,34 @@ class Room:
         maximum_rect = Rect.from_corner(corner, new_x_size, new_y_size)
         return Perimeter(maximum_rect.get_segments())
 
-    # Search the surrounding rooms of the current room
     # Find the most suitable space for the current room to claim
-    # If we have parent free space available then use it
-    # If not, find a neighbour room which is able to expand and use its space
+    # If current room is expanded over another room then the other room must also expand to compensate
+    # At the end, the extra space will be substracted from the parent free space
     def expand_room (self):
-        # Find all surrounding rooms and their contact region
+
+        # Calculate how much are we need to expand
+        required_area = self.forced_area - self.area
+
+        # ----------------------------------------------------------------------------------------------------
+        # Split the room perimeter in segments according to what each region is connected to
+        # Regions connected to the parent free space are desired to expand
+        # Regions connected to other rooms may be expanded if the colliding room is able to expand also
+        # Regions connected to the parent limits will never be expanded
+        # ----------------------------------------------------------------------------------------------------
+
         # The parent limits are not allowed for expansion
         parent_room = self.parent
-        restricted_frontiers = self.get_frontiers(parent_room)
+        parent_frontiers = self.get_frontiers(parent_room)
         # Other rooms inside the same parent may be displaced if there is no free space available
         brother_rooms = [ room for room in parent_room.children if room is not self ]
-        conflict_frontiers = []
+        brother_frontiers = []
         for room in brother_rooms:
             frontiers = self.get_frontiers(room)
             if frontiers:
-                conflict_frontiers.append(frontiers)
+                brother_frontiers.append(frontiers)
         # The prefered limits to expand are those connected to free space inside the current parent
         # First of all get all already found frontier segments
-        all_frontiers = [restricted_frontiers, *conflict_frontiers]
+        all_frontiers = [parent_frontiers, *brother_frontiers]
         all_frontier_segments = []
         for frontier in all_frontiers:
             all_frontier_segments += frontier
@@ -329,6 +338,74 @@ class Room:
         free_frontiers = []
         for segment in self.perimeter.segments:
             free_frontiers += segment.substract_segments(all_frontier_segments)
+
+        # ----------------------------------------------------------------------------------------------------
+        # Try to expand in the easiest way: push an individual frontier segment
+        # Only segment longer than the minimum size may be expanded this way
+        # Start pushing free frontiers
+        # - No matter if the space is divided as a result of the expansion
+        # If there are no suitable free frontiers then proceed with brother frontiers
+        # - Space must never be divided as a result of the expansion
+        # ----------------------------------------------------------------------------------------------------
+
+        for frontier in free_frontiers:
+            rects = parent_room.free_rects
+            # In case segment is vertical the expansion uses maximum columns
+            # In case segment is horizontal the expansion uses maximum rows
+            if frontier.is_vertical():
+                rects = get_column_rectangles(rects)
+            elif frontier.is_horizontal():
+                rects = get_row_rectangles(rects)
+            else:
+                raise NameError('ERROR: diagonal lines are not supported for room expansion')
+            # One and only one of the rows/columns will always include the segment
+            space = next(rect for rect in rects if frontier in rect)
+            space_contact = next(line for line in space.lines if frontier in line)
+
+            # ----------------------------------------------------------------------------------------------------
+            # First of all check if frontier points are connected to the space limits
+            # In this case, we do not have to bother about margins
+            # i.e. minimum length between the claimed space and space borders
+            # Otherwise, we must check that borthers are respected
+            # ----------------------------------------------------------------------------------------------------
+
+            # Sort points using the space contact 'a' point as reference
+            points = [ frontier.a, frontier.b ]
+            def by_distance(point):
+                return space_contact.a.get_distance_to(point)
+            sorted_points = sorted(points, key=by_distance)
+            forntier_a = sorted_points[0]
+            frontier_b = sorted_points[1]
+            margin_a = Segment(space_contact.a, forntier_a) if space_contact.a != forntier_a else None
+            margin_b = Segment(space_contact.b, forntier_b) if space_contact.b != forntier_b else None
+
+            # If a margin exists and it is not as long as required we have a problem
+            problem_a = margin_a and margin_a.length < parent_room.min_size
+            problem_b = margin_b and margin_b.length < parent_room.min_size
+
+            # If there is no problem we can just push the frontier
+            if not problem_a and not problem_b:
+                # DANI: Falta comprobar la distancia con el extremo del maximim rect
+                pass
+
+            # ----------------------------------------------------------------------------------------------------
+            # If a margin is not respected then we have 2 options (no option will always be possible):
+            # - Cut the frontier to be expanded in order to respect the margin
+            #   * If the cutted frontier is shorter than the minimum size we can not expand
+            # - Claim also all the space between the claimed space and the space border
+            #   * If the expanded space perpendicular space is not equal or longer to the minimum we cannot expand sideways
+            #   * If the extra claimed space exceeds the required expand area we cannot claim it
+            # ----------------------------------------------------------------------------------------------------
+
+            # The real limit is the maximum length
+            # If one maximum rect includes the segment it may be expanded to its whole width/height
+            # Substract the margin ??
+            limit_length = max(lengths) - margin
+            # Calculate how much we must expand the frontier to reach the required area
+            required_length = required_area / frontier.length
+            # Create a new rectangle by pushing the frontier as much as needed or possible
+            final_length = min([ limit_length, required_length ])
+        
         #print(free_frontiers)
 
 
