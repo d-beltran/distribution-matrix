@@ -356,7 +356,7 @@ class Segment(Line):
         remaining_segments = self.substract_segments(segments)
         return len(remaining_segments) == 0
 
-
+    # Split the segment at multiple points and return the splitted segments
     def split_at_points(self, points : List[Point]) -> list:
         # Get only thouse points which are cutting the segment
         cutting_points = [ point for point in points if point in self and point != self.a and point != self.b ]
@@ -411,6 +411,10 @@ class Segment(Line):
 
         #print(str(self) + ' / ' + str(segment) + ' -> ' + str(Point(x, y)))
         return Point(x, y)
+
+    # Get the point in the middle of the segment
+    def get_middle_point (self) -> Point:
+        return self.a + self.vector / 2
 
     # Get the overlap segment between two segments
     # Return None if segments are not in the same line
@@ -649,14 +653,6 @@ class Rect:
             #point.segments = segment_pairs[p]
         return corners
 
-    # Return all rectangle segments in a 'perimeter-friendly' order
-    def get_crossing_segment(self) -> Segment:
-        return Segment(self.pmin, self.pmax, self.segments_color)
-
-    # Create a new rectangle identical to this rectangle but with a specified color
-    def get_colored_rect(self, segments_color : str = 'black', fill_color : str = 'white') -> 'Rect':
-        return Rect(self.pmin, self.pmax, segments_color, fill_color)
-
     # Get horizontal size
     def get_x_size(self) -> number:
         return self.pmax.x - self.pmin.x
@@ -688,6 +684,20 @@ class Rect:
 
     # The area is treated appart since it may be an expensive calculation
     area = property(get_area, None, None, "The rectangle area")
+
+    # Return a segment which crosses the rectangle in diagonal from min to max point
+    def get_crossing_segment(self) -> Segment:
+        return Segment(self.pmin, self.pmax, self.segments_color)
+
+    # Get the point in the middle of the rect
+    def get_middle_point (self) -> Point:
+        # Get the point in the middle of the crossing line
+        crossing_segment = get_crossing_segment()
+        return crossing_segment.get_middle_point()
+
+    # Create a new rectangle identical to this rectangle but with a specified color
+    def get_colored_rect(self, segments_color : str = 'black', fill_color : str = 'white') -> 'Rect':
+        return Rect(self.pmin, self.pmax, segments_color, fill_color)
 
     # Split a rect in as many rects as specified by the 'x' and 'y' cuts
     # DANI: No lo he provado desde que lo moví de abajo

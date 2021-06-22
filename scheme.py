@@ -350,23 +350,69 @@ class Room:
 
         for frontier in free_frontiers:
             rects = parent_room.free_rects
-            # In case segment is vertical the expansion uses maximum columns
-            # In case segment is horizontal the expansion uses maximum rows
+            mrects = parent_room.free_mrects
+            contact_mrects = [ rect for rect in mrects if frontier in rect ]
+            # In case segment is vertical:
+            # - The expansion uses maximum columns
+            # - The expansion 'froward' is the x dimension
+            # - The expansion 'sides' is the y dimension
+            # In case segment is horizontal
+            # - The expansion uses maximum rows
+            # - The expansion 'froward' is the y dimension
+            # - The expansion 'sides' is the x dimension
+            # Here 'forward' and 'sides' may mean '0 -> x dimension' or '1 -> y dimension'
+            # This is because rectangles size is given in a (x,y) tuple format
+            # So size[0] = x and size[1] = 1
             if frontier.is_vertical():
                 rects = get_column_rectangles(rects)
+                forward = 0
+                sides = 1
             elif frontier.is_horizontal():
                 rects = get_row_rectangles(rects)
+                forward = 1
+                sides = 0
             else:
                 raise NameError('ERROR: diagonal lines are not supported for room expansion')
+
             # One and only one of the rows/columns will always include the segment
             space = next(rect for rect in rects if frontier in rect)
             space_contact = next(line for line in space.lines if frontier in line)
+            space_forward_limit = space.get_size()[forward]
+
+            # Find the direction of the expansion as a vector
+            forward_direction = space_contact.get_middle_point() + space.get_middle_point()
+
+            # Get the forward expansion limit according to maximum rectangles
+            maximum_forward_limit = max([ rect.get_size()[forward] for rect in contact_mrects ])
+            margin = parent_room.min_size
+            margined_forward_limit = maximum_forward_limit - margin
+
+            # Now create a function to make a rectangle by pushing a segment (which may change)
+            # The forward length of this rectangle will depend on the available area and limits
+            # This segment may not be the original frontier, but a variation of it
+            def push_segment (segment : Segment):
+                segment_size = segment.length
+                push_length = required_area / segment_size
+                # If the length exceeds the maximum limit then stay in the maximum limit
+                if push_length > maximum_forward_limit:
+                    push_length = maximum_forward_limit
+                # If the length is between the maximum limit and the margin limit then stay at the margin
+                elif push_length > margined_forward_limit:
+                    push_length = margined_forward_limit
+                # If at this point the length exceeds the space limit then stay in the space limit
+                if push_length > space_forward_limit:
+                    push_length = space_forward_limit
+                # Create the new rect with the definitive length
+                new_point = segment.a + forward_direction.normalized() * push_length
+                new_segment = Segment(segment.a, new_point)
+                new_rect = Rect.from_segments(segment, new_segment)
+                return new_rect
 
             # ----------------------------------------------------------------------------------------------------
             # First of all check if frontier points are connected to the space limits
             # In this case, we do not have to bother about margins
             # i.e. minimum length between the claimed space and space borders
-            # Otherwise, we must check that borthers are respected
+            # Otherwise, we must check that borders are respected
             # ----------------------------------------------------------------------------------------------------
 
             # Sort points using the space contact 'a' point as reference
@@ -385,8 +431,7 @@ class Room:
 
             # If there is no problem we can just push the frontier
             if not problem_a and not problem_b:
-                # DANI: Falta comprobar la distancia con el extremo del maximim rect
-                pass
+                expansion = push_segment(frontier)
 
             # ----------------------------------------------------------------------------------------------------
             # If a margin is not respected then we have 2 options (no option will always be possible):
@@ -397,14 +442,7 @@ class Room:
             #   * If the extra claimed space exceeds the required expand area we cannot claim it
             # ----------------------------------------------------------------------------------------------------
 
-            # The real limit is the maximum length
-            # If one maximum rect includes the segment it may be expanded to its whole width/height
-            # Substract the margin ??
-            limit_length = max(lengths) - margin
-            # Calculate how much we must expand the frontier to reach the required area
-            required_length = required_area / frontier.length
-            # Create a new rectangle by pushing the frontier as much as needed or possible
-            final_length = min([ limit_length, required_length ])
+
         
         #print(free_frontiers)
 
