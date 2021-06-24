@@ -31,9 +31,10 @@ def is_number(var):
     return isinstance(var, int) or isinstance(var, float)
 
 # Set a resoltion limit
-# This is the number of decimals to take in count when comparing different coordinates
-resolution = 4
-def resolute(num):
+# Resolution is the number of decimals to take in count when comparing different coordinates
+# When working with squared values (e.g. areas) the resolution should be decreased in 2 orders
+base_resolution = 4
+def resolute(num, resolution = base_resolution):
     res = 10**resolution
     return round(num * res) / res
 
@@ -65,7 +66,7 @@ class Point:
     # Point + Vector -> Point, Point + Point -> Vector
     def __add__(self, other):
         if isinstance(other, self.__class__):
-            return Vector(self.x + other.x, self.y + other.y)
+            return Vector(other.x - self.x, other.y - self.y)
         if isinstance(other, Vector):
             return Point(self.x + other.x, self.y + other.y)
 
@@ -134,7 +135,7 @@ class Vector:
             x_mul = self.x * num
             y_mul = self.y * num
             return Vector(x_mul, y_mul)
-        raise NameError('Vector multiplication is only supported with numeric values')
+        raise RuntimeError('Vector multiplication is only supported with numeric values')
 
     __rmul__ = __mul__
 
@@ -143,7 +144,7 @@ class Vector:
             x_div = self.x / num
             y_div = self.y / num
             return Vector(x_div, y_div)
-        raise NameError('Vector division is only supported with numeric values')
+        raise RuntimeError('Vector division is only supported with numeric values')
 
     __rdiv__ = __div__
 
@@ -152,7 +153,7 @@ class Vector:
             x_div = self.x / num
             y_div = self.y / num
             return Vector(x_div, y_div)
-        raise NameError('Vector division is only supported with numeric values')
+        raise RuntimeError('Vector division is only supported with numeric values')
 
     __rtruediv__ = __truediv__
 
@@ -294,12 +295,14 @@ class Segment(Line):
 
     def __init__(self, a : Point, b : Point, color : str = 'black'):
         if a == b:
-            raise NameError('ERROR: Inexistent segment. Points "a" and "b" must be different: ' + str(a))
+            raise RuntimeError('Inexistent segment. Points "a" and "b" must be different: ' + str(a))
         self.a = a
         self.b = b
         self.color = color
         super().__init__(a, b - a)
         self.length = a.get_distance_to(b)
+        # Save both points as a tuple
+        self.points = a, b
 
     def __str__(self):
         return 'A: ' + str(self.a) + ' -> B: ' + str(self.b)
@@ -333,6 +336,10 @@ class Segment(Line):
         points = [self.a, self.b]
         sorted_points = sorted( sorted(points, key=sort_by_x), key=sort_by_y )
         return tuple(sorted_points)
+
+    # Get the inverted segment (i.e. invert a and b points)
+    def inverted (self):
+        return Segment(self.b, self.a, self.color)
 
     # Create a new segment identical to this segment but with a specified color
     def get_colored_segment(self, color : str):
@@ -486,7 +493,7 @@ class Corner(Point):
     def __init__(self, x : number, y : number, in_segment : Segment, out_segment : Segment, inside : bool = None):
         super().__init__(x, y)
         if in_segment.b != self or out_segment.a != self:
-            raise NameError('The corner does not follow the standard')
+            raise RuntimeError('The corner does not follow the standard')
         self.in_segment = in_segment
         self.out_segment = out_segment
         # Save also both segments as a tuple
@@ -516,12 +523,7 @@ class Corner(Point):
         other_points = [ other_normalized_a, other_normalized_b ]
         # Find self points which do not match any other point
         self_different = [ p for p, point in enumerate(self_points) if point not in other_points ]
-        # If there are no identical points or both are identical we are over
-        if len(self_different) != 1:
-            return None
-        # Now we must find the other different point
-        # It must be always only 1
-        other_different = [ p for p, point in enumerate(other_points) if point not in self_points ]
+        # If there are no identical points or both are identical we are overordered_segmentsnt not in self_points ]
         # And finally we check that both different points belong to aligned segments
         # For this we just check if the corner point is between them
         self_different_point = self.points[self_different[0]]
@@ -548,7 +550,7 @@ class Rect:
     def from_segments(cls, segments : List[Segment], segments_color : str = 'black', fill_color : str = 'white'):
         # Check that there are at least 2 segments
         if len(segments) < 2:
-            raise NameError('It is required at least 2 segments')
+            raise RuntimeError('It is required at least 2 segments')
         # Get all segment points and find the minimum and maximum x and y values of all those points
         points = [ point for segment in segments for point in (segment.a, segment.b) ]
         x_coords = [ point.x for point in points ]
@@ -560,7 +562,7 @@ class Rect:
         # If any minimum and maximum values match then the rectangle has no area
         if x_min == x_max or y_min == y_max:
             print(segments)
-            raise NameError('The rectangle has no area')
+            raise RuntimeError('The rectangle has no area')
         # Set pmin and pmax and build the rectange
         pmin = Point(x_min, y_min)
         pmax = Point(x_max, y_max)
@@ -679,7 +681,7 @@ class Rect:
         if self._area:
             return self._area
         x_size, y_size = self.get_size()
-        self._area = x_size * y_size
+        self._area = resolute(x_size * y_size, base_resolution - 2)
         return self._area
 
     # The area is treated appart since it may be an expensive calculation
@@ -692,7 +694,7 @@ class Rect:
     # Get the point in the middle of the rect
     def get_middle_point (self) -> Point:
         # Get the point in the middle of the crossing line
-        crossing_segment = get_crossing_segment()
+        crossing_segment = self.get_crossing_segment()
         return crossing_segment.get_middle_point()
 
     # Create a new rectangle identical to this rectangle but with a specified color
@@ -797,7 +799,8 @@ class Perimeter:
         for segment in segments:
             segment.color = segments_color
         # Check the perimeter is closed and segments are not diagonal
-        self.check() 
+        self.check()
+        print(self.segments)
         self._corners = None
         self._rects = None
         self._mrects = None
@@ -809,7 +812,7 @@ class Perimeter:
     def from_corners(cls, corners : List[Corner]):
         # Check that there are at least 4 points
         if len(corners) < 4:
-            raise NameError('It is required at least 4 points')
+            raise RuntimeError('It is required at least 4 points')
         # Set the segment between each pair of points
         segments = []
         for a,b in pairwise(corners, retro=True):
@@ -889,7 +892,7 @@ class Perimeter:
         rects = self.rects
         # Get the area of each rectangle
         areas = [ rect.get_area() for rect in rects ]
-        self._area = sum(areas)
+        self._area = resolute(sum(areas), base_resolution - 2)
         return self._area
 
     # The area is treated appart since it may be an expensive calculation
@@ -903,19 +906,69 @@ class Perimeter:
                 return False
         return True
 
+    # Format segments in a way that segments and their points are ordered
+    # i.e. each segment 'b' point is the 'a' point of the next segment
+    # The first segment 'a' point must be the final segment 'b' point
+    # If the list of segments cannot be formatted like this then return an error
+    open_perimeter_error = RuntimeError('The perimeter is not closed')
+    def close_segments(self):
+        # Check that each segment ends in the same point that the next segment starts
+        ordered_segments = [ self.segments[0] ]
+        available_segments = self.segments[1:]
+        while ( len(ordered_segments) < len(self.segments) ):
+            # If there are no more available segments return error
+            # This may happen in case there was a duplicated segment, which means the perimeter is wrong
+            if len(available_segments) == 0:
+                raise self.open_perimeter_error
+            # Get the last ordered segment to find which is the next connected segment
+            last_ordered_segment = ordered_segments[-1]
+            last_point = last_ordered_segment.b
+            # Get the segment which is connected with the previous segment
+            connected_segment = next((segment for segment in available_segments if last_point in segment.points), None)
+            if not connected_segment:
+                raise self.open_perimeter_error
+            # Remove the connected segment from the available 
+            available_segments = [ segment for segment in available_segments if segment != connected_segment ]
+            # The connected segment must be connected by the 'a' point
+            # If it is connected by the 'b' point then get the inverted segment
+            if connected_segment.b == last_point:
+                connected_segment = connected_segment.inverted()
+            ordered_segments.append(connected_segment)
+        # Finally, check that the first segment and the last segment are also connected
+        if ordered_segments[0].a != ordered_segments[-1].b:
+            raise self.open_perimeter_error
+        self.segments = ordered_segments
+
+    # Merge continuous segments (i.e. connected segments in the same segment)
+    def merge_segments (self):
+        count = 0
+        while (count < len(self.segments)):
+            for current, nextone in pairwise(self.segments, retro=True):
+                if current.same_line_as(nextone):
+                    merged_segment = Segment(current.a, nextone.b)
+                    self.segments = [ seg for seg in self.segments if seg not in [current, nextone] ]
+                    self.segments.insert(count, merged_segment)
+                    break
+                count += 1
+
     # Check the perimeter to be closed
-    # Otherwise return an error, since not closed perimeters are not supported
+    # Try to close it if possible. Otherwise return an error, since not closed perimeters are not supported
     # DANI: En principio los perímetros no cerrados no tendrán soporte nunca porque no tienen mucho sentido o no les veo la utilidad
-    # DANI: Esto es para el desarrollo. Una vez esté comprobado que los perímteros son estables quitaré esto porque retrasa el cálculo
     # Check each perimeter segment to not be diagonal
     # Otherwise return an error, since perimeters with diagonal segments are not yet supported
     # DANI: En principio algun día se podría hacer esto
+    # Merge continuous segments (i.e. connected segments in the same line)
     def check(self):
+        # Check the perimeter to be closed
         if not self.is_closed():
-            raise NameError('The perimeter is not closed')
+            print('REMAKE!!')
+            self.close_segments()
+        # Check each perimeter segment to not be diagonal
         for segment in self.segments:
             if segment.is_diagonal():
-                raise NameError('The perimeter has diagonal segments')
+                raise RuntimeError('The perimeter has diagonal segments, which are not supported')
+        # Merge continuous segments (i.e. connected segments in the same line)
+        self.merge_segments() 
 
     # Set the perimeter corners as points with additional stored values
     # The 'segments' variable defines the two segments of the perimeter which form the corner itself
@@ -943,7 +996,7 @@ class Perimeter:
         # There should be always 4 more corners in one direction than in the other (may be left or right)
         # DANI: Esto es para el desarrollo. Una vez esté comprobado que los perímteros son estables quitaré esto porque retrasa el cálculo
         if abs(difference) != 4:
-            raise NameError('There is something wrong with the perimeter')
+            raise RuntimeError('There is something wrong with the perimeter')
 
         # Check if are more corners in the counted direction (true) or the other (false)
         lefted_perimeter = difference > 0
@@ -1093,7 +1146,7 @@ class Perimeter:
 
             # There should be always at least 1 intersection
             if len(intersection_points) == 0:
-                raise NameError('An inside segment has no intersection point: ' + str(segment))
+                raise RuntimeError('An inside segment has no intersection point: ' + str(segment))
 
             # Sort the points by distance
             def by_distance(point):
@@ -1425,14 +1478,12 @@ def get_row_rectangles(splitted_rects : list = []) -> list:
     # Do it by finding the most maximum pmax and the most minimum pmin
     def sort_by_x(point):
         return point.x
-    def sort_by_y(point):
-        return point.y
     def merge_rectangles(rects):
         pmax_points = [ rect.pmax for rect in rects ]
-        sorted_pmax_points = sorted( sorted( pmax_points, key=sort_by_x, reverse=True ), key=sort_by_y, reverse=True )
+        sorted_pmax_points = sorted( pmax_points, key=sort_by_x, reverse=True )
         maximum_pmax = sorted_pmax_points[0]
         pmin_points = [ rect.pmin for rect in rects ]
-        sorted_pmin_points = sorted( sorted( pmin_points, key=sort_by_x), key=sort_by_y )
+        sorted_pmin_points = sorted( pmin_points, key=sort_by_x )
         minimum_pmin = sorted_pmin_points[0]
         return Rect(minimum_pmin, maximum_pmax)
 
@@ -1467,7 +1518,9 @@ def get_row_rectangles(splitted_rects : list = []) -> list:
         # Set all rectangles in the row as checked
         for rect in row:
             rect.check = True
-        rows.append(row)
+        # Merge all rectangles in row
+        row_rectangle = merge_rectangles(rows)
+        rows.append(row_rectangle)
 
     return rows
 
@@ -1493,16 +1546,14 @@ def get_column_rectangles(splitted_rects : list = []) -> list:
 
     # Set a function to merge multiple rects into a single big rect
     # Do it by finding the most maximum pmax and the most minimum pmin
-    def sort_by_x(point):
-        return point.x
     def sort_by_y(point):
         return point.y
     def merge_rectangles(rects):
         pmax_points = [ rect.pmax for rect in rects ]
-        sorted_pmax_points = sorted( sorted( pmax_points, key=sort_by_x, reverse=True ), key=sort_by_y, reverse=True )
+        sorted_pmax_points = sorted( pmax_points, key=sort_by_y, reverse=True )
         maximum_pmax = sorted_pmax_points[0]
         pmin_points = [ rect.pmin for rect in rects ]
-        sorted_pmin_points = sorted( sorted( pmin_points, key=sort_by_x), key=sort_by_y )
+        sorted_pmin_points = sorted( pmin_points, key=sort_by_y )
         minimum_pmin = sorted_pmin_points[0]
         return Rect(minimum_pmin, maximum_pmax)
 
@@ -1526,17 +1577,19 @@ def get_column_rectangles(splitted_rects : list = []) -> list:
             bottomest = get_bottom_rect(bottomest)
             if not bottomest:
                 break
-            first_column.append(bottomest)
+            column.append(bottomest)
         # Append all rectangles upper from current rectangle to the column
         upperest = splitted_rect
         while (True):
             upperest = get_upper_rect(upperest)
             if not upperest:
                 break
-            first_column.append(upperest)
+            column.append(upperest)
         # Set all rectangles in the column as checked
         for rect in column:
             rect.check = True
-        columns.append(column)
+        # Merge all rectangles in column
+        column_rectangle = merge_rectangles(column)
+        columns.append(column_rectangle)
 
     return columns

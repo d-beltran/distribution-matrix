@@ -4,6 +4,8 @@ from scheme_display import add_frame
 
 from vectorial_base import *
 
+from utils import InputError
+
 import random
 from math import sqrt
         
@@ -37,14 +39,14 @@ class Room:
         self.parent = None
         self.children = []
         # Set the perimeter and the real area
+        # Self area is updated when the perimeter is set
+        self.area = None
         # If the perimeter has been forced then update the display with the initial segments
         if perimeter:
             self.perimeter = perimeter
             self.update_display()
-            self.area = perimeter.area
         else:
             self.perimeter = None
-            self.area = None
         # Set the expected final area
         if forced_area:
             self.forced_area = forced_area
@@ -52,14 +54,14 @@ class Room:
             self.forced_area = self.area
         # If the forced area does not cover the minimum size it makes no sense
         if min_size and forced_area < min_size**2:
-            raise NameError('Input error: Forced area is not sufficient for the minimum size in room ' + name)
+            raise InputError('Forced area is not sufficient for the minimum size in room ' + name)
         # Set the free area: area where there is no children rooms
         self.free_area = self.area
         # Set size limits
         if min_size or min_size == 0:
             self.min_size = min_size
         else:
-            self.min_size = min_size
+            self.min_size = 0
         if max_size:
             self.max_size = max_size
         elif self.forced_area and self.min_size:
@@ -78,11 +80,13 @@ class Room:
 
     # Set the perimeter
     # Reset the own rects and the parent rects also
-    def set_perimeter (self, value):
-        self._perimeter = value
+    def set_perimeter (self, perimeter):
+        self._perimeter = perimeter
         self.reset_rects()
         if self.parent:
             self.parent.reset_rects()
+        if perimeter:
+            self.area = perimeter.area
 
     # The area is treated appart since it may be an expensive calculation
     perimeter = property(get_perimeter, set_perimeter, None, "The room perimeter")
@@ -187,16 +191,16 @@ class Room:
         for room in rooms:
             children_area += room.forced_area
         if children_area > self.area:
-            raise NameError('Input error: Children together require more area than the parent has')
+            raise InputError('Children together require more area than the parent has')
         # Check all children are inside the perimeter, if they have a predefined perimeter
         for room in rooms:
             if room.perimeter and room.perimeter not in self.perimeter:
-                raise NameError('Input error: The child room "' + room.name + '" is out of the parent perimeter')
+                raise InputError('The child room "' + room.name + '" is out of the parent perimeter')
         # Check all children minim sizes fit in the perimeter, if they have a predefined minimum size
         for room in rooms:
             size = room.min_size
             if size and not self.perimeter.fit(size, size):
-                raise NameError('Input error: The child room "' + room.name + '" minimum size does not fit in the parent perimeter')
+                raise InputError('The child room "' + room.name + '" minimum size does not fit in the parent perimeter')
 
         # Sort children rooms by minimum size, with the biggest sizes first
         def sort_by_size (room):
@@ -237,7 +241,7 @@ class Room:
         # Stop here if there are no available rectangles
         # DANI: Esto no debería pasar nunca. Debería preveerse de antes.
         if len(suitable_rects) == 0:
-            raise NameError('ERROR: The room ' + room.name + ' fits nowhere')
+            raise RuntimeError('ERROR: The room ' + room.name + ' fits nowhere')
         # Try to set up the new room in all possible sites until we find one
         # Each 'site' means each corner in each suitable rectangle
         # Check each site to allow other rooms to grow
@@ -308,8 +312,13 @@ class Room:
     # At the end, the extra space will be substracted from the parent free space
     def expand_room (self):
 
-        # Calculate how much are we need to expand
-        required_area = self.forced_area - self.area
+        # Calculate how much area we need to expand
+        required_area = resolute(self.forced_area - self.area, base_resolution - 2)
+        print('Forced area: ' + str(self.forced_area))
+        print('Current area: ' + str(self.area))
+        print('Required area: ' + str(required_area))
+        if required_area <= 0:
+            return
 
         # ----------------------------------------------------------------------------------------------------
         # Split the room perimeter in segments according to what each region is connected to
@@ -372,11 +381,11 @@ class Room:
                 forward = 1
                 sides = 0
             else:
-                raise NameError('ERROR: diagonal lines are not supported for room expansion')
+                raise RuntimeError('ERROR: diagonal segments are not supported for room expansion')
 
             # One and only one of the rows/columns will always include the segment
             space = next(rect for rect in rects if frontier in rect)
-            space_contact = next(line for line in space.lines if frontier in line)
+            space_contact = next(segment for segment in space.segments if frontier in segment)
             space_forward_limit = space.get_size()[forward]
 
             # Find the direction of the expansion as a vector
@@ -390,9 +399,10 @@ class Room:
             # Now create a function to make a rectangle by pushing a segment (which may change)
             # The forward length of this rectangle will depend on the available area and limits
             # This segment may not be the original frontier, but a variation of it
-            def push_segment (segment : Segment):
-                segment_size = segment.length
-                push_length = required_area / segment_size
+            def push_segment (pushed_segment : Segment):
+                print('PUSHED SEGMENT: ' + str(pushed_segment))
+                pushed_segment_size = pushed_segment.length
+                push_length = required_area / pushed_segment_size
                 # If the length exceeds the maximum limit then stay in the maximum limit
                 if push_length > maximum_forward_limit:
                     push_length = maximum_forward_limit
@@ -403,10 +413,18 @@ class Room:
                 if push_length > space_forward_limit:
                     push_length = space_forward_limit
                 # Create the new rect with the definitive length
-                new_point = segment.a + forward_direction.normalized() * push_length
-                new_segment = Segment(segment.a, new_point)
-                new_rect = Rect.from_segments(segment, new_segment)
-                return new_rect
+                new_point = pushed_segment.a + forward_direction.normalized() * push_length
+                print('NEW POINT: ' + str(new_point))
+                new_side = Segment(pushed_segment.a, new_point)
+                new_rect = Rect.from_segments([pushed_segment, new_side])
+                # Then add the new current rectangle by modifying the current perimeter
+                # Substract the pushed segment from the perimeter and add the new created segments
+                new_segments = [ seg for seg in new_rect.segments if seg != pushed_segment ]
+                deformed_segment = next( seg for seg in self.perimeter.segments if pushed_segment in seg )
+                remaining_segments = [ seg for seg in self.perimeter.segments if seg != deformed_segment ]
+                new_segments += deformed_segment.substract_segments([ pushed_segment ])
+                new_perimeter = Perimeter([ *remaining_segments, *new_segments ])
+                self.perimeter = new_perimeter
 
             # ----------------------------------------------------------------------------------------------------
             # First of all check if frontier points are connected to the space limits
@@ -420,10 +438,12 @@ class Room:
             def by_distance(point):
                 return space_contact.a.get_distance_to(point)
             sorted_points = sorted(points, key=by_distance)
-            forntier_a = sorted_points[0]
+            frontier_a = sorted_points[0]
             frontier_b = sorted_points[1]
-            margin_a = Segment(space_contact.a, forntier_a) if space_contact.a != forntier_a else None
-            margin_b = Segment(space_contact.b, forntier_b) if space_contact.b != forntier_b else None
+
+            # Define margins at both sides of the current frontiers
+            margin_a = Segment(space_contact.a, frontier_a) if space_contact.a != frontier_a else None
+            margin_b = Segment(space_contact.b, frontier_b) if space_contact.b != frontier_b else None
 
             # If a margin exists and it is not as long as required we have a problem
             problem_a = margin_a and margin_a.length < parent_room.min_size
@@ -431,7 +451,8 @@ class Room:
 
             # If there is no problem we can just push the frontier
             if not problem_a and not problem_b:
-                expansion = push_segment(frontier)
+                push_segment(frontier)
+                return True
 
             # ----------------------------------------------------------------------------------------------------
             # If a margin is not respected then we have 2 options (no option will always be possible):
@@ -442,7 +463,7 @@ class Room:
             #   * If the extra claimed space exceeds the required expand area we cannot claim it
             # ----------------------------------------------------------------------------------------------------
 
-
+            return False
         
         #print(free_frontiers)
 
