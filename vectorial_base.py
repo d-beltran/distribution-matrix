@@ -800,7 +800,6 @@ class Perimeter:
             segment.color = segments_color
         # Check the perimeter is closed and segments are not diagonal
         self.check()
-        print(self.segments)
         self._corners = None
         self._rects = None
         self._mrects = None
@@ -859,7 +858,7 @@ class Perimeter:
         if self._rects:
             return self._rects
         # Get all rectangles which form the perimeter
-        rects = self.split_in_rectangles()
+        rects = Grid.from_perimeter(self)
         # Apply the perimter color
         for rect in rects:
             rect.color = self.fill_color
@@ -875,7 +874,7 @@ class Perimeter:
         if self._mrects:
             return self._mrects
         # Get all rectangles which form the perimeter
-        mrects = get_maximum_rectangles(self.rects)
+        mrects = self.rects.get_maximum_rectangles()
         self._mrects = mrects
         return mrects
 
@@ -961,7 +960,6 @@ class Perimeter:
     def check(self):
         # Check the perimeter to be closed
         if not self.is_closed():
-            print('REMAKE!!')
             self.close_segments()
         # Check each perimeter segment to not be diagonal
         for segment in self.segments:
@@ -1279,6 +1277,299 @@ class Perimeter:
             if x_fit_size <= x_size and y_fit_size <= y_size:
                 return True
         return False
+
+# A grid is a group of rectangles which may be connected (next to each other) or not
+# All rectangles which are connected have the whole segment connected
+# i.e. two rectangle points must also be identical
+# This class is used to handle perimeters splitted in rectangles
+# WARNING: There is no control yet to make sure rects are connected right
+# WARNING: If wrong rectangles are passed no error will raise but the grid won't work right
+class Grid:
+
+    def __init__(self, rects : List[Rect]):
+        self.rects = rects
+
+    def __iter__(self):
+        return iter(self.rects)
+
+    def __next__(self):
+        return next(iter(self.rects))
+
+    # Set the grid from a perimeter
+    @classmethod
+    def from_perimeter(cls, perimeter : Perimeter):
+        rects = perimeter.split_in_rectangles()
+        return cls(rects)
+
+    # First, some functions are defined to find colliding rects
+    def get_left_rect (self, rect : Rect) -> Optional[Rect]:
+        pmax = rect.get_upper_left_point()
+        for r in self.rects:
+            if r.pmax == pmax:
+                return r
+        return None
+    def get_right_rect (self, rect : Rect) -> Optional[Rect]:
+        pmin = rect.get_bottom_right_point()
+        for r in self.rects:
+            if r.pmin == pmin:
+                return r
+        return None
+    def get_upper_rect (self, rect : Rect) -> Optional[Rect]:
+        pmin = rect.get_upper_left_point()
+        for r in self.rects:
+            if r.pmin == pmin:
+                return r
+        return None
+    def get_bottom_rect (self, rect : Rect) -> Optional[Rect]:
+        pmax = rect.get_bottom_right_point()
+        for r in self.rects:
+            if r.pmax == pmax:
+                return r
+        return None
+
+    # One by one for each *available rectangle, where available rectangles are the splitted rectangles
+    # Get as many rectanges as possible which are connected horizontally to the current rectangle
+    # Get as many rows of rectangles as possible which are connected vertically to all previous rectangles
+    # Consider all previous rectangles as a single rectange
+    # Repeat in the inverse order (first vertically, then horizontally)
+    # Remove all previous rectangles from the *available rectangles list
+    def get_maximum_rectangles(self) -> List[Rect]:
+
+        # Set a function to merge multiple rects into a single big rect
+        # Do it by finding the most maximum pmax and the most minimum pmin
+        def sort_by_x(point):
+            return point.x
+        def sort_by_y(point):
+            return point.y
+        def merge_rectangles(rects):
+            pmax_points = [ rect.pmax for rect in rects ]
+            sorted_pmax_points = sorted( sorted( pmax_points, key=sort_by_x, reverse=True ), key=sort_by_y, reverse=True )
+            maximum_pmax = sorted_pmax_points[0]
+            pmin_points = [ rect.pmin for rect in rects ]
+            sorted_pmin_points = sorted( sorted( pmin_points, key=sort_by_x), key=sort_by_y )
+            minimum_pmin = sorted_pmin_points[0]
+            return Rect(minimum_pmin, maximum_pmax)
+
+        # Trace which rectangles have been already checked both horizontally and vertically to avoid repeating
+        for rect in self.rects:
+            rect.horizontal_check = False
+            rect.vertical_check = False
+
+        # Save all maximum rectangles in a list to be returned at the end
+        maximum_rectangles = []
+
+        # Group rectangles first horizontally and then vertically
+        for rect in self.rects:
+            # Skip already grouped rectangles horizontally
+            if rect.horizontal_check == True:
+                continue
+            # Set the first row
+            first_row = [ rect ]
+            # Append all rectangles at right from current rectangle to the row
+            rightest = rect
+            while (True):
+                rightest = self.get_right_rect(rightest)
+                if not rightest:
+                    break
+                first_row.append(rightest)
+            # Append all rectangles at left from current rectangle to the row
+            leftest = rect
+            while (True):
+                leftest = self.get_left_rect(leftest)
+                if not leftest:
+                    break
+                first_row.append(leftest)
+            # Set all rectangles in the first row as checked horizontally
+            for rect in first_row:
+                rect.horizontal_check = True
+            # Set the group of rectangles to be joined
+            group = [ rect for rect in first_row ]
+            # If all rectangles in the row have a botton rectangle then add all those new rects to a new row
+            # This new row is then added to the whole group of rectanges and used to find the next row
+            current_row = [ rect for rect in first_row ]
+            while (True):
+                new_row = [ self.get_bottom_rect(rect) for rect in current_row ]
+                if not all(new_row):
+                    break
+                group += new_row
+                current_row = [ *new_row ]
+            # Repeat the process but upperwards
+            current_row = [ rect for rect in first_row ]
+            while (True):
+                new_row = [ self.get_upper_rect(rect) for rect in current_row ]
+                if not all(new_row):
+                    break
+                group += new_row
+                current_row = [ *new_row ]
+            # Create a new rect which contains all group rects
+            maximum_rect = merge_rectangles(group)
+            # Add the new maximum rectnagle to the list if it is not there already
+            if maximum_rect not in maximum_rectangles:
+                maximum_rectangles.append(maximum_rect)
+
+        # Now repeat the process in the inverse order (first vertically, then horizontally)
+        for rect in self.rects:
+            # Skip already grouped rectangles vertically
+            if rect.vertical_check == True:
+                continue
+            # Set the first column
+            first_column = [ rect ]
+            # Append all rectangles at the bottom from current rectangle to the column
+            bottomest = rect
+            while (True):
+                bottomest = self.get_bottom_rect(bottomest)
+                if not bottomest:
+                    break
+                first_column.append(bottomest)
+            # Append all rectangles upper from current rectangle to the column
+            upperest = rect
+            while (True):
+                upperest = self.get_upper_rect(upperest)
+                if not upperest:
+                    break
+                first_column.append(upperest)
+            # Set all rectangles in the first column as checked vertically
+            for rect in first_column:
+                rect.vertical_check = True
+            # Set the group of rectangles to be joined
+            group = [ rect for rect in first_column ]
+            # If all rectangles in the column have a right rectangle then add all those new rects to a new column
+            # This new column is then added to the whole group of rectanges and used to find the next column
+            current_column = [ rect for rect in first_column ]
+            while (True):
+                new_column = [ self.get_right_rect(rect) for rect in current_column ]
+                if not all(new_column):
+                    break
+                group += new_column
+                current_column = [ *new_column ]
+            # Repeat the process but to the left
+            current_column = [ rect for rect in first_column ]
+            while (True):
+                new_column = [ self.get_left_rect(rect) for rect in current_column ]
+                if not all(new_column):
+                    break
+                group += new_column
+                current_column = [ *new_column ]
+            # Create a new rect which contains all group rects
+            maximum_rect = merge_rectangles(group)
+            # Add the new maximum rectnagle to the list if it is not there already
+            if maximum_rect not in maximum_rectangles:
+                maximum_rectangles.append(maximum_rect)
+
+        return maximum_rectangles
+
+    # One by one for each *available rectangle, where available rectangles are the splitted rectangles
+    # Get as many rectanges as possible which are connected horizontally to the current rectangle
+    # Consider all previous rectangles as a single rectange
+    # Remove all previous rectangles from the *available rectangles list
+    def get_row_rectangles(self) -> List[Rect]:
+
+        # Set a function to merge multiple rects into a single big rect
+        # Do it by finding the most maximum pmax and the most minimum pmin
+        def sort_by_x(point):
+            return point.x
+        def merge_rectangles(rects):
+            pmax_points = [ rect.pmax for rect in rects ]
+            sorted_pmax_points = sorted( pmax_points, key=sort_by_x, reverse=True )
+            maximum_pmax = sorted_pmax_points[0]
+            pmin_points = [ rect.pmin for rect in rects ]
+            sorted_pmin_points = sorted( pmin_points, key=sort_by_x )
+            minimum_pmin = sorted_pmin_points[0]
+            return Rect(minimum_pmin, maximum_pmax)
+
+        # Trace which rectangles have been already checked both horizontally and vertically to avoid repeating
+        for rect in self.rects:
+            rect.check = False
+
+        # Save all maximum rectangles in a list to be returned at the end
+        rows = []
+
+        # Group rectangles first horizontally and then vertically
+        for rect in self.rects:
+            # Skip already grouped rectangles horizontally
+            if rect.check == True:
+                continue
+            # Start the row
+            row = [ rect ]
+            # Append all rectangles at right from current rectangle to the row
+            rightest = rect
+            while (True):
+                rightest = self.get_right_rect(rightest)
+                if not rightest:
+                    break
+                row.append(rightest)
+            # Append all rectangles at left from current rectangle to the row
+            leftest = rect
+            while (True):
+                leftest = self.get_left_rect(leftest)
+                if not leftest:
+                    break
+                row.append(leftest)
+            # Set all rectangles in the row as checked
+            for rect in row:
+                rect.check = True
+            # Merge all rectangles in row
+            row_rectangle = merge_rectangles(row)
+            rows.append(row_rectangle)
+
+        return rows
+
+    # One by one for each *available rectangle, where available rectangles are the splitted rectangles
+    # Get as many rectanges as possible which are connected vertically to the current rectangle
+    # Consider all previous rectangles as a single rectange
+    # Remove all previous rectangles from the *available rectangles list
+    def get_column_rectangles(self) -> List[Rect]:
+
+        # Set a function to merge multiple rects into a single big rect
+        # Do it by finding the most maximum pmax and the most minimum pmin
+        def sort_by_y(point):
+            return point.y
+        def merge_rectangles(rects):
+            pmax_points = [ rect.pmax for rect in rects ]
+            sorted_pmax_points = sorted( pmax_points, key=sort_by_y, reverse=True )
+            maximum_pmax = sorted_pmax_points[0]
+            pmin_points = [ rect.pmin for rect in rects ]
+            sorted_pmin_points = sorted( pmin_points, key=sort_by_y )
+            minimum_pmin = sorted_pmin_points[0]
+            return Rect(minimum_pmin, maximum_pmax)
+
+        # Trace which rectangles have been already checked both horizontally and vertically to avoid repeating
+        for rect in self.rects:
+            rect.check = False
+
+        # Save all maximum rectangles in a list to be returned at the end
+        columns = []
+
+        # Group rectangles first horizontally and then vertically
+        for rect in self.rects:
+            # Skip already grouped rectangles horizontally
+            if rect.check == True:
+                continue
+            # Start the column
+            column = [ rect ]
+            # Append all rectangles at the bottom from current rectangle to the column
+            bottomest = rect
+            while (True):
+                bottomest = self.get_bottom_rect(bottomest)
+                if not bottomest:
+                    break
+                column.append(bottomest)
+            # Append all rectangles upper from current rectangle to the column
+            upperest = rect
+            while (True):
+                upperest = self.get_upper_rect(upperest)
+                if not upperest:
+                    break
+                column.append(upperest)
+            # Set all rectangles in the column as checked
+            for rect in column:
+                rect.check = True
+            # Merge all rectangles in column
+            column_rectangle = merge_rectangles(column)
+            columns.append(column_rectangle)
+
+        return columns
+
                 
 
 # Auxiliar functions ---------------------------------------------------------------
@@ -1296,300 +1587,3 @@ def pairwise (values : list, retro : bool = False, loyals = False):
         yield values[i], values[i+1]
     if retro:
         yield values[last], values[0]
-
-# One by one for each *available rectangle, where available rectangles are the splitted rectangles
-# Get as many rectanges as possible which are connected horizontally to the current rectangle
-# Get as many rows of rectangles as possible which are connected vertically to all previous rectangles
-# Consider all previous rectangles as a single rectange
-# Repeat in the inverse order (first vertically, then horizontally)
-# Remove all previous rectangles from the *available rectangles list
-def get_maximum_rectangles(splitted_rects : list = []) -> list:
-
-    # First, some functions are defined to find colliding rects
-    def get_left_rect (rect : Rect):
-        pmax = rect.get_upper_left_point()
-        for r in splitted_rects:
-            if r.pmax == pmax:
-                return r
-        return None
-    def get_right_rect (rect : Rect):
-        pmin = rect.get_bottom_right_point()
-        for r in splitted_rects:
-            if r.pmin == pmin:
-                return r
-        return None
-    def get_upper_rect (rect : Rect):
-        pmin = rect.get_upper_left_point()
-        for r in splitted_rects:
-            if r.pmin == pmin:
-                return r
-        return None
-    def get_bottom_rect (rect : Rect):
-        pmax = rect.get_bottom_right_point()
-        for r in splitted_rects:
-            if r.pmax == pmax:
-                return r
-        return None
-
-    # Set a function to merge multiple rects into a single big rect
-    # Do it by finding the most maximum pmax and the most minimum pmin
-    def sort_by_x(point):
-        return point.x
-    def sort_by_y(point):
-        return point.y
-    def merge_rectangles(rects):
-        pmax_points = [ rect.pmax for rect in rects ]
-        sorted_pmax_points = sorted( sorted( pmax_points, key=sort_by_x, reverse=True ), key=sort_by_y, reverse=True )
-        maximum_pmax = sorted_pmax_points[0]
-        pmin_points = [ rect.pmin for rect in rects ]
-        sorted_pmin_points = sorted( sorted( pmin_points, key=sort_by_x), key=sort_by_y )
-        minimum_pmin = sorted_pmin_points[0]
-        return Rect(minimum_pmin, maximum_pmax)
-
-    # Trace which rectangles have been already checked both horizontally and vertically to avoid repeating
-    for splitted_rect in splitted_rects:
-        splitted_rect.horizontal_check = False
-        splitted_rect.vertical_check = False
-
-    # Save all maximum rectangles in a list to be returned at the end
-    maximum_rectangles = []
-
-    # Group rectangles first horizontally and then vertically
-    for splitted_rect in splitted_rects:
-        # Skip already grouped rectangles horizontally
-        if splitted_rect.horizontal_check == True:
-            continue
-        # Set the first row
-        first_row = [ splitted_rect ]
-        # Append all rectangles at right from current rectangle to the row
-        rightest = splitted_rect
-        while (True):
-            rightest = get_right_rect(rightest)
-            if not rightest:
-                break
-            first_row.append(rightest)
-        # Append all rectangles at left from current rectangle to the row
-        leftest = splitted_rect
-        while (True):
-            leftest = get_left_rect(leftest)
-            if not leftest:
-                break
-            first_row.append(leftest)
-        # Set all rectangles in the first row as checked horizontally
-        for rect in first_row:
-            rect.horizontal_check = True
-        # Set the group of rectangles to be joined
-        group = [ rect for rect in first_row ]
-        # If all rectangles in the row have a botton rectangle then add all those new rects to a new row
-        # This new row is then added to the whole group of rectanges and used to find the next row
-        current_row = [ rect for rect in first_row ]
-        while (True):
-            new_row = [ get_bottom_rect(rect) for rect in current_row ]
-            if not all(new_row):
-                break
-            group += new_row
-            current_row = [ *new_row ]
-        # Repeat the process but upperwards
-        current_row = [ rect for rect in first_row ]
-        while (True):
-            new_row = [ get_upper_rect(rect) for rect in current_row ]
-            if not all(new_row):
-                break
-            group += new_row
-            current_row = [ *new_row ]
-        # Create a new rect which contains all group rects
-        maximum_rect = merge_rectangles(group)
-        # Add the new maximum rectnagle to the list if it is not there already
-        if maximum_rect not in maximum_rectangles:
-            maximum_rectangles.append(maximum_rect)
-
-    # Now repeat the process in the inverse order (first vertically, then horizontally)
-    for splitted_rect in splitted_rects:
-        # Skip already grouped rectangles vertically
-        if splitted_rect.vertical_check == True:
-            continue
-        # Set the first column
-        first_column = [ splitted_rect ]
-        # Append all rectangles at the bottom from current rectangle to the column
-        bottomest = splitted_rect
-        while (True):
-            bottomest = get_bottom_rect(bottomest)
-            if not bottomest:
-                break
-            first_column.append(bottomest)
-        # Append all rectangles upper from current rectangle to the column
-        upperest = splitted_rect
-        while (True):
-            upperest = get_upper_rect(upperest)
-            if not upperest:
-                break
-            first_column.append(upperest)
-        # Set all rectangles in the first column as checked vertically
-        for rect in first_column:
-            rect.vertical_check = True
-        # Set the group of rectangles to be joined
-        group = [ rect for rect in first_column ]
-        # If all rectangles in the column have a right rectangle then add all those new rects to a new column
-        # This new column is then added to the whole group of rectanges and used to find the next column
-        current_column = [ rect for rect in first_column ]
-        while (True):
-            new_column = [ get_right_rect(rect) for rect in current_column ]
-            if not all(new_column):
-                break
-            group += new_column
-            current_column = [ *new_column ]
-        # Repeat the process but to the left
-        current_column = [ rect for rect in first_column ]
-        while (True):
-            new_column = [ get_left_rect(rect) for rect in current_column ]
-            if not all(new_column):
-                break
-            group += new_column
-            current_column = [ *new_column ]
-        # Create a new rect which contains all group rects
-        maximum_rect = merge_rectangles(group)
-        # Add the new maximum rectnagle to the list if it is not there already
-        if maximum_rect not in maximum_rectangles:
-            maximum_rectangles.append(maximum_rect)
-
-    return maximum_rectangles
-
-# One by one for each *available rectangle, where available rectangles are the splitted rectangles
-# Get as many rectanges as possible which are connected horizontally to the current rectangle
-# Consider all previous rectangles as a single rectange
-# Remove all previous rectangles from the *available rectangles list
-def get_row_rectangles(splitted_rects : list = []) -> list:
-
-    # First, some functions are defined to find colliding rects
-    def get_left_rect (rect : Rect):
-        pmax = rect.get_upper_left_point()
-        for r in splitted_rects:
-            if r.pmax == pmax:
-                return r
-        return None
-    def get_right_rect (rect : Rect):
-        pmin = rect.get_bottom_right_point()
-        for r in splitted_rects:
-            if r.pmin == pmin:
-                return r
-        return None
-
-    # Set a function to merge multiple rects into a single big rect
-    # Do it by finding the most maximum pmax and the most minimum pmin
-    def sort_by_x(point):
-        return point.x
-    def merge_rectangles(rects):
-        pmax_points = [ rect.pmax for rect in rects ]
-        sorted_pmax_points = sorted( pmax_points, key=sort_by_x, reverse=True )
-        maximum_pmax = sorted_pmax_points[0]
-        pmin_points = [ rect.pmin for rect in rects ]
-        sorted_pmin_points = sorted( pmin_points, key=sort_by_x )
-        minimum_pmin = sorted_pmin_points[0]
-        return Rect(minimum_pmin, maximum_pmax)
-
-    # Trace which rectangles have been already checked both horizontally and vertically to avoid repeating
-    for splitted_rect in splitted_rects:
-        splitted_rect.check = False
-
-    # Save all maximum rectangles in a list to be returned at the end
-    rows = []
-
-    # Group rectangles first horizontally and then vertically
-    for splitted_rect in splitted_rects:
-        # Skip already grouped rectangles horizontally
-        if splitted_rect.check == True:
-            continue
-        # Start the row
-        row = [ splitted_rect ]
-        # Append all rectangles at right from current rectangle to the row
-        rightest = splitted_rect
-        while (True):
-            rightest = get_right_rect(rightest)
-            if not rightest:
-                break
-            row.append(rightest)
-        # Append all rectangles at left from current rectangle to the row
-        leftest = splitted_rect
-        while (True):
-            leftest = get_left_rect(leftest)
-            if not leftest:
-                break
-            row.append(leftest)
-        # Set all rectangles in the row as checked
-        for rect in row:
-            rect.check = True
-        # Merge all rectangles in row
-        row_rectangle = merge_rectangles(rows)
-        rows.append(row_rectangle)
-
-    return rows
-
-# One by one for each *available rectangle, where available rectangles are the splitted rectangles
-# Get as many rectanges as possible which are connected vertically to the current rectangle
-# Consider all previous rectangles as a single rectange
-# Remove all previous rectangles from the *available rectangles list
-def get_column_rectangles(splitted_rects : list = []) -> list:
-
-    # First, some functions are defined to find colliding rects
-    def get_upper_rect (rect : Rect):
-        pmin = rect.get_upper_left_point()
-        for r in splitted_rects:
-            if r.pmin == pmin:
-                return r
-        return None
-    def get_bottom_rect (rect : Rect):
-        pmax = rect.get_bottom_right_point()
-        for r in splitted_rects:
-            if r.pmax == pmax:
-                return r
-        return None
-
-    # Set a function to merge multiple rects into a single big rect
-    # Do it by finding the most maximum pmax and the most minimum pmin
-    def sort_by_y(point):
-        return point.y
-    def merge_rectangles(rects):
-        pmax_points = [ rect.pmax for rect in rects ]
-        sorted_pmax_points = sorted( pmax_points, key=sort_by_y, reverse=True )
-        maximum_pmax = sorted_pmax_points[0]
-        pmin_points = [ rect.pmin for rect in rects ]
-        sorted_pmin_points = sorted( pmin_points, key=sort_by_y )
-        minimum_pmin = sorted_pmin_points[0]
-        return Rect(minimum_pmin, maximum_pmax)
-
-    # Trace which rectangles have been already checked both horizontally and vertically to avoid repeating
-    for splitted_rect in splitted_rects:
-        splitted_rect.check = False
-
-    # Save all maximum rectangles in a list to be returned at the end
-    columns = []
-
-    # Group rectangles first horizontally and then vertically
-    for splitted_rect in splitted_rects:
-        # Skip already grouped rectangles horizontally
-        if splitted_rect.check == True:
-            continue
-        # Start the column
-        column = [ splitted_rect ]
-        # Append all rectangles at the bottom from current rectangle to the column
-        bottomest = splitted_rect
-        while (True):
-            bottomest = get_bottom_rect(bottomest)
-            if not bottomest:
-                break
-            column.append(bottomest)
-        # Append all rectangles upper from current rectangle to the column
-        upperest = splitted_rect
-        while (True):
-            upperest = get_upper_rect(upperest)
-            if not upperest:
-                break
-            column.append(upperest)
-        # Set all rectangles in the column as checked
-        for rect in column:
-            rect.check = True
-        # Merge all rectangles in column
-        column_rectangle = merge_rectangles(column)
-        columns.append(column_rectangle)
-
-    return columns

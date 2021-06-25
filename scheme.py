@@ -106,7 +106,7 @@ class Room:
             free_rects = self.perimeter.rects
         # Otherwise, split in rectangles using the children as exclusion perimeters
         else:
-            free_rects = self.perimeter.split_in_rectangles( exclusion_perimeters = [ child.perimeter for child in self.children if child.perimeter ] )
+            free_rects = Grid(self.perimeter.split_in_rectangles( exclusion_perimeters = [ child.perimeter for child in self.children if child.perimeter ] ))
         # Apply the current room colors to all rectangles
         for rect in free_rects:
             rect.segments_color = self.segments_color
@@ -134,7 +134,7 @@ class Room:
             free_mrects = self.perimeter.mrects
         # Otherwise, split in rectangles using the children as exclusion perimeters
         else:
-            free_mrects = get_maximum_rectangles( self.free_rects )
+            free_mrects = self.free_rects.get_maximum_rectangles()
         # Apply the current room colors to all rectangles
         for rect in free_mrects:
             rect.segments_color = self.segments_color
@@ -257,7 +257,9 @@ class Room:
         room.perimeter = base_perimeter
 
         # Procedd with the expansion of this child room until it reaches its forced area
-        room.expand_room()
+        while room.get_required_area() > 0:
+            if not room.expand_room():
+                break
         
         self.update_display()
 
@@ -307,13 +309,17 @@ class Room:
         maximum_rect = Rect.from_corner(corner, new_x_size, new_y_size)
         return Perimeter(maximum_rect.get_segments())
 
+    # Calculate how much area we need to expand
+    def get_required_area (self):
+        return resolute(self.forced_area - self.area, base_resolution - 2)
+
     # Find the most suitable space for the current room to claim
     # If current room is expanded over another room then the other room must also expand to compensate
     # At the end, the extra space will be substracted from the parent free space
     def expand_room (self):
 
         # Calculate how much area we need to expand
-        required_area = resolute(self.forced_area - self.area, base_resolution - 2)
+        required_area = self.get_required_area()
         print('Forced area: ' + str(self.forced_area))
         print('Current area: ' + str(self.area))
         print('Required area: ' + str(required_area))
@@ -373,11 +379,11 @@ class Room:
             # This is because rectangles size is given in a (x,y) tuple format
             # So size[0] = x and size[1] = 1
             if frontier.is_vertical():
-                rects = get_column_rectangles(rects)
+                rects = rects.get_column_rectangles()
                 forward = 0
                 sides = 1
             elif frontier.is_horizontal():
-                rects = get_row_rectangles(rects)
+                rects = rects.get_row_rectangles()
                 forward = 1
                 sides = 0
             else:
