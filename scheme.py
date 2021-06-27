@@ -27,9 +27,8 @@ class Room:
         children : list = [],
         ):
         # Set internal variables
-        self._free_rects = None
-        self._free_mrects = None
         self._perimeter = None
+        self._free_grid = None
         # Set representation parameters
         self.display = display
         self.name = name
@@ -38,9 +37,7 @@ class Room:
         # Set up the hierarchy of rooms
         self.parent = None
         self.children = []
-        # Set the perimeter and the real area
-        # Self area is updated when the perimeter is set
-        self.area = None
+        # Set the perimeter
         # If the perimeter has been forced then update the display with the initial segments
         if perimeter:
             self.perimeter = perimeter
@@ -55,8 +52,6 @@ class Room:
         # If the forced area does not cover the minimum size it makes no sense
         if min_size and forced_area < min_size**2:
             raise InputError('Forced area is not sufficient for the minimum size in room ' + name)
-        # Set the free area: area where there is no children rooms
-        self.free_area = self.area
         # Set size limits
         if min_size or min_size == 0:
             self.min_size = min_size
@@ -70,8 +65,6 @@ class Room:
             self.max_size = None
         # Set up all children rooms
         self.add_children(children)
-        # Update the representation after the setup
-        #self.update_display()
 
     # Get the perimeter
     # Just return the internal perimeter value
@@ -82,79 +75,76 @@ class Room:
     # Reset the own rects and the parent rects also
     def set_perimeter (self, perimeter):
         self._perimeter = perimeter
-        self.reset_rects()
+        self.reset_free_grid()
         if self.parent:
-            self.parent.reset_rects()
-        if perimeter:
-            self.area = perimeter.area
+            self.parent.reset_free_grid()
 
-    # The area is treated appart since it may be an expensive calculation
+    # The room perimeter
     perimeter = property(get_perimeter, set_perimeter, None, "The room perimeter")
 
-    # Get the available space inside de perimeter splitted in rects
+    # Area inside the room perimeter (read only)
+    def get_area(self):
+        return self.perimeter.area
+    area = property(get_area, None, None, "Area inside the room perimeter")
+
+    # Get the available space inside the room perimeter as a rectangles grid
     # i.e. space not filled by children rooms
-    def get_free_rects (self):
+    def get_free_grid (self):
         # If rects are previously calculated then return them
-        if self._free_rects:
-            return self._free_rects
+        if self._free_grid:
+            return self._free_grid
         # Return none if there is not perimeter yet
         if not self.perimeter:
             return None
         # If there are no children then return the current perimeter rectangles
         # If all children have no perimeter then return the current perimeter rectangles
         if len(self.children) == 0 or not any([ child.perimeter for child in self.children ]):
-            free_rects = self.perimeter.rects
+            free_grid = self.perimeter.grid
         # Otherwise, split in rectangles using the children as exclusion perimeters
         else:
-            free_rects = Grid(self.perimeter.split_in_rectangles( exclusion_perimeters = [ child.perimeter for child in self.children if child.perimeter ] ))
+            children_perimeters = [ child.perimeter for child in self.children if child.perimeter ]
+            free_rects = self.perimeter.split_in_rectangles( exclusion_perimeters = children_perimeters )
+            free_grid = Grid(free_rects)
         # Apply the current room colors to all rectangles
-        for rect in free_rects:
+        for rect in free_grid.rects:
             rect.segments_color = self.segments_color
             rect.fill_color = self.fill_color
-        self._free_rects = free_rects
-        # Represent the new free rectangles in red color
-        colored_rects = [ rect.get_colored_rect(segments_color='red') for rect in free_rects ]
-        self.update_display(colored_rects)
-        return free_rects
+        self._free_grid = free_grid
+        # ---------------------------------------------------------------------------------------------------
+        # DANI: Muestra los rects la primera vez que se calculan
+        colored_rects = [ rect.get_colored_rect(segments_color='red') for rect in free_grid.rects ]
+        #self.update_display(colored_rects)
+        # ---------------------------------------------------------------------------------------------------
+        return free_grid
+    # Free space grid (read only)
+    free_grid = property(get_free_grid, None, None, "The room free space grid")
 
-    # The area is treated appart since it may be an expensive calculation
+    # Get rectangles in the free grid
+    def get_free_rects (self):
+        return self.free_grid.rects
     free_rects = property(get_free_rects, None, None, "The room free area splitted in rectangles")
 
-    # Get the maximum joined rectangles from the free rectangles
-    def get_free_mrects (self):
-        # If rects are previously calculated then return them
-        if self._free_mrects:
-            return self._free_mrects
-        # Return none if there is not perimeter yet
-        if not self.perimeter:
-            return None
-        # If there are no children then return the current perimeter rectangles
-        # If all children have no perimeter then return the current perimeter rectangles
-        if len(self.children) == 0 or not any([ child.perimeter for child in self.children ]):
-            free_mrects = self.perimeter.mrects
-        # Otherwise, split in rectangles using the children as exclusion perimeters
-        else:
-            free_mrects = self.free_rects.get_maximum_rectangles()
-        # Apply the current room colors to all rectangles
-        for rect in free_mrects:
-            rect.segments_color = self.segments_color
-            rect.fill_color = self.fill_color
-        self._free_mrects = free_mrects
-        # Represent the new free maximum rectangles
-        colored_rects = [ rect.get_colored_rect(segments_color='blue') for rect in free_mrects ]
-        self.update_display(colored_rects)
-        return free_mrects
+    # Get the maximum rectangles from the free grid
+    def get_free_max_rects (self):
+        # ---------------------------------------------------------------------------------------------------
+        # DANI: Muestra los max rects la primera vez que se calculan
+        first_time = self.free_grid._max_rects == None
+        if first_time:
+            colored_rects = [ rect.get_colored_rect(segments_color='blue') for rect in self.free_grid.max_rects ]
+            #self.update_display(colored_rects)
+        # ---------------------------------------------------------------------------------------------------
+        return self.free_grid.max_rects
+    free_max_rects = property(get_free_max_rects, None, None, "The free maximum rectangles")
 
-    # The area is treated appart since it may be an expensive calculation
-    free_mrects = property(get_free_mrects, None, None, "The maximum free are rectnagles")
+    # Free space area (read only)
+    def get_free_area (self):
+        return self.free_grid.area
+    free_area = property(get_free_area, None, None, "Free space area (read only)")
 
     # Reset all minimum and maximum free rects
     # This must be done each time the perimeter is modified since they are not valid anymore
-    def reset_rects (self):
-        self._free_rects = None
-        self._free_mrects = None
-        self.get_free_rects()
-        self.get_free_mrects()
+    def reset_free_grid (self):
+        self._free_grid = None
 
     # Check if a rectangle fits somewhere in the perimeter
     # Iterate over all maximum rectangles and try to fit
@@ -162,7 +152,7 @@ class Room:
     def fit (self, x_fit_size : number, y_fit_size : number = None):
         if not y_fit_size:
             y_fit_size = x_fit_size
-        for rect in self.free_mrects:
+        for rect in self.free_max_rects:
             x_size, y_size = rect.get_size()
             if x_fit_size <= x_size and y_fit_size <= y_size:
                 return True
@@ -175,7 +165,7 @@ class Room:
         fit_rects = []
         if not y_fit_size:
             y_fit_size = x_fit_size
-        for rect in self.free_mrects:
+        for rect in self.free_max_rects:
             x_size, y_size = rect.get_size()
             if x_fit_size <= x_size and y_fit_size <= y_size:
                 fit_rects.append(rect)
@@ -228,7 +218,7 @@ class Room:
         return False
 
     # Set up a room perimeter
-    def set_child_room_perimeter (self, room):
+    def set_child_room_perimeter (self, room) -> bool:
         # Find a suitable maximum free rectangle to deploy a starting base perimeter
         # The minimum base perimeter is a square with both sides as long as the room minimum size
         suitable_rects = self.get_fit(room.min_size)
@@ -253,15 +243,14 @@ class Room:
                         return initial_perimeter
             return None
         base_perimeter = set_base_perimeter()
-        # La vida
+        # Set the child first perimeter, which automatically resets this room free grid
         room.perimeter = base_perimeter
+        #self.update_display()
 
-        # Procedd with the expansion of this child room until it reaches its forced area
-        while room.get_required_area() > 0:
-            if not room.expand_room():
-                break
-        
-        self.update_display()
+        # Proceed with the expansion of this child room until it reaches its forced area
+        if not room.expand():
+            return False
+        return True
 
     # Set the initial room perimeter as the maximum possible rectangle
     # This is a shortcut to skip the difficult expansion protocol
@@ -313,10 +302,18 @@ class Room:
     def get_required_area (self):
         return resolute(self.forced_area - self.area, base_resolution - 2)
 
+    # Expand this room until it reaches the forced area
+    def expand (self) -> bool:
+        while self.get_required_area() > 0:
+            if not self.expand_step():
+                return False
+            self.update_display()
+        return True
+
     # Find the most suitable space for the current room to claim
     # If current room is expanded over another room then the other room must also expand to compensate
     # At the end, the extra space will be substracted from the parent free space
-    def expand_room (self):
+    def expand_step (self) -> bool:
 
         # Calculate how much area we need to expand
         required_area = self.get_required_area()
@@ -342,17 +339,17 @@ class Room:
         for room in brother_rooms:
             frontiers = self.get_frontiers(room)
             if frontiers:
-                brother_frontiers.append(frontiers)
+                brother_frontiers += frontiers
         # The prefered limits to expand are those connected to free space inside the current parent
         # First of all get all already found frontier segments
-        all_frontiers = [parent_frontiers, *brother_frontiers]
-        all_frontier_segments = []
-        for frontier in all_frontiers:
-            all_frontier_segments += frontier
-        # Now susbstract all frontier segments to each room perimeter segments to find free frontiers
+        all_frontiers = [*parent_frontiers, *brother_frontiers]
+        # Now susbstract all frontiers to each room perimeter segments to find free frontiers
         free_frontiers = []
         for segment in self.perimeter.segments:
-            free_frontiers += segment.substract_segments(all_frontier_segments)
+            free_frontiers += segment.substract_segments(all_frontiers)
+        # Set the room all free segment belong to as None
+        for segment in free_frontiers:
+            segment.room = None
 
         # ----------------------------------------------------------------------------------------------------
         # Try to expand in the easiest way: push an individual frontier segment
@@ -363,10 +360,15 @@ class Room:
         # - Space must never be divided as a result of the expansion
         # ----------------------------------------------------------------------------------------------------
 
-        for frontier in free_frontiers:
-            rects = parent_room.free_rects
-            mrects = parent_room.free_mrects
-            contact_mrects = [ rect for rect in mrects if frontier in rect ]
+        def expand_frontier (frontier : Segment) -> bool:
+            print("Expanding '" + self.name + "' -> " + str(frontier))
+            # Set some parameters according to the room this frontier belongs to
+            room = frontier.room
+            grid = room.perimeter.grid if room else parent_room.free_grid
+            margin_limit = room.min_size if room else parent_room.min_size
+            # Find the maximum rectangles which are in contact with our frontier
+            max_rects = grid.max_rects
+            contact_max_rects = [ rect for rect in max_rects if frontier in rect ]
             # In case segment is vertical:
             # - The expansion uses maximum columns
             # - The expansion 'froward' is the x dimension
@@ -379,11 +381,11 @@ class Room:
             # This is because rectangles size is given in a (x,y) tuple format
             # So size[0] = x and size[1] = 1
             if frontier.is_vertical():
-                rects = rects.get_column_rectangles()
+                rects = grid.find_column_rectangles()
                 forward = 0
                 sides = 1
             elif frontier.is_horizontal():
-                rects = rects.get_row_rectangles()
+                rects = grid.find_row_rectangles()
                 forward = 1
                 sides = 0
             else:
@@ -398,15 +400,14 @@ class Room:
             forward_direction = space_contact.get_middle_point() + space.get_middle_point()
 
             # Get the forward expansion limit according to maximum rectangles
-            maximum_forward_limit = max([ rect.get_size()[forward] for rect in contact_mrects ])
-            margin = parent_room.min_size
-            margined_forward_limit = maximum_forward_limit - margin
+            maximum_forward_limit = max([ rect.get_size()[forward] for rect in contact_max_rects ])
+            margined_forward_limit = maximum_forward_limit - margin_limit
 
             # Now create a function to make a rectangle by pushing a segment (which may change)
             # The forward length of this rectangle will depend on the available area and limits
             # This segment may not be the original frontier, but a variation of it
-            def push_segment (pushed_segment : Segment):
-                print('PUSHED SEGMENT: ' + str(pushed_segment))
+            def push_segment (pushed_segment : Segment) -> bool:
+                #print('PUSHED SEGMENT: ' + str(pushed_segment))
                 pushed_segment_size = pushed_segment.length
                 push_length = required_area / pushed_segment_size
                 # If the length exceeds the maximum limit then stay in the maximum limit
@@ -420,17 +421,66 @@ class Room:
                     push_length = space_forward_limit
                 # Create the new rect with the definitive length
                 new_point = pushed_segment.a + forward_direction.normalized() * push_length
-                print('NEW POINT: ' + str(new_point))
+                #print('NEW POINT: ' + str(new_point))
                 new_side = Segment(pushed_segment.a, new_point)
                 new_rect = Rect.from_segments([pushed_segment, new_side])
                 # Then add the new current rectangle by modifying the current perimeter
                 # Substract the pushed segment from the perimeter and add the new created segments
+                # First find the new created segments as a result of the expansion
                 new_segments = [ seg for seg in new_rect.segments if seg != pushed_segment ]
+                # In addition, it may happend that the new segments overlap with current segments
+                # e.g. when the expanded frontier makes a corner with another segment from this room
+                # In those cases we must substract the overlapped part from both new and current segments
+                overlap_segments = []
+                substract_segments = []
+                for current_segment in self.perimeter.segments:
+                    for new_segment in new_segments:
+                        overlap = new_segment.get_overlap_segment(current_segment)
+                        if overlap:
+                            overlap_segments += [current_segment, new_segment]
+                            current_substracted_segments = current_segment.substract_segments([overlap])
+                            new_substracted_segments = new_segment.substract_segments([overlap])
+                            substract_segments += current_substracted_segments + new_substracted_segments
+                new_segments = [ seg for seg in new_segments if seg not in overlap_segments ]
+                new_segments += substract_segments
+                # We must find all current perimeter segments which will be modified by the push
+                # Find the whole segment where the pushed segment comes from, which will always be modified
                 deformed_segment = next( seg for seg in self.perimeter.segments if pushed_segment in seg )
-                remaining_segments = [ seg for seg in self.perimeter.segments if seg != deformed_segment ]
+                # Substract the pushed segment from the whole segment
+                # WARNING: This step must be done after the subtsraction of overlapped segments
                 new_segments += deformed_segment.substract_segments([ pushed_segment ])
-                new_perimeter = Perimeter([ *remaining_segments, *new_segments ])
-                self.perimeter = new_perimeter
+                # Find the rest of segments in the perimeter that will stay the same
+                modified_segments = [ deformed_segment, *overlap_segments ]
+                remaining_segments = [ seg for seg in self.perimeter.segments if seg not in modified_segments ]
+                # Join all previous segments to make the new perimeter
+                new_perimeter = Perimeter.non_canonical([ *remaining_segments, *new_segments ])
+                # In case the perimeter is extended over another room,
+                # We must substract the claimed rect from the other room and make it expand to compensate
+                if room:
+                    # Make a backup of the current perimeter in case the further expansions fail an we have to go back
+                    backup_perimeter = self.perimeter
+                    self.perimeter = new_perimeter
+                    # Substract the claimed rect from the other room
+                    exclusion_perimeters = [ Perimeter(new_rect.segments) ]
+                    truncated_grid = Grid( room.perimeter.split_in_rectangles( exclusion_perimeters ) )
+                    truncated_perimeters = truncated_grid.find_perimeters()
+                    # In case the invaded room has been splitted in 2 parts as a result of this expansion we go back
+                    if len(truncated_perimeters) > 1:
+                        print('WARNING: The room has been splitted -> Go back')
+                        self.perimeter = backup_perimeter
+                        return False
+                    # Modify the invaded room perimeter
+                    room.perimeter = truncated_perimeters[0]
+                    # Expand the invaded room as much as the invaded area
+                    # In case the expansions fails go back
+                    if not room.expand():
+                        print('WARNING: The room cannot expand -> Go back')
+                        self.perimeter = backup_perimeter
+                        return False
+                else:
+                    self.perimeter = new_perimeter
+                return True
+                 
 
             # ----------------------------------------------------------------------------------------------------
             # First of all check if frontier points are connected to the space limits
@@ -452,13 +502,12 @@ class Room:
             margin_b = Segment(space_contact.b, frontier_b) if space_contact.b != frontier_b else None
 
             # If a margin exists and it is not as long as required we have a problem
-            problem_a = margin_a and margin_a.length < parent_room.min_size
-            problem_b = margin_b and margin_b.length < parent_room.min_size
+            problem_a = margin_a and margin_a.length < margin_limit
+            problem_b = margin_b and margin_b.length < margin_limit
 
             # If there is no problem we can just push the frontier
             if not problem_a and not problem_b:
-                push_segment(frontier)
-                return True
+                return push_segment(frontier)
 
             # ----------------------------------------------------------------------------------------------------
             # If a margin is not respected then we have 2 options (no option will always be possible):
@@ -470,8 +519,13 @@ class Room:
             # ----------------------------------------------------------------------------------------------------
 
             return False
-        
-        #print(free_frontiers)
+
+        # Try to expand one by one all frontiers until one of them is expanded sucessfully
+        # Once an expansion has been done we must recalculate frontiers if we want to keep expanding
+        for frontier in [ *free_frontiers, *brother_frontiers ]:
+            if expand_frontier(frontier):
+                return True
+        return False
 
 
     # Get all overlapped segments between the current room and others
@@ -483,6 +537,8 @@ class Room:
             for other_segment in other_segments:
                 overlap_segment = self_segment.get_overlap_segment(other_segment)
                 if overlap_segment:
+                    # Save the room this segment belongs to inside the segment object
+                    overlap_segment.room = other
                     overlap_segments.append(overlap_segment)
         return overlap_segments
 

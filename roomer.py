@@ -12,7 +12,7 @@ if __name__ == '__main__':
     setup_display()
 
     distribution = Room(
-        perimeter=Perimeter.from_corners(test_perimeter_2),
+        perimeter=Perimeter.from_corners(test_perimeter_4),
         display=True,
         name='Planta',
         children=[

@@ -684,7 +684,7 @@ class Rect:
         self._area = resolute(x_size * y_size, base_resolution - 2)
         return self._area
 
-    # The area is treated appart since it may be an expensive calculation
+    # The rectangle area (read only)
     area = property(get_area, None, None, "The rectangle area")
 
     # Return a segment which crosses the rectangle in diagonal from min to max point
@@ -701,7 +701,7 @@ class Rect:
     def get_colored_rect(self, segments_color : str = 'black', fill_color : str = 'white') -> 'Rect':
         return Rect(self.pmin, self.pmax, segments_color, fill_color)
 
-    # Split a rect in as many rects as specified by the 'x' and 'y' cuts
+    # Split the rect in as many rects as specified by the 'x' and 'y' cuts
     # DANI: No lo he provado desde que lo moví de abajo
     def split (self, x_splits : list = [], y_splits : list = []):
         # Get the rectangle minimum and maximum values
@@ -787,26 +787,89 @@ class Rect:
         return rects
 
 # A perimeter defined by several segments
-# The perimeter parameters must never be modified
+# WARNING: The perimeter parameters must never be modified
 # Instead, a new perimeter must be created every time a perimeter needs to be modified
+# IMPORTANT: Segments must follow some standards:
+# - All segments are in the same direction: each segment 'b' point is the next segment 'a' point
+# - The perimeter is closed: the last segment 'b' point is the first segment 'a' point
+# - There are no splitted segments: connected segments are always in different lines (i.e. making a corner)
 class Perimeter:
 
     def __init__(self, segments : list, segments_color = 'black', fill_color = 'white'):
         self.segments = segments
+        # Check the perimeter is closed and segments are not diagonal
+        self.check()
+        # Save display parameters
         self.segments_color = segments_color
         self.fill_color = fill_color
         # Color at this moment all segments
         for segment in segments:
             segment.color = segments_color
-        # Check the perimeter is closed and segments are not diagonal
-        self.check()
         self._corners = None
-        self._rects = None
-        self._mrects = None
-        self._area = None
+        self._grid = None
 
-    # Set the perimeter from its corners
-    # The new rect will contain all rects
+    # Set a class constant error
+    open_perimeter_error = RuntimeError('The perimeter is not closed')
+
+    # Set the perimeter from segments in a non-canonical format
+    # Segments will be sorted, flipped and merged as necessary to accomplish the perimeter standard
+    @classmethod
+    def non_canonical(cls, segments : List[Segment]):
+
+        # Check each perimeter segment to not be diagonal
+        for segment in segments:
+            if segment.is_diagonal():
+                raise RuntimeError('The perimeter has diagonal segments, which are not supported')
+
+        # ---------------------------------------------------------------------------------
+        # Format segments in a way that segments and their points are ordered
+        # i.e. each segment 'b' point is the 'a' point of the next segment
+        # The first segment 'a' point must be the final segment 'b' point
+        # If the list of segments cannot be formatted like this then return an error
+        # ---------------------------------------------------------------------------------
+        # Check that each segment ends in the same point that the next segment starts
+        ordered_segments = [ segments[0] ]
+        available_segments = segments[1:]
+        while ( len(ordered_segments) < len(segments) ):
+            # If there are no more available segments return error
+            # This may happen in case there was a duplicated segment, which means the perimeter is wrong
+            if len(available_segments) == 0:
+                raise cls.open_perimeter_error
+            # Get the last ordered segment to find which is the next connected segment
+            last_ordered_segment = ordered_segments[-1]
+            last_point = last_ordered_segment.b
+            # Get the segment which is connected with the previous segment
+            connected_segment = next((segment for segment in available_segments if last_point in segment.points), None)
+            if not connected_segment:
+                raise cls.open_perimeter_error
+            # Remove the connected segment from the available 
+            available_segments = [ segment for segment in available_segments if segment != connected_segment ]
+            # The connected segment must be connected by the 'a' point
+            # If it is connected by the 'b' point then get the inverted segment
+            if connected_segment.b == last_point:
+                connected_segment = connected_segment.inverted()
+            ordered_segments.append(connected_segment)
+        # Finally, check that the first segment and the last segment are also connected
+        if ordered_segments[0].a != ordered_segments[-1].b:
+            raise cls.open_perimeter_error
+        segments = ordered_segments
+            
+        # Merge continuous segments (i.e. connected segments in the same line)
+        count = 0
+        while (count < len(segments)):
+            for current, nextone in pairwise(segments, retro=True):
+                if current.same_line_as(nextone):
+                    merged_segment = Segment(current.a, nextone.b)
+                    segments = [ seg for seg in segments if seg not in [current, nextone] ]
+                    segments.insert(count, merged_segment)
+                    count = 0
+                    break
+                count += 1
+
+        # Build the canonical perimeter
+        return cls(segments)
+
+    # Set the perimeter from its corners in order
     @classmethod
     def from_corners(cls, corners : List[Corner]):
         # Check that there are at least 4 points
@@ -817,7 +880,7 @@ class Perimeter:
         for a,b in pairwise(corners, retro=True):
             new_segment = Segment(a,b)
             segments.append(new_segment)
-        # Build the rectangle
+        # Build the perimeter
         return cls(segments)
 
     def __str__(self):
@@ -852,49 +915,47 @@ class Perimeter:
     # The area is treated appart since it may be an expensive calculation
     corners = property(get_corners, None, None, "The perimeter corners")
 
-    # Get all rectangles which form the perimeter
-    def get_rects(self):
-        # If rects are previously calculated then return them
-        if self._rects:
-            return self._rects
-        # Get all rectangles which form the perimeter
-        rects = Grid.from_perimeter(self)
-        # Apply the perimter color
+    # Get the perimeter grid
+    def get_grid(self):
+        # If grid already exists then return it
+        if self._grid:
+            return self._grid
+        # Otherwise, set the grid
+        # Split the perimeter in rectangles in a grid-friendly format
+        rects = self.split_in_rectangles()
+        # Apply the perimter color to each rectangle
         for rect in rects:
             rect.color = self.fill_color
-        self._rects = rects
-        return rects
+        # Set, save and return the grid
+        self._grid = Grid(rects)
+        return self._grid
 
-    # The area is treated appart since it may be an expensive calculation
-    rects = property(get_rects, None, None, "The rectangles which form the perimeter")
+    # The perimeter grid (read only)
+    grid = property(get_grid, None, None, "The perimeter grid")
 
-    # Get all rectangles which form the perimeter
-    def get_mrects(self):
-        # If rects are previously calculated then return them
-        if self._mrects:
-            return self._mrects
-        # Get all rectangles which form the perimeter
-        mrects = self.rects.get_maximum_rectangles()
-        self._mrects = mrects
-        return mrects
+    # Get the perimeter grid rectangles (read only)
+    def get_rects(self):
+        return self.grid.rects
+    rects = property(get_rects, None, None, "The perimeter grid rectangles")
 
-    # The area is treated appart since it may be an expensive calculation
-    mrects = property(get_mrects, None, None, "The maximum rectangles posible inside the perimeter")
+    # Get maximum rectangles in the perimeter grid (read only)
+    def get_max_rects(self):
+        return self.grid.max_rects
+    max_rects = property(get_max_rects, None, None, "The maximum rectangles in the perimeter grid")
 
-    # Get the area inside the perimeter
+    # Get row rectangles in the perimeter grid (read only)
+    def get_row_rects(self):
+        return self.grid.row_rects
+    row_rects = property(get_row_rects, None, None, "The row rectangles in the perimeter grid")
+
+    # Get column rectangles in the perimeter grid (read only)
+    def get_col_rects(self):
+        return self.grid.col_rects
+    col_rects = property(get_col_rects, None, None, "The column rectangles in the perimeter grid")
+
+    # Get the area inside the perimeter (read only)
     def get_area(self):
-        # If the area is previously calculated then return it
-        if self._area:
-            return self._area
-        # Otherwise, calculate the area
-        # Get all rectangles which form the perimeter
-        rects = self.rects
-        # Get the area of each rectangle
-        areas = [ rect.get_area() for rect in rects ]
-        self._area = resolute(sum(areas), base_resolution - 2)
-        return self._area
-
-    # The area is treated appart since it may be an expensive calculation
+        return self.grid.area
     area = property(get_area, None, None, "The area inside the perimeter")
 
     # Check if the current segments create a closed perimeter or if it is open
@@ -905,68 +966,19 @@ class Perimeter:
                 return False
         return True
 
-    # Format segments in a way that segments and their points are ordered
-    # i.e. each segment 'b' point is the 'a' point of the next segment
-    # The first segment 'a' point must be the final segment 'b' point
-    # If the list of segments cannot be formatted like this then return an error
-    open_perimeter_error = RuntimeError('The perimeter is not closed')
-    def close_segments(self):
-        # Check that each segment ends in the same point that the next segment starts
-        ordered_segments = [ self.segments[0] ]
-        available_segments = self.segments[1:]
-        while ( len(ordered_segments) < len(self.segments) ):
-            # If there are no more available segments return error
-            # This may happen in case there was a duplicated segment, which means the perimeter is wrong
-            if len(available_segments) == 0:
-                raise self.open_perimeter_error
-            # Get the last ordered segment to find which is the next connected segment
-            last_ordered_segment = ordered_segments[-1]
-            last_point = last_ordered_segment.b
-            # Get the segment which is connected with the previous segment
-            connected_segment = next((segment for segment in available_segments if last_point in segment.points), None)
-            if not connected_segment:
-                raise self.open_perimeter_error
-            # Remove the connected segment from the available 
-            available_segments = [ segment for segment in available_segments if segment != connected_segment ]
-            # The connected segment must be connected by the 'a' point
-            # If it is connected by the 'b' point then get the inverted segment
-            if connected_segment.b == last_point:
-                connected_segment = connected_segment.inverted()
-            ordered_segments.append(connected_segment)
-        # Finally, check that the first segment and the last segment are also connected
-        if ordered_segments[0].a != ordered_segments[-1].b:
-            raise self.open_perimeter_error
-        self.segments = ordered_segments
-
-    # Merge continuous segments (i.e. connected segments in the same segment)
-    def merge_segments (self):
-        count = 0
-        while (count < len(self.segments)):
-            for current, nextone in pairwise(self.segments, retro=True):
-                if current.same_line_as(nextone):
-                    merged_segment = Segment(current.a, nextone.b)
-                    self.segments = [ seg for seg in self.segments if seg not in [current, nextone] ]
-                    self.segments.insert(count, merged_segment)
-                    break
-                count += 1
-
     # Check the perimeter to be closed
-    # Try to close it if possible. Otherwise return an error, since not closed perimeters are not supported
     # DANI: En principio los perímetros no cerrados no tendrán soporte nunca porque no tienen mucho sentido o no les veo la utilidad
     # Check each perimeter segment to not be diagonal
     # Otherwise return an error, since perimeters with diagonal segments are not yet supported
     # DANI: En principio algun día se podría hacer esto
-    # Merge continuous segments (i.e. connected segments in the same line)
     def check(self):
         # Check the perimeter to be closed
         if not self.is_closed():
-            self.close_segments()
+            raise self.open_perimeter_error
         # Check each perimeter segment to not be diagonal
         for segment in self.segments:
             if segment.is_diagonal():
                 raise RuntimeError('The perimeter has diagonal segments, which are not supported')
-        # Merge continuous segments (i.e. connected segments in the same line)
-        self.merge_segments() 
 
     # Set the perimeter corners as points with additional stored values
     # The 'segments' variable defines the two segments of the perimeter which form the corner itself
@@ -994,6 +1006,7 @@ class Perimeter:
         # There should be always 4 more corners in one direction than in the other (may be left or right)
         # DANI: Esto es para el desarrollo. Una vez esté comprobado que los perímteros son estables quitaré esto porque retrasa el cálculo
         if abs(difference) != 4:
+            print('WARNING: There may be splitted segments in the perimeter')
             raise RuntimeError('There is something wrong with the perimeter')
 
         # Check if are more corners in the counted direction (true) or the other (false)
@@ -1163,14 +1176,15 @@ class Perimeter:
     # Split the current perimeter in a list of rectangles
     # The exclusion perimeters are those perimeters inside the current perimeter which are not considered
     # (e.g. children perimeters)
-    def split_in_rectangles(self, exclusion_perimeters : list = []) -> list:
+    # WARNING: Exclusion perimeters out of this perimeter will make this logic fail
+    # We have no easy way to chech if the exclusion perimeter is inside this perimeter at this point
+    def split_in_rectangles(self, exclusion_perimeters : List['Perimeter'] = []) -> List[Rect]:
 
         # Inside corners are the parent perimeter inside corners and the children perimeters outside corners
         parent_inside_corners = [ corner for corner in self.corners if corner.inside == True ]
         children_inside_corners = []
         for perimeter in exclusion_perimeters:
-            child_inside_corners = [ corner for corner in perimeter.corners if corner.inside == False ]
-            children_inside_corners += child_inside_corners
+            children_inside_corners += [ corner for corner in perimeter.corners if corner.inside == False ]
         inside_corners = parent_inside_corners + children_inside_corners
 
         # Limits are the current perimeter and all exclusion perimeters
@@ -1272,7 +1286,7 @@ class Perimeter:
     # Check if a rectangle fits somewhere in the perimeter
     # Iterate over all maximum rectangles and try to fit 
     def fit (self, x_fit_size : number, y_fit_size : number):
-        for rect in self.mrects:
+        for rect in self.max_rects:
             x_size, y_size = rect.get_size()
             if x_fit_size <= x_size and y_fit_size <= y_size:
                 return True
@@ -1287,7 +1301,11 @@ class Perimeter:
 class Grid:
 
     def __init__(self, rects : List[Rect]):
-        self.rects = rects
+        self._rects = rects
+        self._max_rects = None
+        self._row_rects = None
+        self._col_rects = None
+        self._area = None
 
     def __iter__(self):
         return iter(self.rects)
@@ -1301,7 +1319,62 @@ class Grid:
         rects = perimeter.split_in_rectangles()
         return cls(rects)
 
-    # First, some functions are defined to find colliding rects
+    # Grid rectangles are read only
+    def get_rects(self):
+        return self._rects
+    rects = property(get_rects, None, None, "Grid rectangles")
+
+    # Get maximum possible rectangles in the grid
+    # This variable is treated appart since its calculation may be an expensive calculation
+    def get_max_rects(self):
+        # If maximum rectangles are previously calculated then return them
+        if self._max_rects:
+            return self._max_rects
+        # Calculate all maximum rectangles
+        self._max_rects = self.find_maximum_rectangles()
+        return self._max_rects
+    # Grid maximum rectangles (read only)
+    max_rects = property(get_max_rects, None, None, "Maximum possible rectangles in the grid")
+
+    # Get row rectangles in the grid
+    # This variable is treated appart since its calculation may be an expensive calculation
+    def get_row_rects(self):
+        # If row rectangles are previously calculated then return them
+        if self._row_rects:
+            return self._row_rects
+        # Calculate all row rectangles
+        self._row_rects = self.find_row_rectangles()
+        return self._row_rects
+    # Grid row rectangles (read only)
+    row_rects = property(get_row_rects, None, None, "Row rectangles in the grid")
+
+    # Get column rectangles in the grid
+    # This variable is treated appart since its calculation may be an expensive calculation
+    def get_col_rects(self):
+        # If column rectangles are previously calculated then return them
+        if self._col_rects:
+            return self._col_rects
+        # Calculate all column rectangles
+        self._col_rects = self.find_column_rectangles()
+        return self._col_rects
+    # Grid column rectangles (read only)
+    col_rects = property(get_col_rects, None, None, "Column rectangles in the grid")
+
+    # Get the area inside the perimeter
+    # This variable is treated appart since its calculation may be an expensive calculation
+    def get_area(self):
+        # If the area is previously calculated then return it
+        if self._area:
+            return self._area
+        # Otherwise, calculate the area
+        # Add the area of all grid rectangle
+        rect_areas = [ rect.get_area() for rect in self.rects ]
+        self._area = resolute(sum(rect_areas), base_resolution - 2)
+        return self._area
+    # Grid area (read only)
+    area = property(get_area, None, None, "The area of the whole grid")
+
+    # Some functions are defined to find colliding rects
     def get_left_rect (self, rect : Rect) -> Optional[Rect]:
         pmax = rect.get_upper_left_point()
         for r in self.rects:
@@ -1326,6 +1399,12 @@ class Grid:
             if r.pmax == pmax:
                 return r
         return None
+    def get_connected_rects (self, rect : Rect) -> List[Rect]:
+        left_rect = self.get_left_rect(rect)
+        right_rect = self.get_right_rect(rect)
+        upper_rect = self.get_upper_rect(rect)
+        bottom_rect = self.get_bottom_rect(rect)
+        return [ rect for rect in [ left_rect, right_rect, upper_rect, bottom_rect ] if rect != None ]
 
     # One by one for each *available rectangle, where available rectangles are the splitted rectangles
     # Get as many rectanges as possible which are connected horizontally to the current rectangle
@@ -1333,7 +1412,7 @@ class Grid:
     # Consider all previous rectangles as a single rectange
     # Repeat in the inverse order (first vertically, then horizontally)
     # Remove all previous rectangles from the *available rectangles list
-    def get_maximum_rectangles(self) -> List[Rect]:
+    def find_maximum_rectangles(self) -> List[Rect]:
 
         # Set a function to merge multiple rects into a single big rect
         # Do it by finding the most maximum pmax and the most minimum pmin
@@ -1462,7 +1541,7 @@ class Grid:
     # Get as many rectanges as possible which are connected horizontally to the current rectangle
     # Consider all previous rectangles as a single rectange
     # Remove all previous rectangles from the *available rectangles list
-    def get_row_rectangles(self) -> List[Rect]:
+    def find_row_rectangles(self) -> List[Rect]:
 
         # Set a function to merge multiple rects into a single big rect
         # Do it by finding the most maximum pmax and the most minimum pmin
@@ -1518,7 +1597,7 @@ class Grid:
     # Get as many rectanges as possible which are connected vertically to the current rectangle
     # Consider all previous rectangles as a single rectange
     # Remove all previous rectangles from the *available rectangles list
-    def get_column_rectangles(self) -> List[Rect]:
+    def find_column_rectangles(self) -> List[Rect]:
 
         # Set a function to merge multiple rects into a single big rect
         # Do it by finding the most maximum pmax and the most minimum pmin
@@ -1570,7 +1649,41 @@ class Grid:
 
         return columns
 
-                
+    # Find groups of connected rectangles
+    def find_connected_rect_groups (self):
+        # First of all isolate groups of connected rectangles
+        rects_to_group = self.rects
+        rect_groups = []
+        while len(rects_to_group) > 0:
+            first_rect = rects_to_group[0]
+            new_group = [ first_rect ]
+            for rect in new_group:
+                connected_rects = self.get_connected_rects(rect)
+                new_group += [ rect for rect in connected_rects if rect not in new_group ]
+            rects_to_group = [ rect for rect in rects_to_group if rect not in new_group ]
+            rect_groups.append(new_group)
+        return rect_groups
+
+    # Find all grid perimeters
+    # i.e. find the enveloping perimeter for each group of connected rects
+    # WARNING: This logic will fail in case there is a "hole" inside a rectangles group
+    # However, this should never happen in the expansion process, which uses this logic
+    def find_perimeters (self):
+        perimeters = []
+        # First of all isolate groups of connected rectangles
+        rect_groups = self.find_connected_rect_groups()
+        # Now find the perimeter for each group
+        for group in rect_groups:
+            # Get all rectangle segments and find those which are not duplicated
+            # Each non duplicated segment is an outter segment and thus it is part of the perimeter
+            segments = []
+            for rect in group:
+                segments += rect.segments
+            perimeter_segments = [ segm for segm in segments if segments.count(segm) == 1 ]
+            # Now create the perimeter in the non-canonical way
+            group_perimeter = Perimeter.non_canonical(perimeter_segments)
+            perimeters.append(group_perimeter)
+        return perimeters
 
 # Auxiliar functions ---------------------------------------------------------------
 
