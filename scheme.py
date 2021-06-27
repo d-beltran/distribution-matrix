@@ -245,7 +245,7 @@ class Room:
         base_perimeter = set_base_perimeter()
         # Set the child first perimeter, which automatically resets this room free grid
         room.perimeter = base_perimeter
-        #self.update_display()
+        self.update_display()
 
         # Proceed with the expansion of this child room until it reaches its forced area
         if not room.expand():
@@ -308,6 +308,7 @@ class Room:
             if not self.expand_step():
                 return False
             self.update_display()
+        self.update_display()
         return True
 
     # Find the most suitable space for the current room to claim
@@ -323,33 +324,8 @@ class Room:
         if required_area <= 0:
             return
 
-        # ----------------------------------------------------------------------------------------------------
-        # Split the room perimeter in segments according to what each region is connected to
-        # Regions connected to the parent free space are desired to expand
-        # Regions connected to other rooms may be expanded if the colliding room is able to expand also
-        # Regions connected to the parent limits will never be expanded
-        # ----------------------------------------------------------------------------------------------------
-
-        # The parent limits are not allowed for expansion
+        # Get the parent room
         parent_room = self.parent
-        parent_frontiers = self.get_frontiers(parent_room)
-        # Other rooms inside the same parent may be displaced if there is no free space available
-        brother_rooms = [ room for room in parent_room.children if room is not self ]
-        brother_frontiers = []
-        for room in brother_rooms:
-            frontiers = self.get_frontiers(room)
-            if frontiers:
-                brother_frontiers += frontiers
-        # The prefered limits to expand are those connected to free space inside the current parent
-        # First of all get all already found frontier segments
-        all_frontiers = [*parent_frontiers, *brother_frontiers]
-        # Now susbstract all frontiers to each room perimeter segments to find free frontiers
-        free_frontiers = []
-        for segment in self.perimeter.segments:
-            free_frontiers += segment.substract_segments(all_frontiers)
-        # Set the room all free segment belong to as None
-        for segment in free_frontiers:
-            segment.room = None
 
         # ----------------------------------------------------------------------------------------------------
         # Try to expand in the easiest way: push an individual frontier segment
@@ -407,7 +383,6 @@ class Room:
             # The forward length of this rectangle will depend on the available area and limits
             # This segment may not be the original frontier, but a variation of it
             def push_segment (pushed_segment : Segment) -> bool:
-                #print('PUSHED SEGMENT: ' + str(pushed_segment))
                 pushed_segment_size = pushed_segment.length
                 push_length = required_area / pushed_segment_size
                 # If the length exceeds the maximum limit then stay in the maximum limit
@@ -419,6 +394,9 @@ class Room:
                 # If at this point the length exceeds the space limit then stay in the space limit
                 if push_length > space_forward_limit:
                     push_length = space_forward_limit
+                # If the push length at this point is 0 or close to it then we can not push
+                if push_length < 0.0001:
+                    return False
                 # Create the new rect with the definitive length
                 new_point = pushed_segment.a + forward_direction.normalized() * push_length
                 #print('NEW POINT: ' + str(new_point))
@@ -520,9 +498,58 @@ class Room:
 
             return False
 
+        # ----------------------------------------------------------------------------------------------------
+        # Split the room perimeter in segments according to what each region is connected to
+        # Regions connected to the parent free space are desired to expand
+        # Regions connected to other rooms may be expanded if the colliding room is able to expand also
+        # Regions connected to the parent limits will never be expanded
+        # ----------------------------------------------------------------------------------------------------
+
+        # The parent limits are not allowed for expansion
+        parent_frontiers = self.get_frontiers(parent_room)
+        # Other rooms inside the same parent may be displaced if there is no free space available
+        brother_rooms = [ room for room in parent_room.children if room is not self ]
+        brother_frontiers = []
+        for room in brother_rooms:
+            frontiers = self.get_frontiers(room)
+            if frontiers:
+                brother_frontiers += frontiers
+        # The prefered limits to expand are those connected to free space inside the current parent
+        # First of all get all already found frontier segments
+        all_frontiers = [*parent_frontiers, *brother_frontiers]
+        # Now susbstract all frontiers to each room perimeter segments to find free frontiers
+        free_frontiers = []
+        for segment in self.perimeter.segments:
+            free_frontiers += segment.substract_segments(all_frontiers)
+        # Set the room all free segment belong to as None
+        for segment in free_frontiers:
+            segment.room = None
+
+        # Conserve only frontiers which reach the minimum size length
+        # As an exception, frontiers connected to at least 1 inside corner may be expanded with no size restrictions
+        inside_corners = [ corner for corner in self.perimeter.corners if corner.inside == True ]
+        def is_suitable (frontier : Segment) -> bool:
+            return frontier.length >= self.min_size or frontier.a in inside_corners or frontier.b in inside_corners
+        suitable_free_frontiers = [ seg for seg in free_frontiers if is_suitable(seg) ]
+        suitable_brother_frontiers = [ seg for seg in brother_frontiers if is_suitable(seg) ]
+
+        #----------------------------------------------------------------------------------------------
+        # Set now the strategy to sort the frontiers (i.e. to choose which frontiers will be tried first)
+        # This is a critical step, since many frontiers may be expanded but only a few may be useful to expand
+        # There are many possible situtations to take in count
+        # A wrong strategy could lead to an endless loop or dead end
+        # A good strategy could make the algorithm faster
+        #----------------------------------------------------------------------------------------------
+
+        # Random (no strategy)
+        random.shuffle(suitable_free_frontiers)
+        random.shuffle(suitable_brother_frontiers)
+
         # Try to expand one by one all frontiers until one of them is expanded sucessfully
         # Once an expansion has been done we must recalculate frontiers if we want to keep expanding
-        for frontier in [ *free_frontiers, *brother_frontiers ]:
+        # Priorize free frontiers over bother frontiers
+        available_frontiers = [ *suitable_free_frontiers, *suitable_brother_frontiers ]
+        for frontier in available_frontiers:
             if expand_frontier(frontier):
                 return True
         return False

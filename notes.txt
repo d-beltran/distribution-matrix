@@ -1,10 +1,17 @@
-Implementar lógica de claimGroup
+RAM
 
-pushCluster
-- Esta cogiendo celdas fuera de perímetro. No debería ser posible
-	* Si que lo es si posicionas el cuadrado inicial sobre otro cluster
+- Mejorar estrategia del solver: elegir mejor la frontier a expandir
+- Posibilidad de expandir hasta el final SOLO si la expansion va a cubir uno de los sides entero
 
-Se podría crear una nueva función de priorizeClusters:
-- Sería coger todas las celdas colindantes a las celdas libres y guardar los números de sus clusters
-- Luego capturar las celdas colindantes a estos clusters y guardar los números de sus clusters
-- Repetir hasta cubrir todos los clusters posibles, sin volver a guardar clusters repetidos
+
+Largo plazo:
+
+- Areas en porcentaje
+- Puertas y pasillos
+- Bordes
+	* Plantearse dilema de areas con o sin bordes
+- Blender
+	* Plantearse el 3D: altura de habitaciones, alturas de puertas, etc.
+	* Planos en la dirección correcta
+	* Ventanas
+	* Coordinación entre planos apilados (e.g. escaleras, terrazas, etc.)

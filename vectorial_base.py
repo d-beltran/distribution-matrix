@@ -912,7 +912,7 @@ class Perimeter:
         self._corners = corners
         return self._corners
 
-    # The area is treated appart since it may be an expensive calculation
+    # Perimeter corners (read only)
     corners = property(get_corners, None, None, "The perimeter corners")
 
     # Get the perimeter grid
@@ -1006,7 +1006,8 @@ class Perimeter:
         # There should be always 4 more corners in one direction than in the other (may be left or right)
         # DANI: Esto es para el desarrollo. Una vez esté comprobado que los perímteros son estables quitaré esto porque retrasa el cálculo
         if abs(difference) != 4:
-            print('WARNING: There may be splitted segments in the perimeter')
+            # If you see this error there may be splitted segments in your perimeter
+            # Use the non-canonical class method to set your perimeter
             raise RuntimeError('There is something wrong with the perimeter')
 
         # Check if are more corners in the counted direction (true) or the other (false)
