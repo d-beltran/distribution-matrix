@@ -1,12 +1,14 @@
 RAM
 
+- Que el display muestre cada paso en la expansión
 - Mejorar estrategia del solver: elegir mejor la frontier a expandir
+	* Hacer ranking de proximidad con una zona libre
 - Posibilidad de expandir hasta el final SOLO si la expansion va a cubir uno de los sides entero
+- Implementar expansión de frontera combinada
 
 
 Largo plazo:
 
-- Areas en porcentaje
 - Puertas y pasillos
 - Bordes
 	* Plantearse dilema de areas con o sin bordes

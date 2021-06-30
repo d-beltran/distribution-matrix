@@ -55,8 +55,7 @@ class Point:
         return '(x: ' + str(self.x) + ', y: ' + str(self.y) + ')'
 
     def __eq__(self, other):
-        # We also check if the instance belongs to parent classes since this function is inherited by Corner
-        if isinstance(other, (self.__class__, *type(self).__bases__)):
+        if isinstance(other, self.__class__) or issubclass(self.__class__, other.__class__):
             return self.x == other.x and self.y == other.y
         return False
 
@@ -65,17 +64,19 @@ class Point:
     
     # Point + Vector -> Point, Point + Point -> Vector
     def __add__(self, other):
-        if isinstance(other, self.__class__):
+        if isinstance(other, self.__class__) or issubclass(self.__class__, other.__class__):
             return Vector(other.x - self.x, other.y - self.y)
         if isinstance(other, Vector):
             return Point(self.x + other.x, self.y + other.y)
+        raise ValueError('Point addition of ' + str(other.__class__) + ' is not supported')
 
     # Point - Vector -> Point, Point - Point -> Vector
     def __sub__(self, other):
-        if isinstance(other, self.__class__):
+        if isinstance(other, self.__class__) or issubclass(self.__class__, other.__class__):
             return Vector(self.x - other.x, self.y - other.y)
         if isinstance(other, Vector):
             return Point(self.x - other.x, self.y - other.y)
+        raise ValueError('Point substraction of ' + str(other.__class__) + ' is not supported')
 
     # Get the distance from this point to other specified point
     def get_distance_to (self, other : 'Point') -> number:

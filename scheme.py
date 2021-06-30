@@ -12,19 +12,20 @@ from math import sqrt
 # A room is a smart perimeter that may contain other perimeters with conservative areas and size restrictions
 # A start 'perimeter' may be passed. If no perimeters i passed it is assigned automatically according the room rules
 # The 'forced_area' argument stablishes the expected final room area. If no area is passed then the original perimeter area will be used
+# Forced area may be a number (absolute value) or a string (percent) with the format 'XX%'
 # The 'min_size' and 'max_size' are the limits in both x and y axes
 # The 'name' is only a representation parameter
 class Room:
     def __init__ (self,
-        perimeter : Perimeter = None,
-        forced_area : number = None,
-        min_size : number = None,
-        max_size : number = None,
+        perimeter : Optional[Perimeter] = None,
+        forced_area : Optional[Union[number, str]] = None,
+        min_size : Optional[number] = None,
+        max_size : Optional[number] = None,
         display : bool = False,
         name : str = 'Unnamed',
         segments_color : str = 'black',
         fill_color : str = 'white',
-        children : list = [],
+        children : List['Room'] = [],
         ):
         # Set internal variables
         self._perimeter = None
@@ -35,6 +36,7 @@ class Room:
         self.segments_color = segments_color
         self.fill_color = fill_color
         # Set up the hierarchy of rooms
+        # Parent is never assigned from the instance itself, but it is assigned by the parent
         self.parent = None
         self.children = []
         # Set the perimeter
@@ -45,24 +47,28 @@ class Room:
         else:
             self.perimeter = None
         # Set the expected final area
+        self._forced_area_portion = None
         if forced_area:
-            self.forced_area = forced_area
+            # If it is a number
+            if is_number(forced_area):
+                self.forced_area = forced_area
+            # If it is a percent
+            elif type(forced_area) == str and forced_area[-1] == '%':
+                self.forced_area = None
+                self._forced_area_portion = float(forced_area[0:-1]) / 100
+            else:
+                raise InputError('Forced area has a non-supported format')
         else:
             self.forced_area = self.area
         # If the forced area does not cover the minimum size it makes no sense
-        if min_size and forced_area < min_size**2:
+        if min_size and self.forced_area and self.forced_area < min_size**2:
             raise InputError('Forced area is not sufficient for the minimum size in room ' + name)
         # Set size limits
         if min_size or min_size == 0:
             self.min_size = min_size
         else:
             self.min_size = 0
-        if max_size:
-            self.max_size = max_size
-        elif self.forced_area and self.min_size:
-            self.max_size = self.forced_area / self.min_size
-        else:
-            self.max_size = None
+        self._forced_max_size = max_size
         # Set up all children rooms
         self.add_children(children)
 
@@ -141,6 +147,22 @@ class Room:
         return self.free_grid.area
     free_area = property(get_free_area, None, None, "Free space area (read only)")
 
+    # Get the maximum size
+    # If there is a forced maximum size then return it
+    # Otherwise calculate it by dividing the forced area between the minimum size
+    # i.e. return the maximum possible size in case the perimeter was the thinest rectangle
+    def get_maximum_area (self):
+        if self._forced_max_size:
+            return self._forced_max_size
+        elif self.forced_area and self.min_size and self.min_size != 0:
+            return self.forced_area / self.min_size
+        else:
+            return None
+    # Force the maximum size
+    def set_maximum_size (self, value):
+        self._forced_max_size = value
+    max_size = property(get_maximum_area, set_maximum_size, None, "Maximum possible size")
+
     # Reset all minimum and maximum free rects
     # This must be done each time the perimeter is modified since they are not valid anymore
     def reset_free_grid (self):
@@ -179,6 +201,9 @@ class Room:
         # In addition check if any of the children areas has perimeter and, if so, check the perimeter is inside the parent
         children_area = 0
         for room in rooms:
+            # If the children has a percent forced area this is the time to calculate the absolute forced area
+            if room._forced_area_portion:
+                room.forced_area = self.forced_area * room._forced_area_portion
             children_area += room.forced_area
         if children_area > self.area:
             raise InputError('Children together require more area than the parent has')
@@ -367,8 +392,11 @@ class Room:
             else:
                 raise RuntimeError('ERROR: diagonal segments are not supported for room expansion')
 
+            if len(rects) == 0:
+                raise RuntimeError('No pot ser: ' + str(grid))
+
             # One and only one of the rows/columns will always include the segment
-            space = next(rect for rect in rects if frontier in rect)
+            space = next((rect for rect in rects if frontier in rect), None)
             space_contact = next(segment for segment in space.segments if frontier in segment)
             space_forward_limit = space.get_size()[forward]
 
