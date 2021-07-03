@@ -119,7 +119,7 @@ class Room:
         # ---------------------------------------------------------------------------------------------------
         # DANI: Muestra los rects la primera vez que se calculan
         colored_rects = [ rect.get_colored_rect(segments_color='red') for rect in free_grid.rects ]
-        #self.update_display(colored_rects)
+        self.update_display(colored_rects)
         # ---------------------------------------------------------------------------------------------------
         return free_grid
     # Free space grid (read only)
@@ -332,8 +332,6 @@ class Room:
         while self.get_required_area() > 0:
             if not self.expand_step():
                 return False
-            self.update_display()
-        self.update_display()
         return True
 
     # Find the most suitable space for the current room to claim
@@ -397,6 +395,9 @@ class Room:
 
             # One and only one of the rows/columns will always include the segment
             space = next((rect for rect in rects if frontier in rect), None)
+            if space == None:
+                # If this happens it may mean there is a problem with the grid
+                raise RuntimeError('Frontier ' + str(frontier) + ' has no space in ' + str(rects))
             space_contact = next(segment for segment in space.segments if frontier in segment)
             space_forward_limit = space.get_size()[forward]
 
@@ -424,6 +425,7 @@ class Room:
                     push_length = space_forward_limit
                 # If the push length at this point is 0 or close to it then we can not push
                 if push_length < 0.0001:
+                    print('WARNING: The push length is too small')
                     return False
                 # Create the new rect with the definitive length
                 new_point = pushed_segment.a + forward_direction.normalized() * push_length
@@ -477,6 +479,7 @@ class Room:
                         return False
                     # Modify the invaded room perimeter
                     room.perimeter = truncated_perimeters[0]
+                    self.update_display()
                     # Expand the invaded room as much as the invaded area
                     # In case the expansions fails go back
                     if not room.expand():
@@ -485,6 +488,7 @@ class Room:
                         return False
                 else:
                     self.perimeter = new_perimeter
+                    self.update_display()
                 return True
                  
 
@@ -524,6 +528,7 @@ class Room:
             #   * If the extra claimed space exceeds the required expand area we cannot claim it
             # ----------------------------------------------------------------------------------------------------
 
+            print('PROBLEMA')
             return False
 
         # ----------------------------------------------------------------------------------------------------

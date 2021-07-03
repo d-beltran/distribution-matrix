@@ -1,9 +1,17 @@
 RAM
 
-- Que el display muestre cada paso en la expansión
+- Implementar un seed
+- Arreglar bugs internos
+	* Algo va mal con la grid
+		- inside lines que se escapan del perímetro
+		- rects que están dentro de child rooms
+		- no encuentra rects muy estrechos
 - Mejorar estrategia del solver: elegir mejor la frontier a expandir
 	* Hacer ranking de proximidad con una zona libre
+- Gestionar cuando hay PROBLEMA
+	* Hay que poder probar a recortar la frontier para que no haya problemas
 - Posibilidad de expandir hasta el final SOLO si la expansion va a cubir uno de los sides entero
+- Implementar expansión de frontera partida en caso de push length demasiado bajo
 - Implementar expansión de frontera combinada
 
 
@@ -12,8 +20,9 @@ Largo plazo:
 - Puertas y pasillos
 - Bordes
 	* Plantearse dilema de areas con o sin bordes
+- Muebles
 - Blender
-	* Plantearse el 3D: altura de habitaciones, alturas de puertas, etc.
+	* Plantearse el 3D: altura de habitaciones, alturas de puertas, altura de muebles, etc.
 	* Planos en la dirección correcta
 	* Ventanas
 	* Coordinación entre planos apilados (e.g. escaleras, terrazas, etc.)

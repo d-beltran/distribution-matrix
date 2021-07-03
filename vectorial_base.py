@@ -1309,11 +1309,11 @@ class Grid:
         self._col_rects = None
         self._area = None
 
-    def __iter__(self):
-        return iter(self.rects)
+    def __str__(self):
+        return str(self.rects)
 
-    def __next__(self):
-        return next(iter(self.rects))
+    def __repr__(self):
+        return str(self.rects)
 
     # Set the grid from a perimeter
     @classmethod
