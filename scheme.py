@@ -4,10 +4,10 @@ from scheme_display import add_frame
 
 from vectorial_base import *
 
-from utils import InputError
-
 import random
 from math import sqrt
+
+random.seed(8)
         
 # A room is a smart perimeter that may contain other perimeters with conservative areas and size restrictions
 # A start 'perimeter' may be passed. If no perimeters i passed it is assigned automatically according the room rules
@@ -119,7 +119,7 @@ class Room:
         # ---------------------------------------------------------------------------------------------------
         # DANI: Muestra los rects la primera vez que se calculan
         colored_rects = [ rect.get_colored_rect(segments_color='red') for rect in free_grid.rects ]
-        self.update_display(colored_rects)
+        #self.update_display(colored_rects)
         # ---------------------------------------------------------------------------------------------------
         return free_grid
     # Free space grid (read only)
@@ -626,3 +626,8 @@ class Room:
         if root.display:
             elements_to_display = [ *root.get_rooms_recuersive(), *extra ]
             add_frame(elements_to_display)
+
+
+# Exception for when user input is wrong
+class InputError(Exception):
+    pass

@@ -32,7 +32,8 @@ def is_number(var):
 
 # Set a resoltion limit
 # Resolution is the number of decimals to take in count when comparing different coordinates
-# When working with squared values (e.g. areas) the resolution should be decreased in 2 orders
+# When working with substractions (e.g. distances) the resolution should be decreased in 1 order
+# When working with squared substractions (e.g. areas) the resolution should be decreased in 2 orders
 base_resolution = 4
 def resolute(num, resolution = base_resolution):
     res = 10**resolution
@@ -323,7 +324,7 @@ class Segment(Line):
         if isinstance(other, Point):
             distance1 = self.a.get_distance_to(other)
             distance2 = self.b.get_distance_to(other)
-            return resolute(distance1 + distance2) == resolute(self.length)
+            return resolute(distance1 + distance2, base_resolution -1) == resolute(self.length, base_resolution -1)
         if isinstance(other, self.__class__):
             return other.a in self and other.b in self
         return False
@@ -1177,7 +1178,7 @@ class Perimeter:
 
     # Split the current perimeter in a list of rectangles
     # The exclusion perimeters are those perimeters inside the current perimeter which are not considered
-    # (e.g. children perimeters)
+    # e.g. children perimeters in a room perimeter
     # WARNING: Exclusion perimeters out of this perimeter will make this logic fail
     # We have no easy way to chech if the exclusion perimeter is inside this perimeter at this point
     def split_in_rectangles(self, exclusion_perimeters : List['Perimeter'] = []) -> List[Rect]:
@@ -1204,13 +1205,18 @@ class Perimeter:
             if count == 1:
                 limit_points.append(corner)
 
-        # Limit segments are both parent and children segments
+        # Limit segments are both parent and children segments which do not overlap
         limit_segments = []
-        for perimeter in limits:
-            limit_segments += perimeter.segments
+        for perimeter, other_perimeters in otherwise(limits):
+            other_segments = [ segment for perimeter in other_perimeters for segment in perimeter.segments ]
+            for segment in perimeter.segments:
+                limit_segments += segment.substract_segments(other_segments)
 
         # WARNING: If there are no inside corners at this point it means our perimeter/s are made only by single rectangles
         # However those rectangles may be formed by segments longer than the rectangle size, so they may require splitting
+
+        #add_frame([ segment for perimeter in limits for segment in perimeter.segments ])
+        #add_frame(limit_segments)
 
         # Get all inside separator segments
         inside_separators = []
@@ -1230,9 +1236,9 @@ class Perimeter:
 
         # Find all points where the inside separator segments intersect each other
         all_intersections = []
+        # DANI: Aquí me he quedado
+        # DANI: No se estan encontrado las intersections de los inline separators peques
         for segment1, segment2 in itertools.combinations(all_segments, 2):
-            # All inside corners would be found as intersection points, since their 2 segments intersect
-            # For this reason, we set 'in_extremis' as false
             intersection = segment1.get_intersection_point(segment2)
             if not intersection:
                 continue
@@ -1247,6 +1253,11 @@ class Perimeter:
             splitted_segments = segment.split_at_points(all_intersections)
             all_splitted_segments += list(splitted_segments)
         #print('All segments: ' + str(len(all_splitted_segments)))
+
+        # DANI: Usa para ver los segmentos ya cortados
+        for segment in all_splitted_segments:
+            segment.color = generate_random_color()
+        add_frame(all_splitted_segments)
 
         # Finally, for each segment, try to find 2 rectangles
         # Each segment will be connected to exactly 1 or 2 rectangles
@@ -1298,12 +1309,12 @@ class Perimeter:
 # All rectangles which are connected have the whole segment connected
 # i.e. two rectangle points must also be identical
 # This class is used to handle perimeters splitted in rectangles
-# WARNING: There is no control yet to make sure rects are connected right
-# WARNING: If wrong rectangles are passed no error will raise but the grid won't work right
 class Grid:
 
     def __init__(self, rects : List[Rect]):
         self._rects = rects
+        # Check rectangles to match the grid format requirements
+        self.check()
         self._max_rects = None
         self._row_rects = None
         self._col_rects = None
@@ -1314,6 +1325,14 @@ class Grid:
 
     def __repr__(self):
         return str(self.rects)
+
+    # Check that 
+    def check (self):
+        for rect, other_rects in otherwise(self.rects):
+            for other_rect in other_rects:
+                if rect.overlap_rect(other_rect):
+                    print('WARNING: Overlapping rects ' + str(rect) + ' and ' + str(other_rect))
+                    raise RuntimeError('Grid rects are wrong')
 
     # Set the grid from a perimeter
     @classmethod
@@ -1695,10 +1714,24 @@ class Grid:
 # However, if the 'retro' argument is True, the final array value is returned with the first array value as the next value
 # By default, values are returned as follows: A with B, B with C, C with D ...
 # However, if the 'loyals' argument is True, values are returned as follows: A with B, C with D, E with F ...
-def pairwise (values : list, retro : bool = False, loyals = False):
+def pairwise (values : list, retro : bool = False, loyals = False) -> tuple:
     last = len(values) - 1
     step = 2 if loyals else 1
     for i in range(0, last, step):
         yield values[i], values[i+1]
     if retro:
         yield values[last], values[0]
+
+# Set a special iteration system
+# Return one value of the array and a new array with all other values for each value
+def otherwise (values : list) -> tuple:
+    for v, value in enumerate(values):
+        others = values[0:v] + values[v+1:]
+        yield value, others
+
+# Get a random color for display tools
+def generate_random_color ():
+    r = round(random.random() * 255)
+    g = round(random.random() * 255)
+    b = round(random.random() * 255)
+    return '#%02x%02x%02x' % (r,g,b)

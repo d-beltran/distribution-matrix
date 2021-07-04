@@ -1,6 +1,5 @@
 RAM
 
-- Implementar un seed
 - Arreglar bugs internos
 	* Algo va mal con la grid
 		- inside lines que se escapan del perímetro
