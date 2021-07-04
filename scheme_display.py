@@ -7,10 +7,17 @@ import math
 import numpy as np
 from multiprocessing import Process, Queue
 
+# Remove the slider silly warning
+import warnings
+warnings.filterwarnings("ignore")
+
 # Set a list with all system values at each recorded step
 frames = []
 # Set a queue for the frames, since they are passed to a process
 queue = Queue()
+
+# Track any time the previous slider value
+previous_slider_value = None
 
 # Updater called from the system
 def add_frame (data):
@@ -39,6 +46,7 @@ def represent (queue):
     # Animation updater
     def update_frame (i):
         global frames
+        global previous_slider_value
         # Update frames when the queue is not empty
         if queue.qsize() > 0:
             frames = queue.get()
@@ -52,12 +60,20 @@ def represent (queue):
         if updated:
             slider.set_val(maximum)
 
+        # Check the current slider value
+        # If it has no changed since last update then do nothing
+        slider_value = int(slider.val)
+        if slider_value == previous_slider_value:
+            return
+
+        previous_slider_value = slider_value
+
         # Clear previous segments and rects
         #ax.segments = []
         ax.clear()
 
         # Get everything to be displayed in the current frame
-        segments, rects, traced = frames[int(slider.val)]
+        segments, rects, traced = frames[slider_value]
 
         # Draw all segments
         for segment in segments:
