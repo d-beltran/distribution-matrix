@@ -388,18 +388,24 @@ class Segment(Line):
     # in_extremis = 1 -> Intersections which are the 'extrem' point of only one of the segments are also considered
     # in_extremis = 2 -> All interactions are considered
     def get_intersection_point (self, segment, in_extremis : int = 2) -> Optional[Point]:
-        xdiff = Vector(self.a.x - self.b.x, segment.a.x - segment.b.x)
-        ydiff = Vector(self.a.y - self.b.y, segment.a.y - segment.b.y)
+        # WARNING: Do not use Vectors to set xdiff, y diff or d
+        # Vectros would resolute the x and y coordinates leading to inaccuracies
+        # Those unaccuracies could be critical when calculating the intersection point
+        # For this reason, we use 'x' and 'y' dicts for all calculation steps
+        xdiff = { 'x': self.a.x - self.b.x, 'y': segment.a.x - segment.b.x }
+        ydiff = { 'x': self.a.y - self.b.y, 'y': segment.a.y - segment.b.y }
 
         def det(a, b):
-            return a.x * b.y - a.y * b.x
+            return a['x'] * b['y'] - a['y'] * b['x']
 
         div = det(xdiff, ydiff)
         # segments are paralel
         if div == 0:
             return None
 
-        d = Vector(det(self.a, self.b), det(segment.a, segment.b))
+        self_det = det({ 'x': self.a.x, 'y': self.a.y }, { 'x': self.b.x, 'y': self.b.y })
+        segment_det = det({ 'x': segment.a.x, 'y': segment.a.y }, { 'x': segment.b.x, 'y': segment.b.y })
+        d = { 'x': self_det, 'y': segment_det }
         x = det(d, xdiff) / div
         y = det(d, ydiff) / div
         intersection_point = Point(x, y)
