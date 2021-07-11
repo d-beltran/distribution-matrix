@@ -35,9 +35,10 @@ def is_number(var):
 # When working with substractions (e.g. distances) the resolution should be decreased in 1 order
 # When working with squared substractions (e.g. areas) the resolution should be decreased in 2 orders
 base_resolution = 4
-def resolute(num, resolution = base_resolution):
-    res = 10**resolution
-    return round(num * res) / res
+def resolute(num, base_offset = 0):
+    base = base_resolution + base_offset
+    resolution = 10**base
+    return round(num * resolution) / resolution
 
 # An x,y coordinate
 class Point:
@@ -89,8 +90,8 @@ class Vector:
 
     def __init__(self, x : number, y : number):
         # Save the coordinates in Decimal format applying the precision limit
-        self.x = resolute(x)
-        self.y = resolute(y)
+        self.x = resolute(x, +2)
+        self.y = resolute(y, +2)
 
     # Set the vector from a slope
     # If slope is None a vertical vector is returned
@@ -324,7 +325,7 @@ class Segment(Line):
         if isinstance(other, Point):
             distance1 = self.a.get_distance_to(other)
             distance2 = self.b.get_distance_to(other)
-            return resolute(distance1 + distance2, base_resolution -1) == resolute(self.length, base_resolution -1)
+            return resolute(distance1 + distance2, +2) == resolute(self.length, +2)
         if isinstance(other, self.__class__):
             return other.a in self and other.b in self
         return False
@@ -338,6 +339,12 @@ class Segment(Line):
         points = [self.a, self.b]
         sorted_points = sorted( sorted(points, key=sort_by_x), key=sort_by_y )
         return tuple(sorted_points)
+
+    # Check if a point is inside the segment
+    # WARNING: Do not calculate this using the distance A-C + distance A-B = distance A-B method
+    # WARNING: This method is limited by the resolution so a point close to the segment could get a false positive
+    def contains_point (point : Point) -> bool:
+        pass
 
     # Get the inverted segment (i.e. invert a and b points)
     def inverted (self):
@@ -689,7 +696,7 @@ class Rect:
         if self._area:
             return self._area
         x_size, y_size = self.get_size()
-        self._area = resolute(x_size * y_size, base_resolution - 2)
+        self._area = resolute(x_size * y_size, -2)
         return self._area
 
     # The rectangle area (read only)
@@ -849,6 +856,7 @@ class Perimeter:
             # Get the segment which is connected with the previous segment
             connected_segment = next((segment for segment in available_segments if last_point in segment.points), None)
             if not connected_segment:
+                add_frame(segments)
                 raise cls.open_perimeter_error
             # Remove the connected segment from the available 
             available_segments = [ segment for segment in available_segments if segment != connected_segment ]
@@ -1332,10 +1340,17 @@ class Grid:
     def __repr__(self):
         return str(self.rects)
 
-    # Check that 
+    # Check for each corner on each rect that, if it is inside any other rect, it is also a corner in this rect
+    # Check also that rects to do not overlap, since this may happen even with no corners inside each other
     def check (self):
         for rect, other_rects in otherwise(self.rects):
+            rect_corners = rect.get_points()
             for other_rect in other_rects:
+                other_corners = other_rect.get_points()
+                for corner in rect_corners:
+                    if corner in other_rect and corner not in other_corners:
+                        print('WARNING: Conflict rects ' + str(rect) + ' and ' + str(other_rect))
+                        raise RuntimeError('Grid rects are wrong')
                 if rect.overlap_rect(other_rect):
                     print('WARNING: Overlapping rects ' + str(rect) + ' and ' + str(other_rect))
                     raise RuntimeError('Grid rects are wrong')
@@ -1396,7 +1411,7 @@ class Grid:
         # Otherwise, calculate the area
         # Add the area of all grid rectangle
         rect_areas = [ rect.get_area() for rect in self.rects ]
-        self._area = resolute(sum(rect_areas), base_resolution - 2)
+        self._area = resolute(sum(rect_areas), -2)
         return self._area
     # Grid area (read only)
     area = property(get_area, None, None, "The area of the whole grid")

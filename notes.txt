@@ -20,6 +20,10 @@ Largo plazo:
 - Bordes
 	* Plantearse dilema de areas con o sin bordes
 - Muebles
+- Piso entero
+	* Elementos con herencia para plantas superiores:
+		- Escaleras
+		- Habitaciones con techo alto
 - Blender
 	* Plantearse el 3D: altura de habitaciones, alturas de puertas, altura de muebles, etc.
 	* Planos en la dirección correcta
