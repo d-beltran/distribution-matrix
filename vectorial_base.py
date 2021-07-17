@@ -6,7 +6,7 @@ from functools import reduce
 
 import itertools
 
-from math import sqrt
+from math import sqrt, isclose
 
 import random
 colors = [
@@ -44,7 +44,7 @@ def resolute(num, base_offset = 0):
 class Point:
 
     def __init__(self, x : number, y : number):
-        # Save the coordinates in Decimal format applying the precision limit
+        # Save the coordinates in resoluted format applying the precision limit
         self.x = resolute(x)
         self.y = resolute(y)
         # Save both coordinates as a tuple
@@ -89,9 +89,9 @@ class Point:
 class Vector:
 
     def __init__(self, x : number, y : number):
-        # Save the coordinates in Decimal format applying the precision limit
-        self.x = resolute(x, +2)
-        self.y = resolute(y, +2)
+        # Save the coordinates as the whole float
+        self.x = x
+        self.y = y
 
     # Set the vector from a slope
     # If slope is None a vertical vector is returned
@@ -110,7 +110,7 @@ class Vector:
 
     def __eq__(self, other):
         if isinstance(other, self.__class__):
-            return self.x == other.x and self.y == other.y
+            return isclose(self.x, other.x) and isclose(self.y, other.y)
         return False
 
     def __hash__(self):
@@ -164,7 +164,7 @@ class Vector:
         return sqrt( self.x**2 + self.y**2 )
 
     def get_slope(self) -> Optional[number]:
-        if self.x == 0:
+        if isclose(self.x, 0):
             return None
         return self.y / self.x
 
@@ -175,10 +175,10 @@ class Vector:
 
     # Find out if the vector is totally vertical
     def is_vertical(self) -> bool:
-        return self.x == 0
+        return isclose(self.x, 0)
     # Find out if the segment is totally horizontal
     def is_horizontal(self) -> bool:
-        return self.y == 0
+        return isclose(self.y, 0)
 
     # Find out if the segment is diagonal
     def is_diagonal(self) -> bool:
@@ -187,8 +187,8 @@ class Vector:
     # Find out if two vectors are equivalent
     # i.e. they have the same direction and magnitude, no matter the sense
     def is_equivalent_to (self, other : 'Vector') -> bool:
-        same_slope = self.get_slope() == other.get_slope()
-        same_magnitude = self.get_magnitude() == other.get_magnitude()
+        same_slope = isclose(self.get_slope(), other.get_slope())
+        same_magnitude = isclose(self.get_magnitude(), other.get_magnitude())
         return same_slope and same_magnitude
 
 # A line defined by a point and a directional vector
@@ -212,6 +212,8 @@ class Line:
         return False
 
     def __contains__(self, other):
+        if isinstance(other, Point):
+            return self.line_contains_point(other)
         if isinstance(other, Segment):
             return self.same_line_as(other)
         return False
@@ -224,7 +226,7 @@ class Line:
     # Get the line y intercept
     # i.e. the y coordinate from the point in the vertical line x = 0 where this line cuts
     # Return None in case the line is vertical
-    def get_y_intercept (self) -> int:
+    def get_y_intercept (self) -> number:
         slope = self.get_slope()
         if slope == None:
             return None
@@ -244,7 +246,7 @@ class Line:
     # Get the line x intercept
     # i.e. the x coordinate from the point in the horizontal line y = 0 where this line cuts
     # Return None in case the line is horizontal
-    def get_x_intercept(self) -> int:
+    def get_x_intercept(self) -> number:
         slope = self.get_slope()
         if slope == 0:
             return None
@@ -292,6 +294,17 @@ class Line:
         are_paralel = self.is_paralel_to(other)
         same_intercept = self.get_intercept_point() == other.get_intercept_point()
         return are_paralel and same_intercept
+
+    # Check if a point is inside the line
+    # WARNING: This function is independent from __contain__ since it must be inherited by the Segment class
+    def line_contains_point (self, point : Point) -> bool:
+        if self.is_vertical():
+            x = self.get_x_intercept()
+            return resolute(x) == point.x
+        slope = self.get_slope()
+        intercept = self.get_y_intercept()
+        y = point.x * slope + intercept
+        return resolute(y) == point.y
         
 # A segment defined by 2 coordinates (Points): 'a' and 'b'
 class Segment(Line):
@@ -323,9 +336,16 @@ class Segment(Line):
 
     def __contains__(self, other):
         if isinstance(other, Point):
+            # First of all check that the point is in the line
+            # WARNING: This may seem redundant if then we use the distances method, but it is not
+            # WARNING: The distances method may return True when a point is just close to the line
+            # WARNING: The more far the segment points are the less resolution this method has
+            if not self.line_contains_point(other):
+                return False
+            # Now that we know the point is in the line, check if it is between both segment points
             distance1 = self.a.get_distance_to(other)
             distance2 = self.b.get_distance_to(other)
-            return resolute(distance1 + distance2, +2) == resolute(self.length, +2)
+            return isclose(distance1 + distance2, self.length)
         if isinstance(other, self.__class__):
             return other.a in self and other.b in self
         return False
@@ -339,12 +359,6 @@ class Segment(Line):
         points = [self.a, self.b]
         sorted_points = sorted( sorted(points, key=sort_by_x), key=sort_by_y )
         return tuple(sorted_points)
-
-    # Check if a point is inside the segment
-    # WARNING: Do not calculate this using the distance A-C + distance A-B = distance A-B method
-    # WARNING: This method is limited by the resolution so a point close to the segment could get a false positive
-    def contains_point (point : Point) -> bool:
-        pass
 
     # Get the inverted segment (i.e. invert a and b points)
     def inverted (self):
@@ -395,24 +409,20 @@ class Segment(Line):
     # in_extremis = 1 -> Intersections which are the 'extrem' point of only one of the segments are also considered
     # in_extremis = 2 -> All interactions are considered
     def get_intersection_point (self, segment, in_extremis : int = 2) -> Optional[Point]:
-        # WARNING: Do not use Vectors to set xdiff, y diff or d
-        # Vectros would resolute the x and y coordinates leading to inaccuracies
-        # Those unaccuracies could be critical when calculating the intersection point
-        # For this reason, we use 'x' and 'y' dicts for all calculation steps
-        xdiff = { 'x': self.a.x - self.b.x, 'y': segment.a.x - segment.b.x }
-        ydiff = { 'x': self.a.y - self.b.y, 'y': segment.a.y - segment.b.y }
+        xdiff = Vector(self.a.x - self.b.x, segment.a.x - segment.b.x)
+        ydiff = Vector(self.a.y - self.b.y, segment.a.y - segment.b.y)
 
-        def det(a, b):
-            return a['x'] * b['y'] - a['y'] * b['x']
+        def det(a, b) -> number:
+            return a.x * b.y - a.y * b.x
 
         div = det(xdiff, ydiff)
         # segments are paralel
         if div == 0:
             return None
 
-        self_det = det({ 'x': self.a.x, 'y': self.a.y }, { 'x': self.b.x, 'y': self.b.y })
-        segment_det = det({ 'x': segment.a.x, 'y': segment.a.y }, { 'x': segment.b.x, 'y': segment.b.y })
-        d = { 'x': self_det, 'y': segment_det }
+        self_det = det( Vector(self.a.x, self.a.y), Vector(self.b.x, self.b.y) )
+        segment_det = det( Vector(segment.a.x, segment.a.y), Vector(segment.b.x, segment.b.y))
+        d = Vector(self_det, segment_det)
         x = det(d, xdiff) / div
         y = det(d, ydiff) / div
         intersection_point = Point(x, y)
@@ -1182,9 +1192,12 @@ class Perimeter:
             sorted_points = sorted(intersection_points, key=by_distance)
 
             # The closest point will be the first point
-            cut_point = sorted_points[0] # DANI: Me quedé aquí. Parece que una segmenta no corta, hay que chequear
+            cut_point = sorted_points[0]
 
             insider_segment = Segment(segment.a, cut_point, color='red')
+            if insider_segment.is_diagonal():
+                print(segment)
+                raise RuntimeError('WTF miniño: ' + str(insider_segment))
             insider_segments.append(insider_segment)
 
         #return [tracing1, tracing2]

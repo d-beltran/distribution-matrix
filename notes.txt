@@ -1,10 +1,6 @@
 RAM
 
 - Arreglar bugs internos
-	* Algo va mal con la grid
-		- inside lines que se escapan del perímetro
-		- rects que están dentro de child rooms
-		- no encuentra rects muy estrechos
 - Mejorar estrategia del solver: elegir mejor la frontier a expandir
 	* Hacer ranking de proximidad con una zona libre
 - Gestionar cuando hay PROBLEMA

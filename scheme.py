@@ -7,7 +7,7 @@ from vectorial_base import *
 import random
 from math import sqrt
 
-random.seed(8)
+random.seed(5)
         
 # A room is a smart perimeter that may contain other perimeters with conservative areas and size restrictions
 # A start 'perimeter' may be passed. If no perimeters i passed it is assigned automatically according the room rules
