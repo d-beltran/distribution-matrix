@@ -445,7 +445,11 @@ class Segment(Line):
         return Point(x, y)
 
     # Get the point in the middle of the segment
+    # This functions is "dangerous"
+    # According to the resolutution of 0.0001, imagine we have a segment where self.length % 10000 is not 0
+    # Then the middle point of a -> b will be different from the middle point of b -> a although they are the same segment
     def get_middle_point (self) -> Point:
+        print('WARNING: Using the "get middle point" function is risky and it may lead to unaccuracies and unstability')
         return self.a + self.vector / 2
 
     # Get the overlap segment between two segments
@@ -694,13 +698,6 @@ class Rect:
         y_size = self.get_y_size()
         return x_size, y_size
 
-    # Calculate the rectangle center
-    def get_center(self) -> tuple:
-        x_size, y_size = self.get_size()
-        x_position = self.pmin.x + x_size / 2
-        y_position = self.pmin.y + y_size / 2
-        return x_position, y_position
-
     # Calculate the rectangle area
     def get_area(self) -> number:
         if self._area:
@@ -712,11 +709,29 @@ class Rect:
     # The rectangle area (read only)
     area = property(get_area, None, None, "The rectangle area")
 
+    # Given a segment of the current rectangle, get the normalized direction from this segment to the rectangle center
+    def get_side_direction_to_center (self, segment : Segment) -> Vector:
+        segments = self.get_segments()
+        # Left side
+        if segment == segments[0]:
+            return Vector(1,0)
+        # Upper side
+        if segment == segments[1]:
+            return Vector(0,-1)
+        # Right side
+        if segment == segments[2]:
+            return Vector(-1,0)
+        # Buttom side
+        if segment == segments[3]:
+            return Vector(0,1)
+        raise ValueError('Segment "' + str(segment) + '" is not part of rectangle "' + str(self) + '"')
+
     # Return a segment which crosses the rectangle in diagonal from min to max point
     def get_crossing_segment(self) -> Segment:
         return Segment(self.pmin, self.pmax, self.segments_color)
 
     # Get the point in the middle of the rect
+    # WARNING: Avoid using this function since it uses the unstable 'Segment.get_middle_point'
     def get_middle_point (self) -> Point:
         # Get the point in the middle of the crossing line
         crossing_segment = self.get_crossing_segment()
@@ -855,10 +870,11 @@ class Perimeter:
         # Check that each segment ends in the same point that the next segment starts
         ordered_segments = [ segments[0] ]
         available_segments = segments[1:]
-        while ( len(ordered_segments) < len(segments) ):
+        while len(ordered_segments) < len(segments):
             # If there are no more available segments return error
             # This may happen in case there was a duplicated segment, which means the perimeter is wrong
             if len(available_segments) == 0:
+                add_frame(segments)
                 raise cls.open_perimeter_error
             # Get the last ordered segment to find which is the next connected segment
             last_ordered_segment = ordered_segments[-1]
@@ -877,12 +893,13 @@ class Perimeter:
             ordered_segments.append(connected_segment)
         # Finally, check that the first segment and the last segment are also connected
         if ordered_segments[0].a != ordered_segments[-1].b:
+            add_frame(segments)
             raise cls.open_perimeter_error
         segments = ordered_segments
             
         # Merge continuous segments (i.e. connected segments in the same line)
         count = 0
-        while (count < len(segments)):
+        while count < len(segments):
             for current, nextone in pairwise(segments, retro=True):
                 if current.same_line_as(nextone):
                     merged_segment = Segment(current.a, nextone.b)
@@ -1184,6 +1201,8 @@ class Perimeter:
 
             # There should be always at least 1 intersection
             if len(intersection_points) == 0:
+                add_frame([ segment, *limit_segments ])
+                #print(self.segments)
                 raise RuntimeError('An inside segment has no intersection point: ' + str(segment))
 
             # Sort the points by distance
@@ -1196,8 +1215,8 @@ class Perimeter:
 
             insider_segment = Segment(segment.a, cut_point, color='red')
             if insider_segment.is_diagonal():
-                print(segment)
-                raise RuntimeError('WTF miniño: ' + str(insider_segment))
+                # This may happen due to a resolution problem
+                raise RuntimeError('An insider segment should never be diagonal: ' + str(insider_segment))
             insider_segments.append(insider_segment)
 
         #return [tracing1, tracing2]
@@ -1225,8 +1244,7 @@ class Perimeter:
         for corner in inside_corners:
             count = 0
             for perimeter in limits:
-                element = perimeter.get_border_element(corner)
-                if element:
+                if perimeter.in_border(corner):
                     count += 1
             # Include this corner only if after all searches it was found only 1 time
             if count == 1:
@@ -1263,8 +1281,6 @@ class Perimeter:
 
         # Find all points where the inside separator segments intersect each other
         all_intersections = []
-        # DANI: Aquí me he quedado
-        # DANI: No se estan encontrado las intersections de los inline separators peques
         for segment1, segment2 in itertools.combinations(all_segments, 2):
             intersection = segment1.get_intersection_point(segment2)
             if not intersection:
@@ -1282,9 +1298,9 @@ class Perimeter:
         #print('All segments: ' + str(len(all_splitted_segments)))
 
         # DANI: Usa para ver los segmentos ya cortados
-        for segment in all_splitted_segments:
-            segment.color = generate_random_color()
-        add_frame(all_splitted_segments)
+        # for segment in all_splitted_segments:
+        #     segment.color = generate_random_color()
+        # add_frame(all_splitted_segments)
 
         # Finally, for each segment, try to find 2 rectangles
         # Each segment will be connected to exactly 1 or 2 rectangles

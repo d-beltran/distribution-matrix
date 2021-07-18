@@ -7,7 +7,7 @@ from vectorial_base import *
 import random
 from math import sqrt
 
-random.seed(5)
+random.seed(1)
         
 # A room is a smart perimeter that may contain other perimeters with conservative areas and size restrictions
 # A start 'perimeter' may be passed. If no perimeters i passed it is assigned automatically according the room rules
@@ -402,7 +402,7 @@ class Room:
             space_forward_limit = space.get_size()[forward]
 
             # Find the direction of the expansion as a vector
-            forward_direction = space_contact.get_middle_point() + space.get_middle_point()
+            forward_direction = space.get_side_direction_to_center(space_contact)
 
             # Get the forward expansion limit according to maximum rectangles
             maximum_forward_limit = max([ rect.get_size()[forward] for rect in contact_max_rects ])
@@ -429,39 +429,18 @@ class Room:
                     return False
                 # Create the new rect with the definitive length
                 new_point = pushed_segment.a + forward_direction.normalized() * push_length
-                #print('NEW POINT: ' + str(new_point))
                 new_side = Segment(pushed_segment.a, new_point)
                 new_rect = Rect.from_segments([pushed_segment, new_side])
                 # Then add the new current rectangle by modifying the current perimeter
-                # Substract the pushed segment from the perimeter and add the new created segments
-                # First find the new created segments as a result of the expansion
-                new_segments = [ seg for seg in new_rect.segments if seg != pushed_segment ]
-                # In addition, it may happend that the new segments overlap with current segments
-                # e.g. when the expanded frontier makes a corner with another segment from this room
-                # In those cases we must substract the overlapped part from both new and current segments
-                overlap_segments = []
-                substract_segments = []
-                for current_segment in self.perimeter.segments:
-                    for new_segment in new_segments:
-                        overlap = new_segment.get_overlap_segment(current_segment)
-                        if overlap:
-                            overlap_segments += [current_segment, new_segment]
-                            current_substracted_segments = current_segment.substract_segments([overlap])
-                            new_substracted_segments = new_segment.substract_segments([overlap])
-                            substract_segments += current_substracted_segments + new_substracted_segments
-                new_segments = [ seg for seg in new_segments if seg not in overlap_segments ]
-                new_segments += substract_segments
-                # We must find all current perimeter segments which will be modified by the push
-                # Find the whole segment where the pushed segment comes from, which will always be modified
-                deformed_segment = next( seg for seg in self.perimeter.segments if pushed_segment in seg )
-                # Substract the pushed segment from the whole segment
-                # WARNING: This step must be done after the subtsraction of overlapped segments
-                new_segments += deformed_segment.substract_segments([ pushed_segment ])
-                # Find the rest of segments in the perimeter that will stay the same
-                modified_segments = [ deformed_segment, *overlap_segments ]
-                remaining_segments = [ seg for seg in self.perimeter.segments if seg not in modified_segments ]
+                # Add the new rectangle segment regions which do not overlap with current perimeter segments
+                # Substract the new rectangle segment regions which overlap with current perimeter segments
+                # e.g. the pushed segment will always be an overlapped region
+                new_segments = new_rect.segments
+                current_segments = self.perimeter.segments
+                added_segments = [ seg for segment in new_segments for seg in segment.substract_segments(current_segments) ]
+                remaining_segments = [ seg for segment in current_segments for seg in segment.substract_segments(new_segments) ]
                 # Join all previous segments to make the new perimeter
-                new_perimeter = Perimeter.non_canonical([ *remaining_segments, *new_segments ])
+                new_perimeter = Perimeter.non_canonical([ *added_segments, *remaining_segments ])
                 # In case the perimeter is extended over another room,
                 # We must substract the claimed rect from the other room and make it expand to compensate
                 if room:
