@@ -445,7 +445,7 @@ class Room:
                 # We must substract the claimed rect from the other room and make it expand to compensate
                 if room:
                     # Make a backup of the current perimeter in case the further expansions fail an we have to go back
-                    backup_perimeter = self.perimeter
+                    self_backup_perimeter = self.perimeter
                     self.perimeter = new_perimeter
                     # Substract the claimed rect from the other room
                     exclusion_perimeter = Perimeter(new_rect.segments)
@@ -455,20 +455,22 @@ class Room:
                     if len(truncated_perimeters) > 1:
                         print('WARNING: The room has been splitted -> Go back')
                         self.update_display()
-                        self.perimeter = backup_perimeter
+                        self.perimeter = self_backup_perimeter
                         return False
                     # DANI: Es posible que se coma toda la habitación??
                     if len(truncated_perimeters) == 0:
                         raise RuntimeError('The invaded room has been fully consumed')
-                    # Modify the invaded room perimeter
+                    # Modify the invaded room perimeter but save a backup in case we have to go back further
+                    room_backup_perimeter = room.perimeter
                     room.perimeter = truncated_perimeters[0]
                     self.update_display()
                     # Expand the invaded room as much as the invaded area
                     # In case the expansions fails go back
                     if not room.expand():
                         print('WARNING: The room cannot expand -> Go back')
-                        self.perimeter = backup_perimeter
                         self.update_display()
+                        self.perimeter = self_backup_perimeter
+                        room.perimeter = room_backup_perimeter
                         return False
                 else:
                     self.perimeter = new_perimeter
