@@ -7,7 +7,7 @@ from vectorial_base import *
 import random
 from math import sqrt
 
-random.seed(1)
+random.seed(4)
         
 # A room is a smart perimeter that may contain other perimeters with conservative areas and size restrictions
 # A start 'perimeter' may be passed. If no perimeters i passed it is assigned automatically according the room rules
@@ -125,6 +125,11 @@ class Room:
     # Free space grid (read only)
     free_grid = property(get_free_grid, None, None, "The room free space grid")
 
+    # Reset all minimum and maximum free rects
+    # This must be done each time the perimeter is modified since they are not valid anymore
+    def reset_free_grid (self):
+        self._free_grid = None
+
     # Get rectangles in the free grid
     def get_free_rects (self):
         return self.free_grid.rects
@@ -163,35 +168,28 @@ class Room:
         self._forced_max_size = value
     max_size = property(get_maximum_area, set_maximum_size, None, "Maximum possible size")
 
-    # Reset all minimum and maximum free rects
-    # This must be done each time the perimeter is modified since they are not valid anymore
-    def reset_free_grid (self):
-        self._free_grid = None
-
-    # Check if a rectangle fits somewhere in the perimeter
-    # Iterate over all maximum rectangles and try to fit
-    # If only the x size parameter is passed it is assumed to be both x and y size
-    def fit (self, x_fit_size : number, y_fit_size : number = None):
-        if not y_fit_size:
-            y_fit_size = x_fit_size
-        for rect in self.free_max_rects:
-            x_size, y_size = rect.get_size()
-            if x_fit_size <= x_size and y_fit_size <= y_size:
-                return True
+    # Check if a room fits in this room according to its minimum size
+    # Check free space by default and all space if the argument 'force' is passed
+    def does_room_fit (self, room : 'Room', force : bool = False) -> bool:
+        size = room.min_size
+        # If there is no minimum size it will always fit
+        if not size:
+            return True
+        # Generate fitting rects. If there is at least one then the room fits
+        grid = self.perimeter.grid if force else self.free_grid
+        fitting_rects = grid.get_fitting_space(size, size)
+        if next(fitting_rects, None):
+            return True
         return False
 
-    # Get all maximum free rectangles with the minimum specified x and y sizes
-    # Iterate over all free maximum rectangles and try to fit
-    # If only the x size parameter is passed it is assumed to be both x and y size
-    def get_fit (self, x_fit_size : number, y_fit_size : number = None):
-        fit_rects = []
-        if not y_fit_size:
-            y_fit_size = x_fit_size
-        for rect in self.free_max_rects:
-            x_size, y_size = rect.get_size()
-            if x_fit_size <= x_size and y_fit_size <= y_size:
-                fit_rects.append(rect)
-        return fit_rects
+    # Search all maximum rects where the specified room minimum rectangle would fit
+    # Search in free space by default and all space if the argument 'force' is passed
+    def get_room_fitting_rects (self, room : 'Room', force : bool = False) -> List[Rect]:
+        size = room.min_size
+        # Get all fitting rects
+        grid = self.perimeter.grid if force else self.free_grid
+        fitting_rects = grid.get_fitting_space(size, size)
+        return list(fitting_rects)
 
     # Add children rooms
     def add_children (self, rooms : list):
@@ -213,8 +211,7 @@ class Room:
                 raise InputError('The child room "' + room.name + '" is out of the parent perimeter')
         # Check all children minim sizes fit in the perimeter, if they have a predefined minimum size
         for room in rooms:
-            size = room.min_size
-            if size and not self.perimeter.fit(size, size):
+            if not self.does_room_fit(room, force=True):
                 raise InputError('The child room "' + room.name + '" minimum size does not fit in the parent perimeter')
 
         # Sort children rooms by minimum size, with the biggest sizes first
@@ -246,30 +243,47 @@ class Room:
     def set_child_room_perimeter (self, room) -> bool:
         # Find a suitable maximum free rectangle to deploy a starting base perimeter
         # The minimum base perimeter is a square with both sides as long as the room minimum size
-        suitable_rects = self.get_fit(room.min_size)
+        suitable_rects = self.get_room_fitting_rects(room)
+        # If there are no suitable rects it means this child fits nowhere in the free space
+        # This may happen with the last childs, when previous childs have take almost all space
+        # In this case we take as availbale space all the room space and then we invade overlapped children
+        forced = False
+        if len(suitable_rects) == 0:
+            print('WARNING: The room ' + room.name + ' fits nowhere in the free space')
+            suitable_rects = self.get_room_fitting_rects(room, force=True)
+            forced = True
+            if len(suitable_rects) == 0:
+                # DANI: Esto no debería pasar nunca. Debería preveerse de antes
+                raise RuntimeError('The room ' + room.name + ' fits nowhere')
         # Shuffle the suitable rects
         random.shuffle(suitable_rects)
         # Sort the suitable rects by minimum size, with the biggest sizes first
         def sort_by_size(rect):
             return min(rect.get_size())
         sorted_suitable_rects = sorted( suitable_rects, key=sort_by_size, reverse=True )
-        # Stop here if there are no available rectangles
-        # DANI: Esto no debería pasar nunca. Debería preveerse de antes.
-        if len(suitable_rects) == 0:
-            raise RuntimeError('ERROR: The room ' + room.name + ' fits nowhere')
+            
         # Try to set up the new room in all possible sites until we find one
         # Each 'site' means each corner in each suitable rectangle
         # Check each site to allow other rooms to grow
-        def set_base_perimeter():
-            for rect in sorted_suitable_rects:
-                for corner in rect.get_corners():
-                    initial_perimeter = room.set_maximum_initial_perimeter(corner, rect)
-                    if initial_perimeter:
-                        return initial_perimeter
-            return None
-        base_perimeter = set_base_perimeter()
-        # Set the child first perimeter, which automatically resets this room free grid
-        room.perimeter = base_perimeter
+        sites = [ (corner, rect) for rect in sorted_suitable_rects for corner in rect.get_corners() ]
+        for corner, rect in sites:
+            # In case we forced the base perimeter we must check which children were invaded
+            # In addition, the base perimeter must be as small as possible
+            if forced:
+                initial_perimeter = room.set_minimum_initial_perimeter(corner, rect)
+            # Otherwise we set freely the maximum possible perimeter
+            else:
+                initial_perimeter = room.set_maximum_initial_perimeter(corner, rect)
+            if initial_perimeter:
+                # Set the child first perimeter, which automatically resets this room free grid
+                room.perimeter = initial_perimeter
+                # Now we must check that the overlapped children rooms are fine with the invasion
+                if forced:
+                    if not self.invade_children([initial_perimeter]):
+                        room.perimeter = None
+                        continue
+                break
+
         self.update_display()
 
         # Proceed with the expansion of this child room until it reaches its forced area
@@ -278,7 +292,7 @@ class Room:
         return True
 
     # Set the initial room perimeter as the maximum possible rectangle
-    # This is a shortcut to skip the difficult expansion protocol
+    # This is a shortcut to skip the difficult expansion protocol as much as possible
     # It is useful to set a whole room at the begining, when there is plenty of free space
     # It is useful to set as much perimeter as possible at the start before we resolve space conflicts
     def set_maximum_initial_perimeter (self, corner : Point, space : Rect) -> Perimeter:
@@ -292,8 +306,8 @@ class Room:
                     maximum_rect = Rect.from_corner(corner, x_space, self.max_size)
                 else:
                     maximum_rect = Rect.from_corner(corner, self.max_size, y_space)
-                return Perimeter(maximum_rect.get_segments())
-            return Perimeter(space.get_segments())
+                return Perimeter.from_rect(maximum_rect)
+            return Perimeter.from_rect(space)
         # Else, fit the room in the space
         # First of all create the 3 rule rectangle from the space
         # i.e. calculate the relation of areas and apply it to the square root to both x and y sizes
@@ -303,7 +317,7 @@ class Room:
         # If any of the new sizes is shorter than the maximum size then the rectangle is valid
         if new_x_size < self.max_size or new_y_size < self.max_size:
             maximum_rect = Rect.from_corner(corner, new_x_size, new_y_size)
-            return Perimeter(maximum_rect.get_segments())
+            return Perimeter.from_rect(maximum_rect)
         # If both new sizes are longer than the maximum size we must find another solution
         # The new rectangle will have the maximum size in one of its sides
         # Calculate the other side size
@@ -321,7 +335,13 @@ class Room:
             new_x_size = min(new_min_size, new_x_size)
             new_y_size = min(new_max_size, new_y_size)
         maximum_rect = Rect.from_corner(corner, new_x_size, new_y_size)
-        return Perimeter(maximum_rect.get_segments())
+        return Perimeter.from_rect(maximum_rect)
+
+    # Set the initial room perimeter as the minimum possible rectangle
+    # This is used when the initial perimeter must be forced over other children rooms
+    def set_minimum_initial_perimeter (self, corner : Point, space : Rect) -> Perimeter:
+        minimum_rect = Rect.from_corner(corner, self.min_size, self.min_size)
+        return Perimeter.from_rect(minimum_rect)
 
     # Calculate how much area we need to expand
     def get_required_area (self):
@@ -445,36 +465,16 @@ class Room:
                 # We must substract the claimed rect from the other room and make it expand to compensate
                 if room:
                     # Make a backup of the current perimeter in case the further expansions fail an we have to go back
-                    self_backup_perimeter = self.perimeter
+                    backup_perimeter = self.perimeter
                     self.perimeter = new_perimeter
                     # Substract the claimed rect from the other room
-                    exclusion_perimeter = Perimeter(new_rect.segments)
-                    truncated_grid = Grid( room.perimeter.split_in_rectangles( exclusion_perimeters = [exclusion_perimeter] ) )
-                    truncated_perimeters = truncated_grid.find_perimeters()
-                    # In case the invaded room has been splitted in 2 parts as a result of this expansion we go back
-                    if len(truncated_perimeters) > 1:
-                        print('WARNING: The room has been splitted -> Go back')
-                        self.update_display()
-                        self.perimeter = self_backup_perimeter
-                        return False
-                    # DANI: Es posible que se coma toda la habitación??
-                    if len(truncated_perimeters) == 0:
-                        raise RuntimeError('The invaded room has been fully consumed')
-                    # Modify the invaded room perimeter but save a backup in case we have to go back further
-                    room_backup_perimeter = room.perimeter
-                    room.perimeter = truncated_perimeters[0]
-                    self.update_display()
-                    # Expand the invaded room as much as the invaded area
-                    # In case the expansions fails go back
-                    if not room.expand():
-                        print('WARNING: The room cannot expand -> Go back')
-                        self.update_display()
-                        self.perimeter = self_backup_perimeter
-                        room.perimeter = room_backup_perimeter
+                    invaded_region = Perimeter.from_rect(new_rect)
+                    if not room.invade([invaded_region]):
+                        self.perimeter = backup_perimeter
                         return False
                 else:
                     self.perimeter = new_perimeter
-                    self.update_display()
+                self.update_display()
                 return True
                  
 
@@ -573,6 +573,50 @@ class Room:
                 return True
         return False
 
+    # Invade this room by substracting part of its space
+    # Then this room must expand to recover the lost area
+    def invade (self, regions : List[Perimeter]) -> bool:
+        # Calculate the perimeter of this room after substracting the invaded regions
+        truncated_grid = Grid( self.perimeter.split_in_rectangles( exclusion_perimeters = regions ) )
+        truncated_perimeters = truncated_grid.find_perimeters()
+        # In case the room has been splitted in 2 parts as a result of the invasion we go back
+        if len(truncated_perimeters) > 1:
+            print('WARNING: The room has been splitted -> Go back')
+            return False
+        # DANI: Es posible que se coma toda la habitación??
+        if len(truncated_perimeters) == 0:
+            print('WARNING: The invaded room has been fully consumed -> Go back')
+            return False
+        # Modify the room perimeter but save a backup in case we have to go back further
+        backup_perimeter = self.perimeter
+        self.perimeter = truncated_perimeters[0]
+        self.update_display()
+        # Expand the invaded room as much as the invaded area
+        # In case the expansions fails go back
+        if not self.expand():
+            print('WARNING: The room cannot expand -> Go back')
+            self.perimeter = backup_perimeter
+            return False
+        return True
+
+    # Invade children in this room by substracting part of their space
+    # Then all children must expand to recover the lost area
+    def invade_children (self, regions : List[Perimeter]) -> bool:
+        # Make a backup of all children
+        # All perimeters will be recovered in only 1 child fails to get invaded
+        children_backup = [ child.perimeter for child in self.children ]
+        # Now find which children are overlaped by the invade region and then invade them
+        for child in self.children:
+            overlap_perimeters = child.perimeter.get_overlap_perimeters(regions)
+            if len(overlap_perimeters) == 0:
+                continue
+            # In case something went wrong with the invasion recover all children back ups and stop
+            if not child.invade(overlap_perimeters):
+                for c, child in enumerate(self.children):
+                    child.perimeter = children_backup[c]
+                return False
+        return True
+            
 
     # Get all overlapped segments between the current room and others
     def get_frontiers (self, other) -> list:

@@ -1,4 +1,4 @@
-from typing import List, Union, Optional
+from typing import List, Union, Optional, Generator
 
 from scheme_display import add_frame
 
@@ -767,7 +767,7 @@ class Rect:
 
     # Given 2 rectangles, it returns the overlapping region, if exists, as a new rectangle
     # DANI: No lo he provado desde que lo moví de abajo
-    def overlap_rect (self, rect) -> Optional['Rect']:
+    def get_overlap_rect (self, rect) -> Optional['Rect']:
         # Find the overlap in the 'x' dimension
         # Get the maximum of the minimums
         x_minimum = max(self.pmin.x, rect.pmin.x)
@@ -797,7 +797,7 @@ class Rect:
     # DANI: No lo he provado desde que lo moví de abajo
     def join_rect (self, rect) -> list:
         # Find the overlap between these two rectangles
-        overlap = self.overlap_rect(rect)
+        overlap = self.get_overlap_rect(rect)
         # If there is no overlap then just return both input rectangles
         if not overlap:
             return [self, rect]
@@ -814,7 +814,7 @@ class Rect:
     # DANI: No lo he provado desde que lo moví de abajo
     def subtract_rect (self, rect) -> Optional[list]:
         # Find the overlap between these two rectangles
-        overlap = selfoverlap_rect(rect)
+        overlap = self.get_overlap_rect(rect)
         # If there is no overlap then just return the first rectangle intact
         if not overlap:
             return [self]
@@ -925,6 +925,11 @@ class Perimeter:
             segments.append(new_segment)
         # Build the perimeter
         return cls(segments)
+
+    # Set the perimeter from a rectangle
+    @classmethod
+    def from_rect(cls, rect : Rect):
+        return cls(rect.segments)
 
     def __str__(self):
         return ', '.join([str(segment) for segment in self.segments])
@@ -1276,7 +1281,7 @@ class Perimeter:
         # WARNING: inside segments MUST be before limit segments
         all_segments = [ *inside_separators, *limit_segments ]
 
-        # DANI: Usa esto para ver los perímetros en negro y las segmentas interiores en rojo
+        # DANI: Usa esto para ver los perímetros en negro y los segmentos interiores en rojo
         #add_frame(all_segments)
 
         # Find all points where the inside separator segments intersect each other
@@ -1339,14 +1344,47 @@ class Perimeter:
 
         return final_rectangles
 
-    # Check if a rectangle fits somewhere in the perimeter
-    # Iterate over all maximum rectangles and try to fit 
-    def fit (self, x_fit_size : number, y_fit_size : number):
-        for rect in self.max_rects:
-            x_size, y_size = rect.get_size()
-            if x_fit_size <= x_size and y_fit_size <= y_size:
-                return True
-        return False
+    # Get the overlap perimeters between 2 perimeters
+    def get_overlap_perimeters (self, others : List['Perimeter']) -> List['Perimeter']:
+        # Get the rectangles overlap between the current perimeter and each of the other perimeters
+        overlap_rects = []
+        for other in others:
+            overlap_rects += self.grid.get_overlap_rects(other.grid)
+        # Get all rectangle segments and discard overlapped segments
+        # Then connect the remaining segments to build perimeters
+        segments = [ segment for rect in overlap_rects for segment in rect.segments ]
+        # Connect segments until a closed perimeter is formed
+        # Eliminate segments from the list when they get connected to others
+        # Remove them with a comprehension list since it is not possible that the segment is duplciated
+        # There must be no remaining segments at the end
+        perimeters = []
+        while len(segments) > 0:
+            first_segment = segments[0]
+            segments = [ segment for segment in segments if segment != first_segment ]
+            perimeter_segments = [ first_segment ]
+            while True:
+                # Find a new segment which is connected to the last perimeter segment
+                # There must be always at least 1 segment connected
+                last_segment = perimeter_segments[-1]
+                previous_segments = perimeter_segments[0:-1]
+                connected_segment = next(segment for segment in segments if segment.is_connected_with(last_segment))
+                # Remove this segment from the segments list and add it to the perimeter segments list
+                # Use the following removal method since it is not possible that the segment is duplciated
+                segments = [ segment for segment in segments if segment != connected_segment ]
+                perimeter_segments.append(connected_segment)
+                # Check if the new connected segment closes a perimeter with any of the previous segments
+                # Note that the closing segment may not be the first segment
+                # This may happen in case we have 2 perimeters with a same corner
+                closing_segment = next((s for s, segment in enumerate(previous_segments) if segment.is_connected_with(connected_segment)), None)
+                if closing_segment != None:
+                    perimeter_segments = perimeter_segments[closing_segment:]
+                    perimeters.append( Perimeter.non_canonical(perimeter_segments) )
+                    # Recover the discarded segments to the segments list in case the closing segment was not the first segment
+                    discarded_segments = perimeter_segments[0:closing_segment]
+                    segments += discarded_segments
+                    break
+        return perimeters
+
 
 # A grid is a group of rectangles which may be connected (next to each other) or not
 # All rectangles which are connected have the whole segment connected
@@ -1380,7 +1418,7 @@ class Grid:
                     if corner in other_rect and corner not in other_corners:
                         print('WARNING: Conflict rects ' + str(rect) + ' and ' + str(other_rect))
                         raise RuntimeError('Grid rects are wrong')
-                if rect.overlap_rect(other_rect):
+                if rect.get_overlap_rect(other_rect):
                     print('WARNING: Overlapping rects ' + str(rect) + ' and ' + str(other_rect))
                     raise RuntimeError('Grid rects are wrong')
 
@@ -1444,6 +1482,28 @@ class Grid:
         return self._area
     # Grid area (read only)
     area = property(get_area, None, None, "The area of the whole grid")
+
+    # Return the overlap space between two grid splitted in rectangles
+    # Note that these rectangles will not follow the grid standard rules
+    def get_overlap_rects (self, grid : 'Grid') -> List[Rect]:
+        overlap_rects = []
+        for rect in self.rects:
+            for other in grid.rects:
+                overlap_rect = rect.get_overlap_rect(other)
+                if overlap_rect:
+                    overlap_rects.append(overlap_rect)
+        return overlap_rects
+
+    # Search all maximum rectangles which fulfill the specified minimum x and y sizes
+    # Fitting rects are returned as a generator
+    # If only the x size parameter is passed it is assumed to be both x and y size
+    def get_fitting_space (self, x_fit_size : number, y_fit_size : Optional[number] = None) -> Generator[Rect, None, None]:
+        if not y_fit_size:
+            y_fit_size = x_fit_size
+        for rect in self.max_rects:
+            x_size, y_size = rect.get_size()
+            if x_fit_size <= x_size and y_fit_size <= y_size:
+                yield rect
 
     # Some functions are defined to find colliding rects
     def get_left_rect (self, rect : Rect) -> Optional[Rect]:
@@ -1764,7 +1824,7 @@ class Grid:
 # However, if the 'retro' argument is True, the final array value is returned with the first array value as the next value
 # By default, values are returned as follows: A with B, B with C, C with D ...
 # However, if the 'loyals' argument is True, values are returned as follows: A with B, C with D, E with F ...
-def pairwise (values : list, retro : bool = False, loyals = False) -> tuple:
+def pairwise (values : list, retro : bool = False, loyals : bool = False) -> Generator[tuple, None, None]:
     last = len(values) - 1
     step = 2 if loyals else 1
     for i in range(0, last, step):
@@ -1774,7 +1834,7 @@ def pairwise (values : list, retro : bool = False, loyals = False) -> tuple:
 
 # Set a special iteration system
 # Return one value of the array and a new array with all other values for each value
-def otherwise (values : list) -> tuple:
+def otherwise (values : list) -> Generator[tuple, None, None]:
     for v, value in enumerate(values):
         others = values[0:v] + values[v+1:]
         yield value, others
