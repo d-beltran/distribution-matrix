@@ -1353,6 +1353,8 @@ class Perimeter:
         # Get all rectangle segments and discard overlapped segments
         # Then connect the remaining segments to build perimeters
         segments = [ segment for rect in overlap_rects for segment in rect.segments ]
+        # Remove pairs of duplicated segments
+        segments = [ segment for segment in segments if segments.count(segment) == 1 ]
         # Connect segments until a closed perimeter is formed
         # Eliminate segments from the list when they get connected to others
         # Remove them with a comprehension list since it is not possible that the segment is duplciated
