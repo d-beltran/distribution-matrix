@@ -1387,6 +1387,47 @@ class Perimeter:
                     break
         return perimeters
 
+    # Find overlap segments between perimeters
+    # Get overlapping regions between perimeter segments
+    # However, if one segment is inside the area of the other perimeter it will not be considered
+    def get_overlap_segments (self, other : 'Perimeter') -> List[Segment]:
+        overlap_segments = []
+        for segment in self.segments:
+            for other_segment in other.segments:
+                overlap_segment = self.get_overlap_segment(other)
+                if overlap:
+                    overlap_segments.append(overlap_segment)
+
+    # Fuse other perimeter to self perimeter
+    # Check that perimeter can be joined to current perimeter as a single room
+    # i.e. both perimeters must be colliding and the colliding region must be only one and as wide as the minimum size or more
+    # DANI: No se ha provado
+    def merge_perimeter (self, other : 'Perimeter', min_size = None) -> 'Perimeter':
+        # Check if this perimeter is colliding with another perimeter
+        # It means both perimeters have overlapping segments, but they do not overlap in their areas
+        colliding_segments = self.get_overlap_segments(other)
+        if len(colliding_segments) == 0:
+            raise ValueError('Perimeters are not colliding')
+        if len(colliding_segments) > 1:
+            raise ValueError('"Donut" perimeters are not supported')
+        # In case there is a minimum size restriction check that the colliding segment is as long as required
+        colliding_segment = colliding_segments[0]
+        if min_size and colliding_segment.length < min_size:
+            raise ValueError('The colliding region is not wide enough')
+        overlaps = self.get_overlap_perimeters(other)
+        if len(overlaps) == 0:
+            raise ValueError('Perimeters are overlapping')
+        # Check that there are not overlaping areas between both perimeters
+        overlaps = self.get_overlap_perimeters(other)
+        if len(overlaps) == 0:
+            raise ValueError('Perimeters are overlapping')
+        # Now build the new merged perimeter
+        # Substract the overlapping segments from both 
+        added_segments = [ seg for segment in other.segments for seg in segment.substract_segments(colliding_segments) ]
+        remaining_segments = [ seg for segment in self.segments for seg in segment.substract_segments(colliding_segments) ]
+        # Join all previous segments to make the new perimeter
+        new_perimeter = Perimeter.non_canonical([ *added_segments, *remaining_segments ])
+        return new_perimeter            
 
 # A grid is a group of rectangles which may be connected (next to each other) or not
 # All rectangles which are connected have the whole segment connected

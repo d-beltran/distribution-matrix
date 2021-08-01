@@ -274,15 +274,19 @@ class Room:
             # Otherwise we set freely the maximum possible perimeter
             else:
                 initial_perimeter = room.set_maximum_initial_perimeter(corner, rect)
-            if initial_perimeter:
-                # Set the child first perimeter, which automatically resets this room free grid
+            # There must be always an initial perimeter at this point
+            if not initial_perimeter:
+                raise RuntimeError('Something went wrong with initial perimeter')
+            # Set the child first perimeter, which automatically will self room free grid
+            # In case it was forced, we must check that the overlapped children rooms are fine with the invasion
+            if forced:
+                if not self.invade_children(room, initial_perimeter):
+                    room.perimeter = None
+                    continue
+            # Otherwise just claim the perimeter
+            else:
                 room.perimeter = initial_perimeter
-                # Now we must check that the overlapped children rooms are fine with the invasion
-                if forced:
-                    if not self.invade_children([initial_perimeter]):
-                        room.perimeter = None
-                        continue
-                break
+            break
 
         self.update_display()
 
@@ -601,13 +605,20 @@ class Room:
 
     # Invade children in this room by substracting part of their space
     # Then all children must expand to recover the lost area
-    def invade_children (self, regions : List[Perimeter]) -> bool:
-        # Make a backup of all children
-        # All perimeters will be recovered in only 1 child fails to get invaded
+    # The invasor is the children room which will claim this new space
+    def invade_children (self, invasor : 'Room', region : Perimeter) -> bool:
+        # Make a backup of all children, which includes the invasor
+        # All perimeters will be recovered if only 1 child fails to get invaded
         children_backup = [ child.perimeter for child in self.children ]
+        # Claim the invaded region for the invasor room
+        invasor.merge_perimeter(region)
         # Now find which children are overlaped by the invade region and then invade them
         for child in self.children:
-            overlap_perimeters = child.perimeter.get_overlap_perimeters(regions)
+            # Skip the invasor room
+            if child == invasor:
+                continue
+            # Get the overlap regions between the invaded region and this child
+            overlap_perimeters = child.perimeter.get_overlap_perimeters([region])
             if len(overlap_perimeters) == 0:
                 continue
             # In case something went wrong with the invasion recover all children back ups and stop
@@ -616,7 +627,15 @@ class Room:
                     child.perimeter = children_backup[c]
                 return False
         return True
-            
+
+    # Fuse a perimeter to self room perimeter
+    # Check that perimeter can be joined to current perimeter as a single room
+    # i.e. both perimeters must be colliding and the colliding region must be only one and as wide as the minimum size or more
+    def merge_perimeter (self, perimeter : Perimeter):
+        if self.perimeter == None:
+            self.perimeter = perimeter
+        else:
+            self.perimeter = self.perimeter.merge_perimeter(perimeter, self.min_size) 
 
     # Get all overlapped segments between the current room and others
     def get_frontiers (self, other) -> list:
