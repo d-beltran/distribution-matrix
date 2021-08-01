@@ -412,7 +412,7 @@ class Room:
                 forward = 1
                 sides = 0
             else:
-                raise RuntimeError('ERROR: diagonal segments are not supported for room expansion')
+                raise ValueError('ERROR: diagonal segments are not supported for room expansion')
 
             if len(rects) == 0:
                 raise RuntimeError('No pot ser: ' + str(grid))
@@ -534,27 +534,22 @@ class Room:
         brother_rooms = [ room for room in parent_room.children if room is not self ]
         brother_frontiers = []
         for room in brother_rooms:
+            # This function assign the frontier.room already
             frontiers = self.get_frontiers(room)
             if frontiers:
                 brother_frontiers += frontiers
         # The prefered limits to expand are those connected to free space inside the current parent
         # First of all get all already found frontier segments
-        all_frontiers = [*parent_frontiers, *brother_frontiers]
+        conflict_frontiers = [*parent_frontiers, *brother_frontiers]
         # Now susbstract all frontiers to each room perimeter segments to find free frontiers
         free_frontiers = []
         for segment in self.perimeter.segments:
-            free_frontiers += segment.substract_segments(all_frontiers)
+            free_frontiers += segment.substract_segments(conflict_frontiers)
         # Set the room all free segment belong to as None
         for segment in free_frontiers:
             segment.room = None
-
-        # Conserve only frontiers which reach the minimum size length
-        # As an exception, frontiers connected to at least 1 inside corner may be expanded with no size restrictions
-        inside_corners = [ corner for corner in self.perimeter.corners if corner.inside == True ]
-        def is_suitable (frontier : Segment) -> bool:
-            return frontier.length >= self.min_size or frontier.a in inside_corners or frontier.b in inside_corners
-        suitable_free_frontiers = [ seg for seg in free_frontiers if is_suitable(seg) ]
-        suitable_brother_frontiers = [ seg for seg in brother_frontiers if is_suitable(seg) ]
+        # Define the expandable frontiers as free and borther frontiers
+        expandable_frontiers = [ *free_frontiers, *brother_frontiers ]
 
         #----------------------------------------------------------------------------------------------
         # Set now the strategy to sort the frontiers (i.e. to choose which frontiers will be tried first)
@@ -564,17 +559,62 @@ class Room:
         # A good strategy could make the algorithm faster
         #----------------------------------------------------------------------------------------------
 
-        # Random (no strategy)
-        random.shuffle(suitable_free_frontiers)
-        random.shuffle(suitable_brother_frontiers)
+        # Make a function to check which frontiers are suitable for expansion alone
+        # It means frontiers whose length reaches the self room minimum size
+        # As an exception, frontiers connected to at least 1 inside corner may be expanded with no size restrictions
+        inside_corners = [ corner for corner in self.perimeter.corners if corner.inside == True ]
+        def is_suitable (frontier : Segment) -> bool:
+            return frontier.length >= self.min_size or frontier.a in inside_corners or frontier.b in inside_corners
 
-        # Try to expand one by one all frontiers until one of them is expanded sucessfully
-        # Once an expansion has been done we must recalculate frontiers if we want to keep expanding
-        # Priorize free frontiers over bother frontiers
-        available_frontiers = [ *suitable_free_frontiers, *suitable_brother_frontiers ]
-        for frontier in available_frontiers:
-            if expand_frontier(frontier):
-                return True
+        # Short frontiers could be also expanded together with other connected and aligned frontiers
+        # These compound frontiers must be taken in count also although they are harded to expand
+        # Each frontier may form 0, 1 or 2 combined frontiers
+        def combine_frontier (frontier : Segment) -> List[Segment]:
+            combined_frontiers = []
+            for point in [ frontier.a, frontier.b ]:
+                other_frontiers = [ seg for seg in expandable_frontiers if seg != frontier ]
+                combined_frontier = frontier
+                next_point = point
+                # Join connected frontiers until we have enough length or the next frontier is not aligned
+                while combined_frontier.length < self.min_size:
+                    # Find the next connected frontier
+                    # There may be no next connected frontier if next would be a parent frontier
+                    connected_frontier = next((seg for seg in other_frontiers if seg.has_point(next_point)), None)
+                    # If it is not aligned we can not combine it so we stop here
+                    if not connected_frontier or not connected_frontier.same_line_as(combined_frontier):
+                        break
+                    # Otherwise remove the connected frontier from the others list and combine both frontiers
+                    other_frontiers = [ seg for seg in other_frontiers if seg != connected_frontier ]
+                    combined_frontier = combined_frontier.combine_segment(connected_frontier)
+                    next_point = next(point for point in connected_frontier.points if point != next_point)
+                # If the combined frontier reaches the minimum length add it to the list to be returned
+                if combined_frontier.length >= self.min_size:
+                    combined_frontiers.append(combined_frontier)
+            return combined_frontiers
+
+        # Start trying to expand free frontiers first
+        # Check if frontiers are available for expansion alone
+        # In case they are not, skip them and let them for the end
+        for frontiers_groups in [ free_frontiers, brother_frontiers ]:
+            random.shuffle(frontiers_groups)
+            hard_frontiers = []
+            for frontier in frontiers_groups:
+                # If it cannot be expanded alone we skip it by now
+                if not is_suitable(frontier):
+                    hard_frontiers.append(frontier)
+                    continue
+                # Otherwise try to expand it
+                if expand_frontier(frontier):
+                    return True
+            # If none of the suitable frontiers was expanded successfully then try with the combined ones
+            for frontier in hard_frontiers:
+                combined_frontiers = combine_frontier(frontier)
+                for combined_frontier in combined_frontiers:
+                    raise RuntimeError('Tenemos una combinada :D -> ' + str(combined_frontier))
+                    # DANI: Esto no está hecho todabía
+                    if expand_frontier(frontier):
+                        return True
+
         return False
 
     # Invade this room by substracting part of its space

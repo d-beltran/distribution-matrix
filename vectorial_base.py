@@ -368,10 +368,14 @@ class Segment(Line):
     def get_colored_segment(self, color : str):
         return Segment(self.a, self.b, color)
 
+    # Check if one of the segment points matches a point
+    def has_point(self, point : Point) -> bool:
+        return point == self.a or point == self.b
+
     # Check if two segments have a point in common
     # WARNING: They may be overlapped
     def is_connected_with(self, other : 'Segment') -> bool:
-        return other.a == self.a or other.b == self.a or other.a == self.b or other.b == self.b
+        return self.has_point(other.a) or self.has_point(other.b)
 
     # Check if two segments form a corner
     # i.e. they have a point in common and both segments are not paralel
@@ -486,7 +490,7 @@ class Segment(Line):
 
     # Get current segment after substracting other segments
     # Return an empty list if self segment is fully substracted
-    def substract_segments (self, others) -> list:
+    def substract_segments (self, others : List['Segment']) -> list:
         # Filter others to be in the same line that self segment
         inline_segments = [ segment for segment in others if self.same_line_as(segment) ]
         # Order segment points and check how they alternate
@@ -511,6 +515,18 @@ class Segment(Line):
                 continue
             result_segments.append(segment)
         return result_segments
+
+    # Given two segments which have a point in common, return a segment from the non-common points
+    def combine_segment (self, other : 'Segment') -> 'Segment':
+        # Find the non-common point in self, which must be only one
+        different_self_points = [ point for point in self.points if not other.has_point(point) ]
+        if len(different_self_points) != 1:
+            raise ValueError('Segments can not be combined')
+        a = different_self_points[0]
+        # Find the non-common point in other and build the new segment
+        b = next( point for point in other.points if not self.has_point(point) )
+        return Segment(a,b)
+  
 
 # A corner is a point where 2 non-paralel segments are connected
 # i.e. both segments have this point ('a' or 'b') in common

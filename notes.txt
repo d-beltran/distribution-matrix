@@ -1,5 +1,7 @@
 RAM
 
+- Posibilidad de expandir fronteras combinadas
+	* Ya puede encontrarlas, falta enseñarle a expandirlas
 - Mejorar estrategia del solver: elegir mejor la frontier a expandir
 	* Hacer ranking de proximidad con una zona libre
 - Gestionar cuando hay PROBLEMA
