@@ -1,15 +1,6 @@
 RAM
 
-- Posibilidad de expandir fronteras combinadas
-	* Ya puede encontrarlas, falta enseñarle a expandirlas
-- Mejorar estrategia del solver: elegir mejor la frontier a expandir
-	* Hacer ranking de proximidad con una zona libre
-- Gestionar cuando hay PROBLEMA
-	* Hay que poder probar a recortar la frontier para que no haya problemas
-- Posibilidad de expandir hasta el final SOLO si la expansion va a cubir uno de los sides entero
-- Implementar expansión de frontera partida en caso de push length demasiado bajo
-- Implementar expansión de frontera combinada
-
+Enseñarle a salir de bucles
 
 Largo plazo:
 

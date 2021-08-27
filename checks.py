@@ -2,8 +2,8 @@ from vectorial_base import *
 from scheme import *
 from scheme_display import setup_display
 
-# Import some predefined test perimeters
-from test_perimeters import *
+# Import some predefined test polygons
+from test_boundaries import *
 
 def test (actual_value, expected_value) -> str:
     if actual_value == expected_value:

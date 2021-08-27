@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 from matplotlib import animation
-from matplotlib.widgets import Slider 
+from matplotlib.colors import to_rgba 
+from matplotlib.widgets import Slider
 import matplotlib.patches as mpatches
 
 import math
@@ -93,7 +94,9 @@ def represent (queue):
         # Set the legend with all room names
         handles = []
         for track in traced:
-            patch = mpatches.Patch(color=track.fill_color, label=track.name)
+            facecolor = to_rgba(track.fill_color)
+            facecolor = (facecolor[0], facecolor[1], facecolor[2], 0.2) # Reduce the opacity
+            patch = mpatches.Patch(facecolor=facecolor, edgecolor=track.segments_color, label=track.name)
             handles.append(patch)
         columns_number = math.ceil( len(handles) / 2 )
         ax.legend(handles=handles, loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=columns_number)
@@ -118,16 +121,23 @@ def get_segments_from_anything (things : list):
         # If it is a segment or something with a and b (i.e. something "segmentalizable")
         if hasattr(thing, 'a') and hasattr(thing, 'b'):
             segments.append(thing)
-        # If it is a rectangle, perimeter, or something with segments
+        # If it is a rectangle, polygon, or something with segments
         if hasattr(thing, 'segments'):
             segments += thing.segments
         # If it is a rectangle or something with a "crossing segment" getter
         if hasattr(thing, 'get_crossing_segment'):
             segments.append(thing.get_crossing_segment())
-        # If it is a room or something with a perimeter
-        if hasattr(thing, 'perimeter'):
-            if thing.perimeter:
-                segments += thing.perimeter.segments
+        # If it is a boundary or something with a polygon
+        if hasattr(thing, 'polygon'):
+            if thing.polygon:
+                segments += thing.polygon.segments
+        # If it is a room or something with a boundary
+        if hasattr(thing, 'boundary'):
+            boundary = thing.boundary
+            if boundary:
+                segments += boundary.exterior_polygon.segments
+                for polygon in boundary.interior_polygons:
+                    segments += polygon.segments
     return segments
 
 # Mine all possible rectangles from a list of different vectorial_base elements
@@ -137,11 +147,19 @@ def get_rects_from_anything (things : list):
         # If it is a rectangle or something with pmin and pmax (i.e. something "rectanglizable")
         if hasattr(thing, 'pmin') and hasattr(thing, 'pmax'):
             rects.append(thing)
-        # If it is a perimeter
+        # If it is a grid
         if hasattr(thing, 'rects'):
             rects += thing.rects
+        # If it is a boundary
+        if hasattr(thing, 'grid'):
+            if thing.grid:
+                rects += thing.grid.rects
         # If it is a room
-        if hasattr(thing, 'free_rects'):
-            if thing.free_rects:
-                rects += thing.free_rects
+        # This may fail for a parent free grid in steps where children overlap
+        try:
+            if hasattr(thing, 'free_grid'):
+                if thing.boundary:
+                    rects += thing.free_grid.rects
+        except:
+            pass
     return rects

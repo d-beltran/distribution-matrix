@@ -71,8 +71,8 @@ class Cluster:
         return 'c-' + str(self.value)
 
 # Set a matrix with as cells with the specified cell size
-# Some cells of the matrix may be out of the corners perimeter
-# This will happend in not perfectly squared/rectangular perimeters
+# Some cells of the matrix may be out of the corners polygon
+# This will happend in not perfectly squared/rectangular polygons
 class Matrix:
     def __init__(self, corners, cellSize, tracked = 0, updater = None):
         self.corners = corners
@@ -97,7 +97,7 @@ class Matrix:
         self.size = self.xrange * self.yrange
         # Set all cells as 0 at first
         self.values = [0] * self.size
-        # Set the perimeter lines
+        # Set the polygon lines
         self.lines = self.setLines(corners)
         # Represent the first matrix frame
         if self.updater:
@@ -861,10 +861,10 @@ class Matrix:
             oposite_cell = Cell(cell.x -direction[0], cell.y -direction[1])
             if self.getValue(oposite_cell) == pusher_value:
                 directions.append(direction)
-        # If afterall we have no available directions it means the cell is not in the cluster perimeter
+        # If afterall we have no available directions it means the cell is not in the cluster polygon
         # This is not supported, so we return an error
         if len(directions) == 0:
-            return print('Error: the requested cell is not in the perimeter')
+            return print('Error: the requested cell is not in the polygon')
         # Randomize the directions order
         random.shuffle(directions)
         # Get all current cells of the cluster to be pushed

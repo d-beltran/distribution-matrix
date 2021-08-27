@@ -39,6 +39,7 @@ def resolute(num, base_offset = 0):
     base = base_resolution + base_offset
     resolution = 10**base
     return round(num * resolution) / resolution
+minimum_resolution = 1 / 10 ** base_resolution
 
 # An x,y coordinate
 class Point:
@@ -311,7 +312,7 @@ class Segment(Line):
 
     def __init__(self, a : Point, b : Point, color : str = 'black'):
         if a == b:
-            raise RuntimeError('Inexistent segment. Points "a" and "b" must be different: ' + str(a))
+            raise ValueError('Inexistent segment. Points "a" and "b" must be different: ' + str(a))
         self.a = a
         self.b = b
         self.color = color
@@ -465,7 +466,7 @@ class Segment(Line):
         # Otherwise, order both segment points and check how they alternate
         self_points = [self.a, self.b]
         other_points = [other.a, other.b]
-        points = list(set(self_points + other_points))
+        points = unique(self_points + other_points)
         def sort_by_x(point):
             return point.x
         def sort_by_y(point):
@@ -498,7 +499,7 @@ class Segment(Line):
         other_points = []
         for segment in inline_segments:
             other_points += [segment.a, segment.b]
-        points = list(set(self_points + other_points))
+        points = unique(self_points + other_points)
         def sort_by_x(point):
             return point.x
         def sort_by_y(point):
@@ -532,7 +533,7 @@ class Segment(Line):
 # i.e. both segments have this point ('a' or 'b') in common
 # IMPORTANT: It is a standard that the first segment enters the corner while the second exits the corner
 # i.e. first segment is 'a' -> (corner) and second segment is (corner) -> 'b'
-# The inside argument is refered to if this corner points towards the 'inside' of the perimeter which belongs
+# The inside argument is refered to if this corner points towards the 'inside' of the polygon which belongs
 class Corner(Point):
 
     def __init__(self, x : number, y : number, in_segment : Segment, out_segment : Segment, inside : bool = None):
@@ -665,13 +666,24 @@ class Rect:
             return in_pmin and in_pmax
         return False
 
+    # Check if self rect is colliding with other rect
+    # i.e. one of their segments is totally or partially overlapping
+    # Note that one rectangle may be inside of the other
+    def is_colliding_with (self, other : 'Rect') -> bool:
+        for self_segment in self.segments:
+            for other_segment in other.segments:
+                overlap = self_segment.get_overlap_segment(other_segment)
+                if overlap:
+                    return True
+        return False
+
     # Get rectangle points appart from pmin and pmax
     def get_upper_left_point (self) -> Point:
         return Point(self.pmin.x, self.pmax.y)
     def get_bottom_right_point (self) -> Point:
         return Point(self.pmax.x, self.pmin.y)
 
-    # Return all rectangle points in a 'perimeter-friendly' order
+    # Return all rectangle points in a 'polygon-friendly' order
     def get_points(self) -> list:
         point1 = self.pmin
         point2 = self.get_upper_left_point()
@@ -679,13 +691,13 @@ class Rect:
         point4 = self.get_bottom_right_point()
         return [ point1, point2, point3, point4 ]
 
-    # Return all rectangle segments in a 'perimeter-friendly' order
+    # Return all rectangle segments in a 'polygon-friendly' order
     def get_segments(self) -> list:
         points = self.get_points()
         segments = [ Segment(a, b, self.segments_color) for a, b in pairwise(points, retro=True) ]
         return segments
 
-    # Return all rectangle points in a 'perimeter-friendly' order
+    # Return all rectangle points in a 'polygon-friendly' order
     # Each point contains its two adjacent segments
     def get_corners(self) -> list:
         points = self.get_points()
@@ -808,10 +820,10 @@ class Rect:
         overlap = Rect(pmin_overlap, pmax_overlap)
         return overlap
 
-    # Join 2 rectangles by returning a list of all rectangles which define the resulting polygon
+    # Join 2 rectangles by returning a list of all rectangles which define the resulting grid
     # The overlapped region, if exists is transformed to a single rectangle
     # DANI: No lo he provado desde que lo moví de abajo
-    def join_rect (self, rect) -> list:
+    def join_rect (self, rect) -> List['Rect']:
         # Find the overlap between these two rectangles
         overlap = self.get_overlap_rect(rect)
         # If there is no overlap then just return both input rectangles
@@ -826,9 +838,9 @@ class Rect:
         # Return only unique rectangles
         return set(rects)
 
-    # Substract the second rectangle form the first rectangle and return the rectangles which define the resulting polygon
+    # Substract the second rectangle form the first rectangle and return the rectangles which define the resulting grid
     # DANI: No lo he provado desde que lo moví de abajo
-    def subtract_rect (self, rect) -> Optional[list]:
+    def subtract_rect (self, rect) -> Optional[List['Rect']]:
         # Find the overlap between these two rectangles
         overlap = self.get_overlap_rect(rect)
         # If there is no overlap then just return the first rectangle intact
@@ -842,40 +854,36 @@ class Rect:
         rects = [ rect for rect in list(split) if rect != overlap ]
         return rects
 
-# A perimeter defined by several segments
-# WARNING: The perimeter parameters must never be modified
-# Instead, a new perimeter must be created every time a perimeter needs to be modified
+# A polygon is a list of connected segments which is closed
 # IMPORTANT: Segments must follow some standards:
-# - All segments are in the same direction: each segment 'b' point is the next segment 'a' point
-# - The perimeter is closed: the last segment 'b' point is the first segment 'a' point
+# - All segments follow an order: each segment 'b' point is the next segment 'a' point
+# - The polygon is closed: the last segment 'b' point is the first segment 'a' point
 # - There are no splitted segments: connected segments are always in different lines (i.e. making a corner)
-class Perimeter:
+class Polygon:
 
-    def __init__(self, segments : list, segments_color = 'black', fill_color = 'white'):
+    def __init__(self, segments : list, color = 'black'):
         self.segments = segments
-        # Check the perimeter is closed and segments are not diagonal
+        # Check the polygon is closed and segments are not diagonal
         self.check()
         # Save display parameters
-        self.segments_color = segments_color
-        self.fill_color = fill_color
+        self.color = color
         # Color at this moment all segments
         for segment in segments:
-            segment.color = segments_color
+            segment.color = color
         self._corners = None
-        self._grid = None
 
     # Set a class constant error
-    open_perimeter_error = RuntimeError('The perimeter is not closed')
+    open_polygon_error = ValueError('The polygon is not closed')
 
-    # Set the perimeter from segments in a non-canonical format
-    # Segments will be sorted, flipped and merged as necessary to accomplish the perimeter standard
+    # Set the polygon from segments in a non-canonical format
+    # Segments will be sorted, flipped and merged as necessary to accomplish the polygon standard
     @classmethod
     def non_canonical(cls, segments : List[Segment]):
 
-        # Check each perimeter segment to not be diagonal
+        # Check each polygon segment to not be diagonal
         for segment in segments:
             if segment.is_diagonal():
-                raise RuntimeError('The perimeter has diagonal segments, which are not supported')
+                raise RuntimeError('The polygon has diagonal segments, which are not supported')
 
         # ---------------------------------------------------------------------------------
         # Format segments in a way that segments and their points are ordered
@@ -888,10 +896,10 @@ class Perimeter:
         available_segments = segments[1:]
         while len(ordered_segments) < len(segments):
             # If there are no more available segments return error
-            # This may happen in case there was a duplicated segment, which means the perimeter is wrong
+            # This may happen in case there was a duplicated segment, which means the polygon is wrong
             if len(available_segments) == 0:
                 add_frame(segments)
-                raise cls.open_perimeter_error
+                raise cls.open_polygon_error
             # Get the last ordered segment to find which is the next connected segment
             last_ordered_segment = ordered_segments[-1]
             last_point = last_ordered_segment.b
@@ -899,7 +907,7 @@ class Perimeter:
             connected_segment = next((segment for segment in available_segments if last_point in segment.points), None)
             if not connected_segment:
                 add_frame(segments)
-                raise cls.open_perimeter_error
+                raise cls.open_polygon_error
             # Remove the connected segment from the available 
             available_segments = [ segment for segment in available_segments if segment != connected_segment ]
             # The connected segment must be connected by the 'a' point
@@ -910,7 +918,7 @@ class Perimeter:
         # Finally, check that the first segment and the last segment are also connected
         if ordered_segments[0].a != ordered_segments[-1].b:
             add_frame(segments)
-            raise cls.open_perimeter_error
+            raise cls.open_polygon_error
         segments = ordered_segments
             
         # Merge continuous segments (i.e. connected segments in the same line)
@@ -925,10 +933,10 @@ class Perimeter:
                     break
                 count += 1
 
-        # Build the canonical perimeter
+        # Build the canonical polygon
         return cls(segments)
 
-    # Set the perimeter from its corners in order
+    # Set the polygon from its corners in order
     @classmethod
     def from_corners(cls, corners : List[Corner]):
         # Check that there are at least 4 points
@@ -939,10 +947,10 @@ class Perimeter:
         for a,b in pairwise(corners, retro=True):
             new_segment = Segment(a,b)
             segments.append(new_segment)
-        # Build the perimeter
+        # Build the polygon
         return cls(segments)
 
-    # Set the perimeter from a rectangle
+    # Set the polygon from a rectangle
     @classmethod
     def from_rect(cls, rect : Rect):
         return cls(rect.segments)
@@ -950,79 +958,31 @@ class Perimeter:
     def __str__(self):
         return ', '.join([str(segment) for segment in self.segments])
 
-    def __contains__(self, other):
-        if isinstance(other, Point):
-            for rect in self.rects:
-                if other in rect:
-                    return True
-            return False
-        if isinstance(other, Segment):
-            in_a = other.a in self
-            cross_any_segment = any([ other.get_intersection_point(segment, in_extremis=0) for segment in self.segments ])
-            return in_a and not cross_any_segment
-        if isinstance(other, Rect):
-            return all([ segment in self for segment in other.get_segments() ])
-        if isinstance(other, self.__class__):
-            return all([ rect in self for rect in other.rects ])
+    def __repr__(self):
+        return ', '.join([str(segment) for segment in self.segments])
+
+    def __lt__(self, other):
+        return self.get_box().area < other.get_box().area
+
+    def __eq__(self, other):
+        if isinstance(other, self.__class__) or isinstance(other, Rect):
+            return all([ segment in self.segments for segment in other.segments ])
         return False
 
-    # Get the perimeter corners
+    # Get the polygon corners
     def get_corners(self):
         # If rects are previously calculated then return them
         if self._corners:
             return self._corners
-        # Get all rectangles which form the perimeter
+        # Get all rectangles which form the polygon
         corners = self.set_corners()
         self._corners = corners
         return self._corners
 
-    # Perimeter corners (read only)
-    corners = property(get_corners, None, None, "The perimeter corners")
+    # Polygon corners (read only)
+    corners = property(get_corners, None, None, "The polygon corners")
 
-    # Get the perimeter grid
-    def get_grid(self):
-        # If grid already exists then return it
-        if self._grid:
-            return self._grid
-        # Otherwise, set the grid
-        # Split the perimeter in rectangles in a grid-friendly format
-        rects = self.split_in_rectangles()
-        # Apply the perimter color to each rectangle
-        for rect in rects:
-            rect.color = self.fill_color
-        # Set, save and return the grid
-        self._grid = Grid(rects)
-        return self._grid
-
-    # The perimeter grid (read only)
-    grid = property(get_grid, None, None, "The perimeter grid")
-
-    # Get the perimeter grid rectangles (read only)
-    def get_rects(self):
-        return self.grid.rects
-    rects = property(get_rects, None, None, "The perimeter grid rectangles")
-
-    # Get maximum rectangles in the perimeter grid (read only)
-    def get_max_rects(self):
-        return self.grid.max_rects
-    max_rects = property(get_max_rects, None, None, "The maximum rectangles in the perimeter grid")
-
-    # Get row rectangles in the perimeter grid (read only)
-    def get_row_rects(self):
-        return self.grid.row_rects
-    row_rects = property(get_row_rects, None, None, "The row rectangles in the perimeter grid")
-
-    # Get column rectangles in the perimeter grid (read only)
-    def get_col_rects(self):
-        return self.grid.col_rects
-    col_rects = property(get_col_rects, None, None, "The column rectangles in the perimeter grid")
-
-    # Get the area inside the perimeter (read only)
-    def get_area(self):
-        return self.grid.area
-    area = property(get_area, None, None, "The area inside the perimeter")
-
-    # Check if the current segments create a closed perimeter or if it is open
+    # Check if the current segments create a closed polygon or if it is open
     def is_closed(self):
         # Check that each segment ends in the same point that the next segment starts
         for current, nextone in pairwise(self.segments, retro=True):
@@ -1030,23 +990,23 @@ class Perimeter:
                 return False
         return True
 
-    # Check the perimeter to be closed
+    # Check the polygon to be closed
     # DANI: En principio los perímetros no cerrados no tendrán soporte nunca porque no tienen mucho sentido o no les veo la utilidad
-    # Check each perimeter segment to not be diagonal
-    # Otherwise return an error, since perimeters with diagonal segments are not yet supported
+    # Check each polygon segment to not be diagonal
+    # Otherwise return an error, since polygons with diagonal segments are not yet supported
     # DANI: En principio algun día se podría hacer esto
     def check(self):
-        # Check the perimeter to be closed
+        # Check the polygon to be closed
         if not self.is_closed():
-            raise self.open_perimeter_error
-        # Check each perimeter segment to not be diagonal
+            raise self.open_polygon_error
+        # Check each polygon segment to not be diagonal
         for segment in self.segments:
             if segment.is_diagonal():
-                raise RuntimeError('The perimeter has diagonal segments, which are not supported')
+                raise RuntimeError('The polygon has diagonal segments, which are not supported')
 
-    # Set the perimeter corners as points with additional stored values
-    # The 'segments' variable defines the two segments of the perimeter which form the corner itself
-    # The 'inside' variable defines if the corner is "pointing" to the inside of the perimeter
+    # Set the polygon corners as points with additional stored values
+    # The 'segments' variable defines the two segments of the polygon which form the corner itself
+    # The 'inside' variable defines if the corner is "pointing" to the inside of the polygon
     # (e.g. rectangles have no inside corners while an 'L' has one inside corner)
     def set_corners(self):
         # For each segment, save the end point and if the direction of the next segment is left
@@ -1070,29 +1030,29 @@ class Perimeter:
         # There should be always 4 more corners in one direction than in the other (may be left or right)
         # DANI: Esto es para el desarrollo. Una vez esté comprobado que los perímteros son estables quitaré esto porque retrasa el cálculo
         if abs(difference) != 4:
-            # If you see this error there may be splitted segments in your perimeter
-            # Use the non-canonical class method to set your perimeter
-            raise RuntimeError('There is something wrong with the perimeter')
+            # If you see this error there may be splitted segments in your polygon
+            # Use the non-canonical class method to set your polygon
+            raise RuntimeError('There is something wrong with the polygon')
 
         # Check if are more corners in the counted direction (true) or the other (false)
-        lefted_perimeter = difference > 0
+        lefted_polygon = difference > 0
 
         # Now set the real corners and save them in the global variable 'corners'
         # Corners with the minoritarian direction will be set as 'inside = True'
         corners = []
         for precorner in precorners:
             point, segments, lefted_corner = precorner
-            inside = lefted_corner != lefted_perimeter
+            inside = lefted_corner != lefted_polygon
             corner = Corner(*point.coords, *segments, inside)
             corners.append(corner)
         return corners
 
-    # Get all perimeter points
+    # Get all polygon points
     # DANI: Obsoleto
     def get_points(self):
         return [ segment.a for segment in self.segments ]
 
-    # Get a rectangle which contains the whole perimeter
+    # Get a rectangle which contains the whole polygon
     def get_box(self):
         points = self.get_points()
         x_coords = [ point.x for point in points ]
@@ -1105,7 +1065,11 @@ class Perimeter:
         pmax = Point(x_max, y_max)
         return Rect(pmin, pmax)
 
-    # Find out if a point is in the border of the perimeter (segments and corners)
+    # Get the perimeter of the polygon, which is the sum of all its segment lengths
+    def get_perimeter (self) -> number:
+        return sum([ segment.length for segment in self.segments ])
+
+    # Find out if a point is in the border of the polygon (segments and corners)
     def in_border(self, point : Point) -> bool:
         for corner in self.corners:
             if point == corner:
@@ -1115,7 +1079,7 @@ class Perimeter:
                 return True
         return False
 
-    # Get a specific perimeter corner or segment by specifying a point that matches this element
+    # Get a specific polygon corner or segment by specifying a point that matches this element
     def get_border_element (self, point : Point):
         for corner in self.corners:
             if point == corner:
@@ -1125,14 +1089,14 @@ class Perimeter:
                 return segment
         return None
 
-    # Return all points in the perimeter segments which intersect with a given segment
+    # Return all points in the polygon segments which intersect with a given segment
     # Points are sorted according to their distance with the 'a' point of the segment (from less to more distance)
     # WARNING: Intersection of paralel (overlapping) segments is not detected
     # WARNING: If the origen point is in a corner/segment it may return or not the origen as intersection point
     # DANI: No se ha probado a fondo
     # DANI: Actualmente NO está en uso
     def get_segment_intersection_points(self, segment : Segment) -> Optional[list]:
-        # Get the intersection point of the specfied segment with each perimeter limit
+        # Get the intersection point of the specfied segment with each polygon limit
         intersection_points = []
         for limit in self.segments:
             point = limit.get_intersection_point(segment)
@@ -1151,11 +1115,11 @@ class Perimeter:
         sorted_points = sorted(intersection_points, key=by_distance)
         return sorted_points
 
-    # Return all segments inside the perimeter which intersect with a given segment
+    # Return all segments in the polygon which intersect with a given segment
     # segments are sorted according to their distance with the 'a' point of the segment (from less to more distance)
     # WARNING: Intersection of paralel (overlapping) segments is not detected
     # DANI: No se ha probado
-    # DANI: No está acabado. No se contempla la posibilidad de que la segmenta que intersecta empieze dentro del perímetro
+    # DANI: No está acabado. No se contempla la posibilidad de que el segmento que intersecta empieze dentro del perímetro
     # DANI: Actualmente NO está en uso
     def get_segment_intersection_segments(self, segment : Segment) -> Optional[list]:
         # Get the intersection points
@@ -1176,124 +1140,220 @@ class Perimeter:
             intersecting_segments.append(last_intersection_segment)
         return intersecting_segments
 
-    # Given a perimeter corner which is pointing inside,
-    # Create two segments opposed to the corner segments but as long as required to cut the perimeter at onther segment or corner
-    # This two segments will always be inside the perimeter
-    def get_corner_insider_segments(self, corner : Corner, limit_points : list = [], limit_segments : list = []) -> list:
+    # Find overlap segments between polygons
+    # Get overlapping regions between polygon segments
+    # However, if one segment is inside the area of the other polygon it will not be considered
+    def get_overlap_segments (self, other : 'Polygon') -> List[Segment]:
+        overlap_segments = []
+        for segment in self.segments:
+            for other_segment in other.segments:
+                overlap_segment = self.get_overlap_segment(other)
+                if overlap:
+                    overlap_segments.append(overlap_segment)
 
-        # Get the length of the most large possible segment in the perimeter
-        max_length = self.get_box().get_crossing_segment().length
+    # Check if self polygon is colliding with other polygon
+    # i.e. one of their segments is totally or partially overlapping
+    # Note that one polygon may be inside of the other
+    def is_colliding_with (self, other : 'Polygon') -> bool:
+        for self_segment in self.segments:
+            for other_segment in other.segments:
+                overlap = self_segment.get_overlap_segment(other_segment)
+                if overlap:
+                    return True
+        return False
 
-        # Get the oppoiste segments to the corner segments but as long as the max_length
-        # NEVER FORGET: The corner point is the entry segment 'b' point and the exit segment 'a' point
-        entry_segment, exit_segment = corner.segments
-        tracing1 = Segment(corner, corner + entry_segment.vector.normalized() * max_length, color='green')
-        tracing2 = Segment(corner, corner + (-exit_segment.vector.normalized()) * max_length, color='green')
+# A boundary is made of an external polygon and any number of internal polygons which mark the limits of an area
+class Boundary:
+    def __init__(self, exterior_polygon : Polygon, interior_polygons : List[Polygon] = [], color = 'black', fill_color = 'white'):
+        self.exterior_polygon = exterior_polygon
+        self.interior_polygons = interior_polygons
+        self.polygons = [ exterior_polygon, *interior_polygons ]
+        self.segments = [ segment for polygon in self.polygons for segment in polygon.segments ]
+        # Calculate some internal values -------------------------------------------------------------------------
+        # The size is the length to cross the whole boundary
+        self.size = exterior_polygon.get_box().get_crossing_segment().length
+        # Inside corners are the exterior polygon inside corners and the interior polygons outside corners
+        self.exterior_inside_corners = [ corner for corner in exterior_polygon.corners if corner.inside == True ]
+        self.interior_inside_corners = []
+        for polygon in interior_polygons:
+            self.interior_inside_corners += [ corner for corner in polygon.corners if corner.inside == False ]
+        self.inside_corners = self.exterior_inside_corners + self.interior_inside_corners
+        # --------------------------------------------------------------------------------------------------------
+        # Set some display parameters
+        self.color = color
+        self.fill_color = fill_color
+        # --------------------------------------------------------------------------------------------------------
+        self._grid = None
+        self._area = None
+        # Check interior polygons to be inside the exterior polygon
+        self.simple = len(interior_polygons) == 0
+        if not self.simple:
+            self.check()
 
-        # Set the limits if they were not passed
-        if not limit_points or len(limit_points) == 0:
-            limit_points = self.corners
-        if not limit_segments or len(limit_segments) == 0:
-            limit_segments = self.segments
+    def __contains__(self, other):
+        return other in self.grid
 
-        insider_segments = []
-        for segment in [tracing1, tracing2]:
+    # Get the boundary grid
+    def get_grid(self):
+        # If grid already exists then return it
+        if self._grid:
+            return self._grid
+        # Otherwise, set the grid
+        # Split the boundary in rectangles in a grid-friendly format
+        rects = self.split_in_rectangles()
+        # Apply the boundary color to each rectangle
+        for rect in rects:
+            rect.color = self.fill_color
+        # Set, save and return the grid
+        grid = Grid(rects)
+        grid._boundaries = [self]
+        self._grid = grid
+        return grid
 
-            # Get the intersection point of the specfied segment with each perimeter limit
-            intersection_points = []
-            for limit_segment in limit_segments:
-                # Skip the segments of the main corner
-                if limit_segment in corner.segments:
-                    continue
-                point = limit_segment.get_intersection_point(segment)
-                if point:
-                    # Intersection point may be the corner even ignoring corner segments
-                    # This happens when one of the corner segments has been splited
-                    if point == corner:
-                        continue
-                    intersection_points.append(point)
-            # Find out also if the segment intersects any corner
-            for limit_point in limit_points:
-                # Skip the main corner
-                if limit_point == corner:
-                    continue
-                if limit_point in segment:
-                    intersection_points.append(limit_point)
+    # The boundary grid (read only)
+    grid = property(get_grid, None, None, "The boundary grid")
 
-            # There should be always at least 1 intersection
-            if len(intersection_points) == 0:
-                add_frame([ segment, *limit_segments ])
-                #print(self.segments)
-                raise RuntimeError('An inside segment has no intersection point: ' + str(segment))
+    # Get the area inside the polygon (read only)
+    def get_area(self):
+        return self.grid.area
+    area = property(get_area, None, None, "The area inside the boundary")
 
-            # Sort the points by distance
-            def by_distance(point):
-                return segment.a.get_distance_to(point)
-            sorted_points = sorted(intersection_points, key=by_distance)
+    # Get a boundary made with the exterior polygon only
+    def get_simple_boundary(self):
+        if self.simple:
+            return self
+        return Boundary(self.exterior_polygon)
 
-            # The closest point will be the first point
-            cut_point = sorted_points[0]
+    # Check all interior polygons to be inside the exterior polygon
+    # Note that this function is called when the self grid is not made yet, so checking this is not that easy
+    # To do so, we calculate the grid of the exterior polygon alone and then we check if each interior polygon is inside
+    def check (self):
+        simple_boundary = self.get_simple_boundary()
+        for polygon in self.interior_polygons:
+            if polygon not in simple_boundary:
+                # Represent polygons in the problematic boundary
+                exterior_segments = self.exterior_polygon.segments
+                for segment in exterior_segments:
+                    segment.color = 'black'
+                interior_segments = polygon.segments
+                for segment in interior_segments:
+                    segment.color = 'red'
+                add_frame(exterior_segments + interior_segments)
+                raise ValueError('At least one interior polygon is not fully inside the exterior polygon')
 
-            insider_segment = Segment(segment.a, cut_point, color='red')
-            if insider_segment.is_diagonal():
-                # This may happen due to a resolution problem
-                raise RuntimeError('An insider segment should never be diagonal: ' + str(insider_segment))
-            insider_segments.append(insider_segment)
+    # Split the space inside the boundary in a list of rectangles in a grid friendly format
+    def split_in_rectangles(self, exclude_interior_polygons : bool = True) -> List[Rect]:
 
-        #return [tracing1, tracing2]
-        return insider_segments
+        # WARNING: If there are no inside corners at this point it means our polygon/s are made only by single rectangles
+        # However those rectangles may be formed by segments longer than the rectangle size, so they may require splitting
 
-    # Split the current perimeter in a list of rectangles
-    # The exclusion perimeters are those perimeters inside the current perimeter which are not considered
-    # e.g. children perimeters in a room perimeter
-    # WARNING: Exclusion perimeters out of this perimeter will make this logic fail
-    # We have no easy way to chech if the exclusion perimeter is inside this perimeter at this point
-    def split_in_rectangles(self, exclusion_perimeters : List['Perimeter'] = []) -> List[Rect]:
+        # Check if there are interior polygons
+        # If not, do not consider the exclusion of interior polygons
+        # This way the code runs slightly faster although it is not necessary
+        if exclude_interior_polygons and len(self.interior_polygons) == 0:
+            exclude_interior_polygons = False
 
-        # Inside corners are the parent perimeter inside corners and the children perimeters outside corners
-        parent_inside_corners = [ corner for corner in self.corners if corner.inside == True ]
-        children_inside_corners = []
-        for perimeter in exclusion_perimeters:
-            children_inside_corners += [ corner for corner in perimeter.corners if corner.inside == False ]
-        inside_corners = parent_inside_corners + children_inside_corners
-
-        # Limits are the current perimeter and all exclusion perimeters
-        limits = [ self, *exclusion_perimeters ]
-
-        # Limit points are 'inside corners' which are not overlapped with any other perimeters
+        # Limits are the non-overlapping segments and inside corners from both exterior and interior polygons
+        # Limit points are inside corners which are not overlapped with any other polygons
         limit_points = []
-        for corner in inside_corners:
-            count = 0
-            for perimeter in limits:
-                if perimeter.in_border(corner):
-                    count += 1
-            # Include this corner only if after all searches it was found only 1 time
-            if count == 1:
-                limit_points.append(corner)
+        if exclude_interior_polygons:
+            for corner in self.inside_corners:
+                count = 0
+                for polygon in self.polygons:
+                    if polygon.in_border(corner):
+                        count += 1
+                # Include this corner only if after all searches it was found only 1 time
+                if count == 1:
+                    limit_points.append(corner)
+        else:
+            limit_points = self.exterior_inside_corners
 
         # Limit segments are both parent and children segments which do not overlap
         limit_segments = []
-        for perimeter, other_perimeters in otherwise(limits):
-            other_segments = [ segment for perimeter in other_perimeters for segment in perimeter.segments ]
-            for segment in perimeter.segments:
-                limit_segments += segment.substract_segments(other_segments)
+        if exclude_interior_polygons:
+            for polygon, other_polygons in otherwise(self.polygons):
+                other_segments = [ segment for polygon in other_polygons for segment in polygon.segments ]
+                for segment in polygon.segments:
+                    limit_segments += segment.substract_segments(other_segments)
+        else:
+            limit_segments = self.exterior_polygon.segments
 
-        # WARNING: If there are no inside corners at this point it means our perimeter/s are made only by single rectangles
-        # However those rectangles may be formed by segments longer than the rectangle size, so they may require splitting
 
-        #add_frame([ segment for perimeter in limits for segment in perimeter.segments ])
-        #add_frame(limit_segments)
+        # Given a polygon corner which is pointing inside,
+        # Create two segments opposed to the corner segments but as long as required to cut the polygon at onther segment or corner
+        # This two segments will always be inside the polygon
+        def get_corner_insider_segments(corner : Corner) -> list:
+
+            # Get the oppoiste segments to the corner segments but as long as the boundary size
+            # NEVER FORGET: The corner point is the entry segment 'b' point and the exit segment 'a' point
+            entry_segment, exit_segment = corner.segments
+            tracing1 = Segment(corner, corner + entry_segment.vector.normalized() * self.size, color='green')
+            tracing2 = Segment(corner, corner + (-exit_segment.vector.normalized()) * self.size, color='green')
+
+            insider_segments = []
+            for segment in [tracing1, tracing2]:
+
+                # Get the intersection point of the specfied segment with each polygon limit
+                intersection_points = []
+                for limit_segment in limit_segments:
+                    # Skip the segments of the main corner
+                    if limit_segment in corner.segments:
+                        continue
+                    point = limit_segment.get_intersection_point(segment)
+                    if point:
+                        # Intersection point may be the corner even ignoring corner segments
+                        # This happens when one of the corner segments has been splited
+                        if point == corner:
+                            continue
+                        intersection_points.append(point)
+                # Find out also if the segment intersects any corner
+                for limit_point in limit_points:
+                    # Skip the main corner
+                    if limit_point == corner:
+                        continue
+                    if limit_point in segment:
+                        intersection_points.append(limit_point)
+
+                # There should be always at least 1 intersection
+                # This may fail, for example, if interior polygons are overlapped
+                if len(intersection_points) == 0:
+                    # Represent polygons in the problematic boundary
+                    # for limit_segment in limit_segments:
+                    #     limit_segment.color = 'black'
+                    # interior_segments = [ segment for polygon in self.interior_polygons for segment in polygon.segments ]
+                    # for interior_segment in interior_segments:
+                    #     interior_segment.color = 'blue'
+                    # segment.color = 'green'
+                    # add_frame(limit_segments + interior_segments + list(mark_point(corner, 'red')) + [segment])
+                    raise RuntimeError('An inside segment has no intersection point: ' + str(segment))
+
+                # Sort the points by distance
+                def by_distance(point):
+                    return segment.a.get_distance_to(point)
+                sorted_points = sorted(intersection_points, key=by_distance)
+
+                # The closest point will be the first point
+                cut_point = sorted_points[0]
+
+                insider_segment = Segment(segment.a, cut_point, color='red')
+                if insider_segment.is_diagonal():
+                    # This may happen due to a resolution problem
+                    raise RuntimeError('An insider segment should never be diagonal: ' + str(insider_segment))
+                insider_segments.append(insider_segment)
+
+            #return [tracing1, tracing2]
+            return insider_segments
 
         # Get all inside separator segments
         inside_separators = []
         for corner in limit_points:
-            for segment in self.get_corner_insider_segments(corner, limit_points, limit_segments):
+            for segment in get_corner_insider_segments(corner):
                 inside_separators.append(segment)
 
         # Remove duplicates
-        inside_separators = list(set(inside_separators))
+        inside_separators = unique(inside_separators)
 
-        # Join all inside segments with the perimeter limits in a single list
+        # Join all inside segments with the polygon limits in a single list
         # WARNING: inside segments MUST be before limit segments
         all_segments = [ *inside_separators, *limit_segments ]
 
@@ -1309,7 +1369,7 @@ class Perimeter:
             all_intersections.append(intersection)
 
         # Remove duplicates
-        all_intersections = list(set(all_intersections))
+        all_intersections = unique(all_intersections)
 
         # Split the inside separator segments at the intersection points
         all_splitted_segments = []
@@ -1349,108 +1409,64 @@ class Perimeter:
             final_rectangles += this_segment_rects
 
         # Remove duplicates
-        final_rectangles = list(set(final_rectangles))
+        final_rectangles = unique(final_rectangles)
 
-        # In some cases, some rectangles may be found inside exclusion perimeters
+        # In some cases, some rectangles may be found inside interior polygons
+        # This will happen with rectangular interior polygons
         # Find and discard those rectangles
-        for perimeter in exclusion_perimeters:
-            final_rectangles = [ rect for rect in final_rectangles if rect not in perimeter ]
+        for polygon in self.interior_polygons:
+            final_rectangles = [ rect for rect in final_rectangles if polygon != rect ]
 
         #print('Total rectangles: ' + str(len(final_rectangles)))
 
         return final_rectangles
+    
+    # Get the overlap boundaries between 2 boundaries
+    def get_overlap_boundaries (self, other : 'Boundary') -> List['Boundary']:
+        # Get the overlap grid of self boundary grid and the other boundary grid
+        overlap_grid = self.grid.get_overlap_grid(other.grid)
+        return overlap_grid.boundaries
 
-    # Get the overlap perimeters between 2 perimeters
-    def get_overlap_perimeters (self, others : List['Perimeter']) -> List['Perimeter']:
-        # Get the rectangles overlap between the current perimeter and each of the other perimeters
-        overlap_rects = []
-        for other in others:
-            overlap_rects += self.grid.get_overlap_rects(other.grid)
-        # Get all rectangle segments and discard overlapped segments
-        # Then connect the remaining segments to build perimeters
-        segments = [ segment for rect in overlap_rects for segment in rect.segments ]
-        # Remove pairs of duplicated segments
-        segments = [ segment for segment in segments if segments.count(segment) == 1 ]
-        # Connect segments until a closed perimeter is formed
-        # Eliminate segments from the list when they get connected to others
-        # Remove them with a comprehension list since it is not possible that the segment is duplciated
-        # There must be no remaining segments at the end
-        perimeters = []
-        while len(segments) > 0:
-            first_segment = segments[0]
-            segments = [ segment for segment in segments if segment != first_segment ]
-            perimeter_segments = [ first_segment ]
-            while True:
-                # Find a new segment which is connected to the last perimeter segment
-                # There must be always at least 1 segment connected
-                last_segment = perimeter_segments[-1]
-                previous_segments = perimeter_segments[0:-1]
-                connected_segment = next(segment for segment in segments if segment.is_connected_with(last_segment))
-                # Remove this segment from the segments list and add it to the perimeter segments list
-                # Use the following removal method since it is not possible that the segment is duplciated
-                segments = [ segment for segment in segments if segment != connected_segment ]
-                perimeter_segments.append(connected_segment)
-                # Check if the new connected segment closes a perimeter with any of the previous segments
-                # Note that the closing segment may not be the first segment
-                # This may happen in case we have 2 perimeters with a same corner
-                closing_segment = next((s for s, segment in enumerate(previous_segments) if segment.is_connected_with(connected_segment)), None)
-                if closing_segment != None:
-                    perimeter_segments = perimeter_segments[closing_segment:]
-                    perimeters.append( Perimeter.non_canonical(perimeter_segments) )
-                    # Recover the discarded segments to the segments list in case the closing segment was not the first segment
-                    discarded_segments = perimeter_segments[0:closing_segment]
-                    segments += discarded_segments
-                    break
-        return perimeters
-
-    # Find overlap segments between perimeters
-    # Get overlapping regions between perimeter segments
-    # However, if one segment is inside the area of the other perimeter it will not be considered
-    def get_overlap_segments (self, other : 'Perimeter') -> List[Segment]:
-        overlap_segments = []
-        for segment in self.segments:
-            for other_segment in other.segments:
-                overlap_segment = self.get_overlap_segment(other)
-                if overlap:
-                    overlap_segments.append(overlap_segment)
-
-    # Fuse other perimeter to self perimeter
-    # Check that perimeter can be joined to current perimeter as a single room
-    # i.e. both perimeters must be colliding and the colliding region must be only one and as wide as the minimum size or more
+    # Fuse other boundary to self boundary
+    # Check that both boundaries can be joined as a single boundary
+    # i.e. both exterior polygons must be colliding and the colliding region/s must be as wide as the minimum size or more
     # DANI: No se ha provado
-    def merge_perimeter (self, other : 'Perimeter', min_size = None) -> 'Perimeter':
-        # Check if this perimeter is colliding with another perimeter
-        # It means both perimeters have overlapping segments, but they do not overlap in their areas
-        colliding_segments = self.get_overlap_segments(other)
+    def merge_boundary (self, other : 'Boundary', min_size = None) -> 'Boundary':
+        # Check if both boundaries are colliding
+        # i.e. both external polygons have overlapping segments
+        colliding_segments = self.exterior_polygon.get_overlap_segments(other.exterior_polygon)
         if len(colliding_segments) == 0:
-            raise ValueError('Perimeters are not colliding')
-        if len(colliding_segments) > 1:
-            raise ValueError('"Donut" perimeters are not supported')
+            raise ValueError('Boundaries are not colliding')
         # In case there is a minimum size restriction check that the colliding segment is as long as required
-        colliding_segment = colliding_segments[0]
-        if min_size and colliding_segment.length < min_size:
-            raise ValueError('The colliding region is not wide enough')
-        overlaps = self.get_overlap_perimeters(other)
+        if min_size and all([ segment.length < min_size for segment in colliding_segments ]):
+            raise ValueError('Some colliding region is not wide enough')
+        # Check that there are not overlaping areas between both boundaries
+        overlaps = self.get_overlap_boundaries(other)
         if len(overlaps) == 0:
-            raise ValueError('Perimeters are overlapping')
-        # Check that there are not overlaping areas between both perimeters
-        overlaps = self.get_overlap_perimeters(other)
-        if len(overlaps) == 0:
-            raise ValueError('Perimeters are overlapping')
-        # Now build the new merged perimeter
-        # Substract the overlapping segments from both 
-        added_segments = [ seg for segment in other.segments for seg in segment.substract_segments(colliding_segments) ]
-        remaining_segments = [ seg for segment in self.segments for seg in segment.substract_segments(colliding_segments) ]
-        # Join all previous segments to make the new perimeter
-        new_perimeter = Perimeter.non_canonical([ *added_segments, *remaining_segments ])
-        return new_perimeter            
+            raise ValueError('Boundaries are overlapping')
+        # Finally, merge both boundary grids into a single grid and get its boundary
+        grid = self.grid.get_merge_grid(other.grid)
+        boundaries = grid.boundaries
+        if len(boundaries) != 1:
+            raise ValueError('Something went wrong with the boundary')
+        return boundaries[0]
 
-# A grid is a group of rectangles which may be connected (next to each other) or not
-# All rectangles which are connected have the whole segment connected
-# i.e. two rectangle points must also be identical
-# This class is used to handle perimeters splitted in rectangles
+    # Check if self boundary exterior polygon is colliding with other boundary exterior polygon/s
+    # i.e. one of their segments is totally or partially overlapping
+    # Note that one polygon may be inside of the other
+    def is_colliding_with (self, other : 'Boundary') -> bool:
+        return self.exterior_polygon.is_colliding_with(other.exterior_polygon)
+    def is_colliding_with_any (self, others : List['Boundary']) -> bool:
+        for other in others:
+            if self.exterior_polygon.is_colliding_with(other.exterior_polygon):
+                return True
+        return False
+
+# A grid is a group or groups of rectangles connected according to a standard:
+# Two connected rectangles have the whole segment connected
+# i.e. both rectangles have an identical segment
+# This class is used to handle space inside boundaries
 class Grid:
-
     def __init__(self, rects : List[Rect]):
         self._rects = rects
         # Check rectangles to match the grid format requirements
@@ -1459,12 +1475,33 @@ class Grid:
         self._row_rects = None
         self._col_rects = None
         self._area = None
+        self._boundaries = None
 
     def __str__(self):
         return str(self.rects)
 
     def __repr__(self):
         return str(self.rects)
+
+    def __contains__(self, other):
+        if isinstance(other, Point):
+            for rect in self.rects:
+                if other in rect:
+                    return True
+            return False
+        if isinstance(other, Segment):
+            in_a = other.a in self
+            cross_any_segment = any([ other.get_intersection_point(segment, in_extremis=0) for segment in self.get_boundary_segments() ])
+            return in_a and not cross_any_segment
+        if isinstance(other, Rect):
+            return all([ segment in self for segment in other.get_segments() ])
+        if isinstance(other, Polygon):
+            return all([ segment in self for segment in other.segments ])
+        if isinstance(other, Boundary):
+            return all([ segment in self for segment in other.exterior_polygon.segments ])
+        if isinstance(other, self.__class__):
+            return all([ boundary in self for boundary in other.boundaries ])
+        return False
 
     # Check for each corner on each rect that, if it is inside any other rect, it is also a corner in this rect
     # Check also that rects to do not overlap, since this may happen even with no corners inside each other
@@ -1481,11 +1518,63 @@ class Grid:
                     print('WARNING: Overlapping rects ' + str(rect) + ' and ' + str(other_rect))
                     raise RuntimeError('Grid rects are wrong')
 
-    # Set the grid from a perimeter
+    # Check each rect in the grid to reach a minimum size in both x and y dimensions
+    def check_minimum (self, minimum : number) -> bool:
+        for rect in self.rects:
+            current_max_rects = [ max_rect for max_rect in self.max_rects if rect in max_rect ]
+            max_x_size = max([ max_rect.get_x_size() for max_rect in current_max_rects ])
+            max_y_size = max([ max_rect.get_y_size() for max_rect in current_max_rects ])
+            if max_x_size < minimum or max_y_size < minimum:
+                return False
+        return True
+
+    # Set the grid from rectangles which do not follow the standards
+    # i.e. they are not connected each other by the whole segment
+    # However these rectangles must never overlap each other
+    # These rectangles will be used to build a new grid with different rectangles which do follow the standards
     @classmethod
-    def from_perimeter(cls, perimeter : Perimeter):
-        rects = perimeter.split_in_rectangles()
-        return cls(rects)
+    def non_canonical(cls, rects : List[Rect]):
+        # First of all find rectangle groups
+        # This is the non-canonical version of find_connected_rect_groups method
+        rects_to_group = [ *rects ]
+        rect_groups = []
+        while len(rects_to_group) > 0:
+            first_rect = rects_to_group[0]
+            new_group = [ first_rect ]
+            for current_rect in new_group:
+                connected_rects = [ rect for rect in rects if rect.is_colliding_with(current_rect) ]
+                new_group += [ rect for rect in connected_rects if rect not in new_group ]
+            rects_to_group = [ rect for rect in rects_to_group if rect not in new_group ]
+            rect_groups.append(new_group)
+        # Now find the boundary of each rectangles group
+        # This is the non-canonical version of find_boundaries method
+        boundaries = []
+        for group in rect_groups:
+            # Get all rectangle segments and discard overlapped segments
+            # Then connect the remaining segments to build polygons
+            # Note that overlap rects are not in the grid standard format
+            # For this reason, overlapped segments are not necessarily identical
+            segments = [ segment for rect in group for segment in rect.segments ]
+            unique_segments = []
+            for segment, others in otherwise(segments):
+                substract_segments = segment.substract_segments(others)
+                unique_segments += substract_segments
+            # Connect segments to build closed polygons
+            polygons = list(connect_segments(unique_segments))
+            # The external polygon is the polygon with the biggest box
+            sorted_polygons = sorted(polygons)
+            exterior_polygon = sorted_polygons[-1]
+            interior_polygons = sorted_polygons[0:-1]
+            # Now create the boundary
+            boundary = Boundary(exterior_polygon, interior_polygons)
+            boundaries.append(boundary)
+        # Split all boundaries in rects and join them a a single grid
+        canonical_rects = []
+        for boundary in boundaries:
+            canonical_rects += boundary.split_in_rectangles()
+        grid = cls(canonical_rects)
+        grid._boundaries = boundaries
+        return grid
 
     # Grid rectangles are read only
     def get_rects(self):
@@ -1528,7 +1617,7 @@ class Grid:
     # Grid column rectangles (read only)
     col_rects = property(get_col_rects, None, None, "Column rectangles in the grid")
 
-    # Get the area inside the perimeter
+    # Get the area of the whole grid
     # This variable is treated appart since its calculation may be an expensive calculation
     def get_area(self):
         # If the area is previously calculated then return it
@@ -1542,7 +1631,46 @@ class Grid:
     # Grid area (read only)
     area = property(get_area, None, None, "The area of the whole grid")
 
-    # Return the overlap space between two grid splitted in rectangles
+    # Find all grid boundaries
+    # i.e. find the enveloping boundaries for each group of connected rects
+    def find_boundaries (self) -> List[Boundary]:
+        boundaries = []
+        # First of all isolate groups of connected rectangles
+        rect_groups = self.find_connected_rect_groups()
+        # Now find the boundary of each group
+        for group in rect_groups:
+            # Get all rectangle segments and find those which are not duplicated
+            # Each non duplicated segment is an outter segment and thus it is part of the boundary
+            segments = []
+            for rect in group:
+                segments += rect.segments
+            boundary_segments = [ segm for segm in segments if segments.count(segm) == 1 ]
+            # Now get groups of connected segments (i.e. polygons)
+            # A group must contain an exterior polygon and it may contain also several interior polygons
+            polygons = list(connect_segments(boundary_segments))
+            # The external polygon is the polygon with the biggest box
+            sorted_polygons = sorted(polygons)
+            exterior_polygon = sorted_polygons[-1]
+            interior_polygons = sorted_polygons[0:-1]
+            # Now create the boundary
+            boundary = Boundary(exterior_polygon, interior_polygons)
+            boundaries.append(boundary)
+        return boundaries
+
+    # Get grid rectangle groups boundaries
+    def get_boundaries (self) -> List[Boundary]:
+        if not self._boundaries:
+            self._boundaries = self.find_boundaries()
+        return self._boundaries
+
+    # Grid boundaries (read only)
+    boundaries = property(get_boundaries, None, None, "Boundaries which wrap the whole grid")
+
+    # Get all boundaries in all segments
+    def get_boundary_segments (self):
+        return [ segment for boundary in self.boundaries for segment in boundary.segments ]
+
+    # Return the overlap space between two grids splitted in rectangles
     # Note that these rectangles will not follow the grid standard rules
     def get_overlap_rects (self, grid : 'Grid') -> List[Rect]:
         overlap_rects = []
@@ -1552,6 +1680,41 @@ class Grid:
                 if overlap_rect:
                     overlap_rects.append(overlap_rect)
         return overlap_rects
+
+    # Return the resulting grid after overlapping self grid to other grid
+    def get_overlap_grid (self, grid : 'Grid') -> 'Grid':
+        overlap_rects = self.get_overlap_rects(grid)
+        return Grid.non_canonical(overlap_rects)
+
+    # Return the merge space between two grids splitted in rectangles
+    # Note that these rectangles will not follow the grid standard rules
+    def get_merge_rects (self, grid : 'Grid') -> List[Rect]:
+        merge_rects = []
+        for rect in self.rects:
+            for other in grid.rects:
+                join_rects = rect.join_rect(other)
+                merge_rects += join_rects
+        return unique(merge_rects)
+
+    # Return the resulting grid after merging self grid to other grid
+    def get_merge_grid (self, grid : 'Grid') -> 'Grid':
+        merge_rects = self.get_merge_rects(grid)
+        return Grid.non_canonical(merge_rects)
+
+    # Return self grid space after substracting other grid space splitted in rectangles
+    # Note that these rectangles will not follow the grid standard rules
+    def get_substract_rects (self, grid : 'Grid') -> List[Rect]:
+        substract_rects = []
+        for rect in self.rects:
+            for other in grid.rects:
+                new_rects = rect.subtract_rect(other)
+                substract_rects += new_rects
+        return unique(substract_rects)
+
+    # Return the resulting grid after merging self grid to other grid
+    def get_substract_grid (self, grid : 'Grid') -> 'Grid':
+        substract_rects = self.get_substract_rects(grid)
+        return Grid.non_canonical(substract_rects)
 
     # Search all maximum rectangles which fulfill the specified minimum x and y sizes
     # Fitting rects are returned as a generator
@@ -1841,41 +2004,24 @@ class Grid:
 
     # Find groups of connected rectangles
     def find_connected_rect_groups (self):
-        # First of all isolate groups of connected rectangles
         rects_to_group = self.rects
         rect_groups = []
         while len(rects_to_group) > 0:
             first_rect = rects_to_group[0]
             new_group = [ first_rect ]
-            for rect in new_group:
-                connected_rects = self.get_connected_rects(rect)
+            for current_rect in new_group:
+                connected_rects = self.get_connected_rects(current_rect)
                 new_group += [ rect for rect in connected_rects if rect not in new_group ]
             rects_to_group = [ rect for rect in rects_to_group if rect not in new_group ]
             rect_groups.append(new_group)
         return rect_groups
 
-    # Find all grid perimeters
-    # i.e. find the enveloping perimeter for each group of connected rects
-    # WARNING: This logic will fail in case there is a "hole" inside a rectangles group
-    # However, this should never happen in the expansion process, which uses this logic
-    def find_perimeters (self):
-        perimeters = []
-        # First of all isolate groups of connected rectangles
-        rect_groups = self.find_connected_rect_groups()
-        # Now find the perimeter for each group
-        for group in rect_groups:
-            # Get all rectangle segments and find those which are not duplicated
-            # Each non duplicated segment is an outter segment and thus it is part of the perimeter
-            segments = []
-            for rect in group:
-                segments += rect.segments
-            perimeter_segments = [ segm for segm in segments if segments.count(segm) == 1 ]
-            # Now create the perimeter in the non-canonical way
-            group_perimeter = Perimeter.non_canonical(perimeter_segments)
-            perimeters.append(group_perimeter)
-        return perimeters
 
 # Auxiliar functions ---------------------------------------------------------------
+
+# Return unique values of a list
+def unique (values : list) -> list:
+    return list(set(values))
 
 # Set a special iteration system
 # Return each value of the array and the next value
@@ -1898,9 +2044,49 @@ def otherwise (values : list) -> Generator[tuple, None, None]:
         others = values[0:v] + values[v+1:]
         yield value, others
 
+# Find groups of connected segments in a list of segments
+# Yield any closed polygon when it is found
+def connect_segments (segments : List[Segment]) -> Generator[Polygon, None, None]:
+    remaining_segments = [ *segments ]
+    while len(remaining_segments) > 0:
+        first_segment = remaining_segments[0]
+        remaining_segments.remove(first_segment)
+        polygon_segments = [ first_segment ]
+        while True:
+            # Find a new segment which is connected to the last polygon segment
+            # There must be always at least 1 segment connected
+            last_segment = polygon_segments[-1]
+            previous_segments = polygon_segments[0:-1]
+            connected_segment = next(segment for segment in remaining_segments if segment.is_connected_with(last_segment))
+            # Remove this segment from the segments list and add it to the polygon segments list
+            remaining_segments.remove(connected_segment)
+            polygon_segments.append(connected_segment)
+            # Check if the new connected segment closes a polygon with any of the previous segments
+            # Note that the closing segment may not be the first segment
+            # This may happen in case we have 2 polygons with a same corner
+            closing_segment = next((s for s, segment in enumerate(previous_segments) if segment.is_connected_with(connected_segment)), None)
+            if closing_segment != None:
+                polygon_segments = polygon_segments[closing_segment:]
+                yield Polygon.non_canonical(polygon_segments)
+                # Recover the discarded segments to the segments list in case the closing segment was not the first segment
+                discarded_segments = polygon_segments[0:closing_segment]
+                previous_segments += discarded_segments
+                break
+
 # Get a random color for display tools
 def generate_random_color ():
     r = round(random.random() * 255)
     g = round(random.random() * 255)
     b = round(random.random() * 255)
     return '#%02x%02x%02x' % (r,g,b)
+
+# Create a cross with two segments to mark a specific point in the representation
+# Return the segments
+def mark_point (point : Point, color : str = 'black', size : number = 1):
+    point_1a = point + Vector(-1, 1).normalized() * size
+    point_1b = point + Vector(1, -1).normalized() * size
+    segment_1 = Segment(point_1a, point_1b, color)
+    point_2a = point + Vector(-1, -1).normalized() * size
+    point_2b = point + Vector(1, 1).normalized() * size
+    segment_2 = Segment(point_2a, point_2b, color)
+    return segment_1, segment_2
