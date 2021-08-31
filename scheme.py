@@ -12,6 +12,7 @@ seed = None
 #seed = 168166 # burbuja imposible perimetro 4
 #seed = 414509 # infinite loop perimetro 4
 #seed = 402486 # infinite loop perimetro 1
+seed = 320615
 if not seed:
     seed = round(random.random() * 999999)
 print('Seed ' + str(seed))
@@ -727,9 +728,8 @@ class Room:
         print('WARNING: There are no more frontiers available')
         return False
 
-    # Invade this room by substracting part of its space
-    # Then this room must expand to recover the lost area
-    def invade (self, regions : List[Boundary]) -> bool:
+    # Remove part of the room space and check everything is fine after
+    def truncate (self, regions : List[Boundary]) -> bool:
         # Calculate the boundary of this room after substracting the invaded regions
         truncated_grid = self.boundary.grid
         for region in regions:
@@ -748,12 +748,22 @@ class Room:
             print('WARNING: The invaded room has been fully consumed -> Go back')
             return False
         # Modify the room boundary but save a backup in case we have to go back further
-        backup_boundary = self.boundary
         self.boundary = truncated_boundaries[0]
+        return True
+
+    # Invade this room by substracting part of its space
+    # Then this room must expand to recover the lost area
+    def invade (self, regions : List[Boundary]) -> bool:
+        # Truncate the room boundary but save a backup in case we have to go back further
+        backup_boundary = self.boundary
+        if not self.truncate(regions):
+            print('WARNING: The invaded region can not be truncated -> Go back')
+            self.boundary = backup_boundary
+            return False
         # Expand the invaded room as much as the invaded area
         # In case the expansions fails go back
         if not self.expand():
-            print('WARNING: The room cannot expand -> Go back')
+            print('WARNING: The invaded room can not expand -> Go back')
             self.boundary = backup_boundary
             return False
         return True
@@ -767,17 +777,22 @@ class Room:
         children_backup = [ child.boundary for child in self.children ]
         # Claim the invaded region for the invasor room
         invasor.merge_boundary(region)
-        # Now find which children are overlaped by the invade region and then invade them
-        for child in self.children:
-            # Skip the invasor room
-            if child == invasor:
-                continue
+        # Now find which children are overlaped by the invade region and then truncate them
+        children = [ child for child in self.children if child != invasor ]
+        for child in children:
             # Get the overlap regions between the invaded region and this child
             overlap_boundaries = child.boundary.get_overlap_boundaries(region)
             if len(overlap_boundaries) == 0:
                 continue
-            # In case something went wrong with the invasion recover all children backups and stop
-            if not child.invade(overlap_boundaries):
+            # In case something went wrong with any child truncation recover all children backups and stop
+            if not child.truncate(overlap_boundaries):
+                for c, child in enumerate(self.children):
+                    child.boundary = children_backup[c]
+                return False
+        # Finally expand all truncated children
+        for child in children:
+            # In case something went wrong with any child expansion recover all children backups and stop
+            if not child.expand():
                 for c, child in enumerate(self.children):
                     child.boundary = children_backup[c]
                 return False
