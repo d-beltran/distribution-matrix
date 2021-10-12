@@ -362,248 +362,41 @@ class Room:
         # Make a boundary bakcup of this room and all its brothers
         affected_rooms = self.parent.children
         boundaries_backup = [ room.boundary for room in affected_rooms ]
+        # Keep expanding until the current room reaches the desired area
         while self.get_required_area() > 0:
-            if not self.expand_step():
-                for i, room in enumerate(affected_rooms):
-                    room.boundary = boundaries_backup[i]
+            # Calculate how much area we need to expand
+            required_area = self.get_required_area()
+            # Check the required area is big enought to be meaningfull according to the resolution
+            # i.e. check if expanding a segment with the minimum length would make it move more than the minimum resolution
+            if required_area / self.min_size < minimum_resolution:
+                raise ValueError('The required area is not enought to expand according to resolution: ' + str(required_area))
+            # Set a function to supervise if each expansion step is succesful or not
+            def expand_step () -> bool:
+                # Get the most suitable frontier to expand and try to expand it
+                # If the expansions fails, try with the next one
+                for frontier in self.get_best_expansion_frontier():
+                    if self.expand_frontier(frontier, required_area):
+                        return True
                 return False
+            # Expand
+            if expand_step():
+                continue
+            # In case the expansion failed restore the backup and exit
+            for i, room in enumerate(affected_rooms):
+                room.boundary = boundaries_backup[i]
+            return False
         return True
 
-    # Find the most suitable space for the current room to claim
-    # If current room is expanded over another room then the other room must also expand to compensate
-    # At the end, the extra space will be substracted from the parent free space
-    def expand_step (self) -> bool:
+    # Yield all room frontiers in the most suitable order
+    # - Free frontiers before borther frontiers
+    # - Single frontiers before combined frontiers
+    # - In case of a borther frontier, the one which makes shorter the path to free space
+    def get_best_expansion_frontier (self) -> Generator[Segment, None, None]:
 
-        print('Expanding ' + self.name)
-        # Calculate how much area we need to expand
-        required_area = self.get_required_area()
-        if required_area <= 0:
-            raise ValueError('Something went wrong with expansion')
-
-        # Check the required area is big enought to be meaningfull according to the resolution
-        # i.e. check if expanding a segment with the minimum length would make it move more than the minimum resolution
-        if required_area / self.min_size < minimum_resolution:
-            print('WARNING: The required area is not enought to expand according to resolution: ' + str(required_area))
-            return False
-
-        # Get the parent room
-        parent_room = self.parent
         # Get the exterior polygon of the room boundary
         exterior_polygon = self.boundary.exterior_polygon
         # Get the inside corners
         inside_corners = [ corner for corner in exterior_polygon.corners if corner.inside == True ]
-
-        # ----------------------------------------------------------------------------------------------------
-        # Try to expand in the easiest way: push an individual frontier segment
-        # Only segment longer than the minimum size may be expanded this way
-        # Start pushing free frontiers
-        # - No matter if the space is divided as a result of the expansion
-        # If there are no suitable free frontiers then proceed with brother frontiers
-        # - Space must never be divided as a result of the expansion
-        # ----------------------------------------------------------------------------------------------------
-
-        def expand_frontier (frontier : Segment) -> bool:
-            print("Push -> " + str(frontier))
-            # Set some parameters according to the rooms this frontier belongs to
-            rooms = frontier.rooms
-            # Get the grid of the rooms we are about to invade as a reference to calculate how much we can expand
-            # When the invaded room is self room it means we are expanding over free space
-            first_room = rooms[0]
-            grid = first_room.free_grid if first_room == parent_room else first_room.boundary.grid
-            # In case this frontier has more than 1 rooms it means it is a combined frontier
-            # Create a 'ficticious' room with all implicated rooms as a reference
-            for next_room in rooms[1:]:
-                next_grid = next_room.free_grid if next_room == parent_room else next_room.boundary.grid
-                grid = grid.get_merge_grid(next_grid)
-            margin_limit = max([ room.min_size for room in rooms ])
-            # Find the maximum rectangles which are in contact with our frontier
-            max_rects = grid.max_rects
-            contact_max_rects = [ rect for rect in max_rects if frontier in rect ]
-            # In case segment is vertical:
-            # - The expansion uses maximum columns
-            # - The expansion 'froward' is the x dimension
-            # - The expansion 'sides' is the y dimension
-            # In case segment is horizontal
-            # - The expansion uses maximum rows
-            # - The expansion 'froward' is the y dimension
-            # - The expansion 'sides' is the x dimension
-            # Here 'forward' and 'sides' may mean '0 -> x dimension' or '1 -> y dimension'
-            # This is because rectangles size is given in a (x,y) tuple format
-            # So size[0] = x and size[1] = 1
-            if frontier.is_vertical():
-                rects = grid.find_column_rectangles()
-                forward = 0
-                sides = 1
-            elif frontier.is_horizontal():
-                rects = grid.find_row_rectangles()
-                forward = 1
-                sides = 0
-            else:
-                raise ValueError('ERROR: diagonal segments are not supported for room expansion')
-
-            if len(rects) == 0:
-                raise RuntimeError('No pot ser: ' + str(grid))
-
-            # One and only one of the rows/columns will always include the segment
-            space = next((rect for rect in rects if frontier in rect), None)
-            if space == None:
-                # If this happens it may mean there is a problem with the grid
-                raise RuntimeError('Frontier ' + str(frontier) + ' has no space in ' + str(rects))
-            space_contact = next(segment for segment in space.segments if frontier in segment)
-            space_forward_limit = space.get_size()[forward]
-            margined_space_forward_limit = space_forward_limit - margin_limit
-
-            # Find the direction of the expansion as a vector
-            forward_direction = space.get_side_direction_to_center(space_contact)
-
-            # Get the forward expansion limit according to maximum rectangles
-            maximum_forward_limit = max([ rect.get_size()[forward] for rect in contact_max_rects ])
-            margined_maximum_forward_limit = maximum_forward_limit - margin_limit
-
-            # Now create a function to make a rectangle by pushing a segment (which may change)
-            # The forward length of this rectangle will depend on the available area and limits
-            # This segment may not be the original frontier, but a variation of it
-            def push_segment (pushed_segment : Segment, greedy : bool = True) -> bool:
-                push_length = required_area / pushed_segment.length
-                # In case this is an insider segment which is not wide enought to be pushed alone,
-                # Find out how much we can push this segment
-                # i.e. find the connected frontier/s and get the maximum length of these segments
-                if pushed_segment.length < self.min_size:
-                    push_limit = None
-                    other_segments = [ segment for segment in exterior_polygon.segments if segment != pushed_segment ]
-                    for point in pushed_segment.points:
-                        if point in inside_corners:
-                            insider = next(segment for segment in other_segments if point in segment.points)
-                            if not push_limit or push_limit < insider.length:
-                                push_limit = insider.length
-                    # If the push length exceeds the insider limit then stay in the limit
-                    if push_length > push_limit:
-                        push_length = push_limit
-                # First, try to expand using the maximum available space
-                # This is risky since it may split the invaded room in two parts or make regions which do not respect the minimum size
-                if greedy:
-                    # If the length exceeds the maximum limit then stay in the maximum limit
-                    if push_length > maximum_forward_limit:
-                        push_length = maximum_forward_limit
-                    # If the length is between the maximum limit and the margined maximum limit then stay at the margin
-                    elif push_length > margined_maximum_forward_limit:
-                        push_length = margined_maximum_forward_limit
-                # If the greedy try fails use the moderate try
-                # Expand only using the closest row/column rectangle
-                # This expansion is smaller but safe
-                else:
-                    # # If at this point the length exceeds the space limit then stay in the space limit
-                    if push_length > space_forward_limit:
-                        push_length = space_forward_limit
-                    # If the length is between the space limit and the margined space limit then stay at the margin
-                    elif push_length > margined_space_forward_limit:
-                        push_length = margined_space_forward_limit
-                    # In case the length is bigger than the margined maximum we stay at the margin
-                    if push_length > margined_maximum_forward_limit:
-                        push_length = margined_maximum_forward_limit
-                # If the push length at this point is 0 or close to it then we can not push
-                # WARNING: This usually happens because of limits, not because the area was not big enought
-                # For this reason, trying to reduce the segment and push again will have no effect almost always
-                if push_length < minimum_resolution:
-                    print('WARNING: The push length is too small')
-                    return False
-                # Create the new rect with the definitive length
-                new_point = pushed_segment.a + forward_direction.normalized() * push_length
-                new_side = Segment(pushed_segment.a, new_point)
-                new_rect = Rect.from_segments([pushed_segment, new_side])
-                # Then add the new current rectangle by modifying the current boundary
-                # Add the new rectangle segment regions which do not overlap with current boundary segments
-                # Substract the new rectangle segment regions which overlap with current boundary segments
-                # e.g. the pushed segment will always be an overlapped region
-                new_segments = new_rect.segments
-                current_segments = self.boundary.exterior_polygon.segments
-                added_segments = [ seg for segment in new_segments for seg in segment.substract_segments(current_segments) ]
-                remaining_segments = [ seg for segment in current_segments for seg in segment.substract_segments(new_segments) ]
-                # Join all previous segments to make the new polygon
-                new_exterior_polygon = Polygon.non_canonical([ *added_segments, *remaining_segments ])
-                new_boundary = Boundary(new_exterior_polygon, self.boundary.interior_polygons)
-                # In case the boundary is extended over another room,
-                # We must substract the claimed rect from the other room and make it expand to compensate
-                # Make a backup of the current boundary in case the further expansions fail an we have to go back
-                backup_boundary = self.boundary
-                self.boundary = new_boundary
-                invaded_region = Boundary(Polygon.from_rect(new_rect))
-                # Substract the claimed rect from other rooms
-                # Make a backup of all other room current boundaries
-                backup_room_boundaries = [ room.boundary for room in rooms ]
-                for room in rooms:
-                    if room == parent_room:
-                        continue
-                    current_room_invaded_regions = room.boundary.get_overlap_boundaries(invaded_region)
-                    if not room.invade(current_room_invaded_regions):
-                        self.boundary = backup_boundary
-                        for i, modified_room in enumerate(rooms):
-                            modified_room.boundary = backup_room_boundaries[i]
-                        # If the invasion fails then try it again with the non greedy push
-                        # If we are already in the non greedy push then return false
-                        if greedy:
-                            return push_segment(pushed_segment, False)
-                        return False
-                return True
-                 
-
-            # ----------------------------------------------------------------------------------------------------
-            # First of all check if frontier points are connected to the space limits
-            # In this case, we do not have to bother about margins
-            # i.e. minimum length between the claimed space and space borders
-            # Otherwise, we must check that borders are respected
-            # ----------------------------------------------------------------------------------------------------
-
-            # Sort points using the space contact 'a' point as reference
-            points = [ frontier.a, frontier.b ]
-            def by_distance(point):
-                return space_contact.a.get_distance_to(point)
-            sorted_points = sorted(points, key=by_distance)
-            point_a = sorted_points[0]
-            point_b = sorted_points[1]
-
-            # Define margins at both sides of the current frontiers
-            margin_a = Segment(space_contact.a, point_a) if space_contact.a != point_a else None
-            margin_b = Segment(space_contact.b, point_b) if space_contact.b != point_b else None
-
-            # If a margin exists and it is not as long as required we have a problem
-            problem_a = margin_a and margin_a.length < margin_limit
-            problem_b = margin_b and margin_b.length < margin_limit
-
-            # If there is no problem we can just push the frontier
-            if not problem_a and not problem_b:
-                return push_segment(frontier)
-
-            # ----------------------------------------------------------------------------------------------------
-            # If a margin is not respected then we have 2 options (no option will always be possible):
-            # - Cut the frontier to be expanded in order to respect the margin
-            #   * If the cutted frontier is shorter than the minimum size we can not expand
-            # - Claim also all the space between the claimed space and the space border
-            #   * If the expanded space perpendicular space is not equal or longer to the minimum we cannot expand sideways
-            #   * If the extra claimed space exceeds the required expand area we cannot claim it
-            # ----------------------------------------------------------------------------------------------------
-
-            # Try to cut the frontier
-            reduced_frontier = frontier
-            for i, problem in enumerate([ problem_a, problem_b ]):
-                if not problem:
-                    continue
-                margin = [ margin_a, margin_b ][i]
-                reduction = margin_limit - margin.length
-                problem_point = sorted_points[i]
-                other_point = next(point for point in reduced_frontier.points if point != problem_point)
-                direction = (problem_point + other_point).normalized()
-                new_point = problem_point + direction * reduction
-                # In case the new pont has passed the other point we stop here
-                if new_point not in reduced_frontier:
-                    print('WARNING: The frontier has been fully consumed')
-                    return False
-                if new_point.get_distance_to(other_point) < self.min_size:
-                    print('WARNING: The reduced frontier is not wide enought')
-                    return False
-                reduced_frontier = Segment(new_point, other_point)
-
-            return push_segment(reduced_frontier)
 
         # ----------------------------------------------------------------------------------------------------
         # Split the room boundary exterior polygon in segments according to what each region is connected to
@@ -660,73 +453,293 @@ class Room:
                     combined_frontiers.append(combined_frontier)
             return combined_frontiers
 
-        # Start trying to expand free frontiers first
-        # Check if frontiers are available for expansion alone
-        # In case they are not, skip them and let them for the end
-        for frontiers_groups in [ free_frontiers, brother_frontiers ]:
-            # Sort frontiers according to their type
-            # First of all and always we shuffle them at random
-            random.shuffle(frontiers_groups)
-            # Then, in case they are brother frontiers, we sort them with some extra logic
-            if frontiers_groups == brother_frontiers:
-                # Find for each brother room the number of colliding rooms we must jump to find free space
-                # Then use this value to set the "score" of each brother room frontiers
-                colliding_rooms = unique([ frontier.rooms[0] for frontier in frontiers_groups ])
-                for colliding_room in colliding_rooms:
-                    previous_rooms = [ self ]
-                    current_rooms = [ colliding_room ]
-                    counter = 1
-                    searching_free = True
-                    # Get frontiers from all current rooms
-                    # If any of them has free frontiers we are done
-                    # Otherwise, get the rooms from all brother rooms and repeat the whole process
-                    while True:
-                        current_frontiers = []
-                        for current_room in current_rooms:
-                            free, brother, parent = current_room.get_frontiers()
-                            if len(free) > 0:
-                                searching_free = False
-                                break
-                            current_frontiers += brother
-                        if not searching_free:
-                            print('ROOM ' + colliding_room.name + ' -> SCORE ' + str(counter))
-                            break
-                        previous_rooms = previous_rooms + current_rooms
-                        current_rooms = unique([ frontier.rooms[0] for frontier in current_frontiers if frontier.rooms[0] not in previous_rooms ])
-                        if len(current_rooms) == 0:
-                            counter = None
-                            print('ROOM ' + colliding_room.name + ' -> DEAD END')
-                            break
-                        counter += 1
-                    # Set the scores for all frontiers
-                    colliding_room_frontiers = [ frontier for frontier in frontiers_groups if frontier.rooms[0] == colliding_room ]
-                    if counter:
-                        for frontier in colliding_room_frontiers:
-                            frontier.score = counter
-                    else:
-                        for frontier in colliding_room_frontiers:
-                            frontier.score = inf
-                # Now sort frontiers using previous scores
-                def by_score (frontier):
-                    return frontier.score
-                frontiers_groups = sorted(frontiers_groups, key=by_score)
+        # Check each frontier to be available for expansion alone
+        # In case it is, yield it
+        # In case it is not, skip it and let it for the end
+        def priorize_single_frontiers (frontiers_group : list) -> Generator[Segment, None, None]:
             hard_frontiers = []
-            for frontier in frontiers_groups:
+            for frontier in frontiers_group:
                 # If it cannot be expanded alone we skip it by now
                 if not is_suitable(frontier):
                     hard_frontiers.append(frontier)
                     continue
                 # Otherwise try to expand it
-                if expand_frontier(frontier):
-                    return True
+                yield frontier
             # If none of the suitable frontiers was expanded successfully then try with the combined ones
             for frontier in hard_frontiers:
                 combined_frontiers = get_combined_frontiers(frontier)
                 for combined_frontier in combined_frontiers:
-                    if expand_frontier(combined_frontier):
-                        return True
+                    yield combined_frontier
+
+        # Find for each brother room the number of colliding rooms we must jump to find free space
+        # Then use this value to set the "score" of each brother room frontiers and sort them
+        def sort_by_shortest_path (frontiers_group) -> list:
+            colliding_rooms = unique([ frontier.rooms[0] for frontier in frontiers_group ])
+            for colliding_room in colliding_rooms:
+                previous_rooms = [ self ]
+                current_rooms = [ colliding_room ]
+                counter = 1
+                searching_free = True
+                # Get frontiers from all current rooms
+                # If any of them has free frontiers we are done
+                # Otherwise, get the rooms from all brother rooms and repeat the whole process
+                while True:
+                    current_frontiers = []
+                    for current_room in current_rooms:
+                        free, brother, parent = current_room.get_frontiers()
+                        if len(free) > 0:
+                            searching_free = False
+                            break
+                        current_frontiers += brother
+                    if not searching_free:
+                        #print('ROOM ' + colliding_room.name + ' -> SCORE ' + str(counter))
+                        break
+                    previous_rooms = previous_rooms + current_rooms
+                    current_rooms = unique([ frontier.rooms[0] for frontier in current_frontiers if frontier.rooms[0] not in previous_rooms ])
+                    if len(current_rooms) == 0:
+                        counter = None
+                        #print('ROOM ' + colliding_room.name + ' -> DEAD END')
+                        break
+                    counter += 1
+                # Set the scores for all frontiers
+                colliding_room_frontiers = [ frontier for frontier in frontiers_group if frontier.rooms[0] == colliding_room ]
+                if counter:
+                    for frontier in colliding_room_frontiers:
+                        frontier.score = counter
+                else:
+                    for frontier in colliding_room_frontiers:
+                        frontier.score = inf
+            # Now sort frontiers using previous scores
+            def by_score (frontier):
+                return frontier.score
+            return sorted(frontiers_group, key=by_score)
+
+        # Start trying to expand free frontiers first
+        # First of all and always we shuffle them at random
+        random.shuffle(free_frontiers)
+        # Yield free frontiers priorizing single frontiers since they are easier to expand
+        for frontier in priorize_single_frontiers(free_frontiers):
+            yield frontier
+        # Then we try with the brother frontiers
+        random.shuffle(brother_frontiers)
+        # Sort them according to the shortes rout to the free space
+        brother_frontiers = sort_by_shortest_path(brother_frontiers)
+        # Yield brother frontiers priorizing single frontiers since they are easier to expand
+        for frontier in priorize_single_frontiers(brother_frontiers):
+            yield frontier
         print('WARNING: There are no more frontiers available')
-        return False
+
+    # Try to expand a specific room frontier
+    # Note that the frontier must contain the room it belongs to
+    # Set the required (maximum) area it can expand
+    # Return True if the expansion was succesful or False if there was no expansion
+    def expand_frontier (self, frontier : Segment, required_area : number) -> bool:
+        # Get the parent room
+        parent_room = self.parent
+        # Get the exterior polygon of the room boundary
+        exterior_polygon = self.boundary.exterior_polygon
+        # Get the inside corners
+        inside_corners = [ corner for corner in exterior_polygon.corners if corner.inside == True ]
+        # Set some parameters according to the rooms this frontier belongs to
+        rooms = frontier.rooms
+        # Get the grid of the rooms we are about to invade as a reference to calculate how much we can expand
+        # When the invaded room is self room it means we are expanding over free space
+        first_room = rooms[0]
+        grid = first_room.free_grid if first_room == parent_room else first_room.boundary.grid
+        # In case this frontier has more than 1 rooms it means it is a combined frontier
+        # Create a 'ficticious' room with all implicated rooms as a reference
+        for next_room in rooms[1:]:
+            next_grid = next_room.free_grid if next_room == parent_room else next_room.boundary.grid
+            grid = grid.get_merge_grid(next_grid)
+        margin_limit = max([ room.min_size for room in rooms ])
+        # Find the maximum rectangles which are in contact with our frontier
+        max_rects = grid.max_rects
+        contact_max_rects = [ rect for rect in max_rects if frontier in rect ]
+        # In case segment is vertical:
+        # - The expansion uses maximum columns
+        # - The expansion 'froward' is the x dimension
+        # - The expansion 'sides' is the y dimension
+        # In case segment is horizontal
+        # - The expansion uses maximum rows
+        # - The expansion 'froward' is the y dimension
+        # - The expansion 'sides' is the x dimension
+        # Here 'forward' and 'sides' may mean '0 -> x dimension' or '1 -> y dimension'
+        # This is because rectangles size is given in a (x,y) tuple format
+        # So size[0] = x and size[1] = 1
+        if frontier.is_vertical():
+            rects = grid.find_column_rectangles()
+            forward = 0
+            sides = 1
+        elif frontier.is_horizontal():
+            rects = grid.find_row_rectangles()
+            forward = 1
+            sides = 0
+        else:
+            raise ValueError('ERROR: diagonal segments are not supported for room expansion')
+
+        if len(rects) == 0:
+            raise RuntimeError('No pot ser: ' + str(grid))
+
+        # One and only one of the rows/columns will always include the segment
+        space = next((rect for rect in rects if frontier in rect), None)
+        if space == None:
+            # If this happens it may mean there is a problem with the grid
+            raise RuntimeError('Frontier ' + str(frontier) + ' has no space in ' + str(rects))
+        space_contact = next(segment for segment in space.segments if frontier in segment)
+        space_forward_limit = space.get_size()[forward]
+        margined_space_forward_limit = space_forward_limit - margin_limit
+
+        # Find the direction of the expansion as a vector
+        forward_direction = space.get_side_direction_to_center(space_contact)
+
+        # Get the forward expansion limit according to maximum rectangles
+        maximum_forward_limit = max([ rect.get_size()[forward] for rect in contact_max_rects ])
+        margined_maximum_forward_limit = maximum_forward_limit - margin_limit
+
+        # Now create a function to make a rectangle by pushing a segment (which may change)
+        # The forward length of this rectangle will depend on the available area and limits
+        # This segment may not be the original frontier, but a variation of it
+        def push_segment (pushed_segment : Segment, greedy : bool = True) -> bool:
+            push_length = required_area / pushed_segment.length
+            # In case this is an insider segment which is not wide enought to be pushed alone,
+            # Find out how much we can push this segment
+            # i.e. find the connected frontier/s and get the maximum length of these segments
+            if pushed_segment.length < self.min_size:
+                push_limit = None
+                other_segments = [ segment for segment in exterior_polygon.segments if segment != pushed_segment ]
+                for point in pushed_segment.points:
+                    if point in inside_corners:
+                        insider = next(segment for segment in other_segments if point in segment.points)
+                        if not push_limit or push_limit < insider.length:
+                            push_limit = insider.length
+                # If the push length exceeds the insider limit then stay in the limit
+                if push_length > push_limit:
+                    push_length = push_limit
+            # First, try to expand using the maximum available space
+            # This is risky since it may split the invaded room in two parts or make regions which do not respect the minimum size
+            if greedy:
+                # If the length exceeds the maximum limit then stay in the maximum limit
+                if push_length > maximum_forward_limit:
+                    push_length = maximum_forward_limit
+                # If the length is between the maximum limit and the margined maximum limit then stay at the margin
+                elif push_length > margined_maximum_forward_limit:
+                    push_length = margined_maximum_forward_limit
+            # If the greedy try fails use the moderate try
+            # Expand only using the closest row/column rectangle
+            # This expansion is smaller but safe
+            else:
+                # # If at this point the length exceeds the space limit then stay in the space limit
+                if push_length > space_forward_limit:
+                    push_length = space_forward_limit
+                # If the length is between the space limit and the margined space limit then stay at the margin
+                elif push_length > margined_space_forward_limit:
+                    push_length = margined_space_forward_limit
+                # In case the length is bigger than the margined maximum we stay at the margin
+                if push_length > margined_maximum_forward_limit:
+                    push_length = margined_maximum_forward_limit
+            # If the push length at this point is 0 or close to it then we can not push
+            # WARNING: This usually happens because of forward limits, not because the area was not big enought
+            # For this reason, trying to reduce the segment and push again will have no effect almost always
+            if push_length < minimum_resolution:
+                print('WARNING: The push length is too small')
+                return False
+            # Create the new rect with the definitive length
+            new_point = pushed_segment.a + forward_direction.normalized() * push_length
+            new_side = Segment(pushed_segment.a, new_point)
+            new_rect = Rect.from_segments([pushed_segment, new_side])
+            # Then add the new current rectangle by modifying the current boundary
+            # Add the new rectangle segment regions which do not overlap with current boundary segments
+            # Substract the new rectangle segment regions which overlap with current boundary segments
+            # e.g. the pushed segment will always be an overlapped region
+            new_segments = new_rect.segments
+            current_segments = self.boundary.exterior_polygon.segments
+            added_segments = [ seg for segment in new_segments for seg in segment.substract_segments(current_segments) ]
+            remaining_segments = [ seg for segment in current_segments for seg in segment.substract_segments(new_segments) ]
+            # Join all previous segments to make the new polygon
+            new_exterior_polygon = Polygon.non_canonical([ *added_segments, *remaining_segments ])
+            new_boundary = Boundary(new_exterior_polygon, self.boundary.interior_polygons)
+            # In case the boundary is extended over another room,
+            # We must substract the claimed rect from the other room and make it expand to compensate
+            # Make a backup of the current boundary in case the further expansions fail an we have to go back
+            backup_boundary = self.boundary
+            self.boundary = new_boundary
+            invaded_region = Boundary(Polygon.from_rect(new_rect))
+            # Substract the claimed rect from other rooms
+            # Make a backup of all other room current boundaries
+            backup_room_boundaries = [ room.boundary for room in rooms ]
+            for room in rooms:
+                if room == parent_room:
+                    continue
+                current_room_invaded_regions = room.boundary.get_overlap_boundaries(invaded_region)
+                if not room.invade(current_room_invaded_regions):
+                    self.boundary = backup_boundary
+                    for i, modified_room in enumerate(rooms):
+                        modified_room.boundary = backup_room_boundaries[i]
+                    # If the invasion fails then try it again with the non greedy push
+                    # If we are already in the non greedy push then return false
+                    if greedy:
+                        return push_segment(pushed_segment, False)
+                    return False
+            return True
+                
+
+        # ----------------------------------------------------------------------------------------------------
+        # First of all check if frontier points are connected to the space limits
+        # In this case, we do not have to bother about margins
+        # i.e. minimum length between the claimed space and space borders
+        # Otherwise, we must check that borders are respected
+        # ----------------------------------------------------------------------------------------------------
+
+        # Sort points using the space contact 'a' point as reference
+        points = [ frontier.a, frontier.b ]
+        def by_distance(point):
+            return space_contact.a.get_distance_to(point)
+        sorted_points = sorted(points, key=by_distance)
+        point_a = sorted_points[0]
+        point_b = sorted_points[1]
+
+        # Define margins at both sides of the current frontiers
+        margin_a = Segment(space_contact.a, point_a) if space_contact.a != point_a else None
+        margin_b = Segment(space_contact.b, point_b) if space_contact.b != point_b else None
+
+        # If a margin exists and it is not as long as required we have a problem
+        problem_a = margin_a and margin_a.length < margin_limit
+        problem_b = margin_b and margin_b.length < margin_limit
+
+        # If there is no problem we can just push the frontier
+        if not problem_a and not problem_b:
+            return push_segment(frontier)
+
+        # ----------------------------------------------------------------------------------------------------
+        # If a margin is not respected then we have 2 options (no option will always be possible):
+        # - Cut the frontier to be expanded in order to respect the margin
+        #   * If the cutted frontier is shorter than the minimum size we can not expand
+        # - Claim also all the space between the claimed space and the space border
+        #   * If the expanded space perpendicular space is not equal or longer to the minimum we cannot expand sideways
+        #   * If the extra claimed space exceeds the required expand area we cannot claim it
+        # ----------------------------------------------------------------------------------------------------
+
+        # Try to cut the frontier
+        reduced_frontier = frontier
+        for i, problem in enumerate([ problem_a, problem_b ]):
+            if not problem:
+                continue
+            margin = [ margin_a, margin_b ][i]
+            reduction = margin_limit - margin.length
+            problem_point = sorted_points[i]
+            other_point = next(point for point in reduced_frontier.points if point != problem_point)
+            direction = (problem_point + other_point).normalized()
+            new_point = problem_point + direction * reduction
+            # In case the new pont has passed the other point we stop here
+            if new_point not in reduced_frontier:
+                print('WARNING: The frontier has been fully consumed')
+                return False
+            if new_point.get_distance_to(other_point) < self.min_size:
+                print('WARNING: The reduced frontier is not wide enought')
+                return False
+            reduced_frontier = Segment(new_point, other_point)
+
+        return push_segment(reduced_frontier)
 
     # Remove part of the room space and check everything is fine after
     def truncate (self, regions : List[Boundary]) -> bool:
