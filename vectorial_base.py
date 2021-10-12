@@ -1517,16 +1517,7 @@ class Grid:
                 if rect.get_overlap_rect(other_rect):
                     print('WARNING: Overlapping rects ' + str(rect) + ' and ' + str(other_rect))
                     raise RuntimeError('Grid rects are wrong')
-
-    # Check each rect in the grid to reach a minimum size in both x and y dimensions
-    def check_minimum (self, minimum : number) -> bool:
-        for rect in self.rects:
-            current_max_rects = [ max_rect for max_rect in self.max_rects if rect in max_rect ]
-            max_x_size = max([ max_rect.get_x_size() for max_rect in current_max_rects ])
-            max_y_size = max([ max_rect.get_y_size() for max_rect in current_max_rects ])
-            if max_x_size < minimum or max_y_size < minimum:
-                return False
-        return True
+        
 
     # Set the grid from rectangles which do not follow the standards
     # i.e. they are not connected each other by the whole segment
@@ -1758,6 +1749,40 @@ class Grid:
         upper_rect = self.get_upper_rect(rect)
         bottom_rect = self.get_bottom_rect(rect)
         return [ rect for rect in [ left_rect, right_rect, upper_rect, bottom_rect ] if rect != None ]
+
+    # Check the grid to respect minimum size in both x and y dimensions
+    # DANI: No se ha comprovado bien que funcione
+    def check_minimum (self, minimum : number) -> bool:
+        # Check all maximum rectangles
+        for rect in self.max_rects:
+            x_size, y_size = rect.get_size()
+            # If there is at least one maximum rectangle which does not respect minimum size in both x and y dimensions then it is wrong
+            if x_size < minimum and y_size < minimum:
+                return False
+            # Ignore rectangles which respect size only in one dimension
+            if x_size < minimum or y_size < minimum:
+                continue
+            # For all rectangles which respect size in both dimensions,
+            # Find their free borders: border regions which are not overlapping with the grid boundaries
+            limits = [ segment for boundary in self.boundaries for segment in boundary.segments ]
+            free_borders = []
+            for segment in rect.segments:
+                free_borders += segment.substract_segments(limits)            
+            # Check free borders to respect the minimum size
+            for s, segment in enumerate(free_borders):
+                # Find out if the free border is making a corner
+                corner_segment = next((border for border in free_borders[s+1:] if border.makes_corner_with(segment)), None)
+                # In case it is, use the hipotenuse of the border to check the minimum size
+                if corner_segment:
+                    free_borders.remove(corner_segment) # Remove the corner segment from the list
+                    size = sqrt( segment.length**2 + corner_segment.length**2 )
+                # Otherwise, use the size of the segment itself
+                else:
+                    size = segment.length
+                # Check the size to respect the minimum
+                if size < minimum:
+                    return False
+        return True
 
     # One by one for each *available rectangle, where available rectangles are the splitted rectangles
     # Get as many rectanges as possible which are connected horizontally to the current rectangle
@@ -2072,6 +2097,14 @@ def connect_segments (segments : List[Segment]) -> Generator[Polygon, None, None
                 discarded_segments = polygon_segments[0:closing_segment]
                 previous_segments += discarded_segments
                 break
+
+# Given two catets, get the hipotenuse
+def get_hipotenuse (segment_1 : Segment, segment_2 : Segment) -> Segment:
+    if not segment_1.makes_corner_with(segment_2):
+        raise ValueError('Input segment do not make a corner')
+    unique_point_a = next(point for point in segment_1.points if point not in segment_2.points)
+    unique_point_b = next(point for point in segment_2.points if point not in segment_1.points)
+    return Segment(unique_point_a, unique_point_b)
 
 # Get a random color for display tools
 def generate_random_color ():
