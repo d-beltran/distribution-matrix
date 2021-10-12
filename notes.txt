@@ -1,6 +1,16 @@
 RAM
 
+Enseñarle a contraer una frontera (pull segment)
+
+Corrector de habitaciones truncadas
+	* Hay que poder valorar cuando merece la pena corregir y cuando es preferible impedir la invasión
+	- Hacer todos los push necesarios
+		* Nueva función "push corner", para cuando un rectángulo máximo no respeta
+	- Rectificar con pulls en caso de que hayamos sobrepasado el area requerida
+
 Enseñarle a salir de bucles
+	- Detectar cuando hay bucles
+
 
 Largo plazo:
 
@@ -13,7 +23,7 @@ Largo plazo:
 		- Escaleras
 		- Habitaciones con techo alto
 - Blender
-	* Plantearse el 3D: altura de habitaciones, alturas de puertas, altura de muebles, etc.
+	* Plantearse el 3D: altura de habitaciones, alturas de puertas y ventanas, altura de muebles, etc.
 	* Planos en la dirección correcta
-	* Ventanas
+	* Texturización
 	* Coordinación entre planos apilados (e.g. escaleras, terrazas, etc.)
