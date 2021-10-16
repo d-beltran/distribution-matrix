@@ -1,15 +1,16 @@
 RAM
 
+Enseñarle a salir de bucles
+	- Detectar cuando hay bucles
+
 Enseñarle a contraer una frontera (pull segment)
+	* antes hqye que tener claro el sentido de esto
 
 Corrector de habitaciones truncadas
 	* Hay que poder valorar cuando merece la pena corregir y cuando es preferible impedir la invasión
 	- Hacer todos los push necesarios
 		* Nueva función "push corner", para cuando un rectángulo máximo no respeta
 	- Rectificar con pulls en caso de que hayamos sobrepasado el area requerida
-
-Enseñarle a salir de bucles
-	- Detectar cuando hay bucles
 
 
 Largo plazo:

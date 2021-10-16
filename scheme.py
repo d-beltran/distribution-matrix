@@ -9,10 +9,7 @@ from math import sqrt, inf
 
 # Set the seed and print it
 seed = None
-#seed = 168166 # burbuja imposible perimetro 4
-#seed = 414509 # infinite loop perimetro 4
-#seed = 402486 # infinite loop perimetro 1
-seed = 320615
+seed = 268232
 if not seed:
     seed = round(random.random() * 999999)
 print('Seed ' + str(seed))
@@ -263,6 +260,10 @@ class Room:
         def sort_by_size(rect):
             return min(rect.get_size())
         sorted_suitable_rects = sorted( suitable_rects, key=sort_by_size, reverse=True )
+
+        # Make a backup in case we have to force since other rooms will be modified
+        if forced:
+            backup = self.make_children_backup()
             
         # Try to set up the new room in all possible sites until we find one
         # Each 'site' means each corner in each suitable rectangle
@@ -294,6 +295,8 @@ class Room:
             # Proceed with the expansion of this child room until it reaches its forced area
             if not room.expand():
                 room.boundary = None
+                if forced:
+                    self.restore_children_backup(backup)
                 continue
             break
         # If at this point we still have no boundary it means there is no available place to set the perimeter
@@ -360,8 +363,7 @@ class Room:
     # In case it is not able to expand at some point recover the original situation
     def expand (self) -> bool:
         # Make a boundary bakcup of this room and all its brothers
-        affected_rooms = self.parent.children
-        boundaries_backup = [ room.boundary for room in affected_rooms ]
+        backup = self.parent.make_children_backup()
         # Keep expanding until the current room reaches the desired area
         while self.get_required_area() > 0:
             # Calculate how much area we need to expand
@@ -382,8 +384,7 @@ class Room:
             if expand_step():
                 continue
             # In case the expansion failed restore the backup and exit
-            for i, room in enumerate(affected_rooms):
-                room.boundary = boundaries_backup[i]
+            self.parent.restore_children_backup(backup)
             return False
         return True
 
@@ -426,9 +427,8 @@ class Room:
         # Short frontiers could be also expanded together with other connected and aligned frontiers
         # These compound frontiers must be taken in count also although they are harder to expand
         # Each frontier may form 0, 1 or 2 combined frontiers
-        def get_combined_frontiers (frontier : Segment) -> List[Segment]:
-            combined_frontiers = []
-            for point in [ frontier.a, frontier.b ]:
+        def get_combined_frontiers (frontier : Segment) -> Generator[Segment, None, None]:
+            for point in frontier.points:
                 other_frontiers = [ seg for seg in expandable_frontiers if seg != frontier ]
                 combined_frontier = frontier
                 implicated_rooms = frontier.rooms
@@ -445,13 +445,23 @@ class Room:
                     other_frontiers = [ seg for seg in other_frontiers if seg != connected_frontier ]
                     combined_frontier = combined_frontier.combine_segment(connected_frontier)
                     implicated_rooms += connected_frontier.rooms
-                    next_point = next(point for point in connected_frontier.points if point != next_point)
+                    next_point = next(p for p in connected_frontier.points if p != next_point)
                 # If the combined frontier reaches the minimum length add it to the list to be returned
                 if combined_frontier.length >= self.min_size:
+                    # Get unique implicated rooms
+                    implicated_rooms = unique(implicated_rooms)
+                    # Create a fit combined frontier which takes the minimum possible part from the last added frontier
+                    # This way the expansion takes as much possible from the main frontier room
+                    extended_direction = (point + next_point).normalized()
+                    oposite_point = next(p for p in frontier.points if p != point)
+                    fit_combined_frontier = Segment(oposite_point, oposite_point + extended_direction * self.min_size)
+                    # Add all combined frontier rooms to the fit combined frontier
+                    fit_combined_frontier.rooms = implicated_rooms
+                    yield fit_combined_frontier
                     # Add all combined frontier rooms to the combined frontier
-                    combined_frontier.rooms = unique(implicated_rooms)
-                    combined_frontiers.append(combined_frontier)
-            return combined_frontiers
+                    combined_frontier.rooms = implicated_rooms
+                    # Now yield the whole combined frontier
+                    yield combined_frontier
 
         # Check each frontier to be available for expansion alone
         # In case it is, yield it
@@ -467,8 +477,12 @@ class Room:
                 yield frontier
             # If none of the suitable frontiers was expanded successfully then try with the combined ones
             for frontier in hard_frontiers:
+                print('Trying hard frontier')
+                print(frontier)
                 combined_frontiers = get_combined_frontiers(frontier)
-                for combined_frontier in combined_frontiers:
+                for combined_frontier in get_combined_frontiers(frontier):
+                    print('COMBINED FRONTIER')
+                    print(combined_frontier)
                     yield combined_frontier
 
         # Find for each brother room the number of colliding rooms we must jump to find free space
@@ -749,7 +763,7 @@ class Room:
             truncated_grid = truncated_grid.get_substract_grid(region.grid)
         # Check the truncated grid to still respecting the minimum size
         if not truncated_grid.check_minimum(self.min_size):
-            print('WARNING: The room is not respecting the minimum size')
+            print('WARNING: The room is not respecting the minimum size -> Go back')
             return False
         truncated_boundaries = truncated_grid.find_boundaries()
         # In case the room has been splitted in 2 parts as a result of the invasion we go back
@@ -760,7 +774,7 @@ class Room:
         if len(truncated_boundaries) == 0:
             print('WARNING: The invaded room has been fully consumed -> Go back')
             return False
-        # Modify the room boundary but save a backup in case we have to go back further
+        # Modify the room boundary
         self.boundary = truncated_boundaries[0]
         return True
 
@@ -787,7 +801,7 @@ class Room:
     def invade_children (self, invasor : 'Room', region : Boundary) -> bool:
         # Make a backup of all children, which includes the invasor
         # All children boundaries will be recovered if only 1 child fails to get invaded
-        children_backup = [ child.boundary for child in self.children ]
+        backup = self.make_children_backup()
         # Claim the invaded region for the invasor room
         invasor.merge_boundary(region)
         # Now find which children are overlaped by the invade region and then truncate them
@@ -799,15 +813,13 @@ class Room:
                 continue
             # In case something went wrong with any child truncation recover all children backups and stop
             if not child.truncate(overlap_boundaries):
-                for c, child in enumerate(self.children):
-                    child.boundary = children_backup[c]
+                self.restore_children_backup(backup)
                 return False
         # Finally expand all truncated children
         for child in children:
             # In case something went wrong with any child expansion recover all children backups and stop
             if not child.expand():
-                for c, child in enumerate(self.children):
-                    child.boundary = children_backup[c]
+                self.restore_children_backup(backup)
                 return False
         return True
 
@@ -877,6 +889,15 @@ class Room:
         for room in self.children:
             rooms.append(room)
         return rooms
+
+    # Make a backup of current children boundaries
+    def make_children_backup (self) -> List[Boundary]:
+        return [ child.boundary for child in self.children ]
+
+    # Restore children boundaries using a backup
+    def restore_children_backup (self, backup):
+        for c, child in enumerate(self.children):
+            child.boundary = backup[c]
 
     # Add a new frame in the display with the current segments of this room and its children
     # Also an 'extra' argument may be passed with extra segments to be represented
