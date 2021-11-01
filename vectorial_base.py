@@ -839,8 +839,7 @@ class Rect:
         return set(rects)
 
     # Substract the second rectangle form the first rectangle and return the rectangles which define the resulting grid
-    # DANI: No lo he provado desde que lo moví de abajo
-    def subtract_rect (self, rect) -> Optional[List['Rect']]:
+    def subtract_rect (self, rect) -> List['Rect']:
         # Find the overlap between these two rectangles
         overlap = self.get_overlap_rect(rect)
         # If there is no overlap then just return the first rectangle intact
@@ -852,6 +851,27 @@ class Rect:
         split = self.split(x_splits, y_splits)
         # Return all splits but the overlapped rectangle
         rects = [ rect for rect in list(split) if rect != overlap ]
+        return rects
+
+    # Substract several rectangles from self rectangle rectangle and return the rectangles which define the resulting grid
+    def subtract_rects (self, rects) -> List['Rect']:
+        # Find the overlap rects
+        overlaps = []
+        for rect in rects:
+            overlap = self.get_overlap_rect(rect)
+            if overlap:
+                overlaps.append(overlap)
+        # If there is no overlap then just return the first rectangle intact
+        if len(overlaps) == 0:
+            return [self]
+        # Split the first input rectangle using the overlap maximum and minimum points as split points
+        x_splits = [ x_coord for overlap in overlaps for x_coord in [ overlap.pmin.x, overlap.pmax.x ] ]
+        y_splits = [ y_coord for overlap in overlaps for y_coord in [ overlap.pmin.y, overlap.pmax.y ] ]
+        split = self.split(x_splits, y_splits)
+        # Return all splits but the overlapped rectangle
+        def get_overlapped (rect):
+            return next((overlap for overlap in overlaps if rect in overlap), None)
+        rects = [ rect for rect in list(split) if not get_overlapped(rect) ]
         return rects
 
 # A polygon is a list of connected segments which is closed
@@ -1697,12 +1717,11 @@ class Grid:
     def get_substract_rects (self, grid : 'Grid') -> List[Rect]:
         substract_rects = []
         for rect in self.rects:
-            for other in grid.rects:
-                new_rects = rect.subtract_rect(other)
-                substract_rects += new_rects
-        return unique(substract_rects)
+            new_rects = rect.subtract_rects(grid.rects)
+            substract_rects += new_rects
+        return substract_rects
 
-    # Return the resulting grid after merging self grid to other grid
+    # Return the resulting grid after substracting self grid to other grid
     def get_substract_grid (self, grid : 'Grid') -> 'Grid':
         substract_rects = self.get_substract_rects(grid)
         return Grid.non_canonical(substract_rects)

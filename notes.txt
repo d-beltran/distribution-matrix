@@ -1,12 +1,20 @@
 RAM
 
+Loaned push:
+	Igual hay que plantearse enseñarle a no recuperar area de la frontera que acabamos de pushear gracias a la loan (ni sus dos fronteras adyacentes)
+
 Enseñarle a salir de bucles
+	*** Alomejor ya no es necesario, el loaned push funciona muy bien
 	- Detectar cuando hay bucles
 
-Enseñarle a contraer una frontera (pull segment)
-	* antes hqye que tener claro el sentido de esto
+Plantearse utilizar el hecho de que una habitación en contacto con free space
+no pueda expandir ninguna frontera con free space (ni simple ni combinada)
+como detonante para que cada una de esta/s regiones de free space sean desplazadas por otra habitación
+(aunque normalmente siempre será una única región)
+	*** Alomejor ya no es necesario, el loaned push funciona muy bien
 
 Corrector de habitaciones truncadas
+	*** Alomejor ya no es necesario, el loaned push funciona muy bien
 	* Hay que poder valorar cuando merece la pena corregir y cuando es preferible impedir la invasión
 	- Hacer todos los push necesarios
 		* Nueva función "push corner", para cuando un rectángulo máximo no respeta

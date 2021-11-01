@@ -9,7 +9,9 @@ from math import sqrt, inf
 
 # Set the seed and print it
 seed = None
-seed = 268232
+#seed = 268232
+#seed = 438226
+seed = 654453
 if not seed:
     seed = round(random.random() * 999999)
 print('Seed ' + str(seed))
@@ -100,6 +102,14 @@ class Room:
     # The room boundary
     boundary = property(get_boundary, set_boundary, None, "The room boundary")
 
+    # Get the grid
+    # Just return the internal boundary grid value
+    def get_grid (self):
+        return self._boundary.grid
+
+    # The room boundary
+    grid = property(get_grid, None, None, "The room grid")
+
     # Area inside the room boundary (read only)
     def get_area(self):
         boundary = self.boundary
@@ -120,7 +130,7 @@ class Room:
         # If there are no children then return the current boundary grid
         # If all children have no boundary then return the current boundary grid
         if len(self.children) == 0 or not any([ child.boundary for child in self.children ]):
-            free_grid = self.boundary.grid
+            free_grid = self.grid
         # Otherwise, find out the free space grid inside the room boundary
         # Add the children room boundary exterior polygons to self room boundary interior polygons
         else:
@@ -185,7 +195,7 @@ class Room:
         if not size:
             return True
         # Generate fitting rects. If there is at least one then the room fits
-        grid = self.boundary.grid if force else self.free_grid
+        grid = self.grid if force else self.free_grid
         fitting_rects = grid.get_fitting_space(size, size)
         if next(fitting_rects, None):
             return True
@@ -196,7 +206,7 @@ class Room:
     def get_room_fitting_rects (self, room : 'Room', force : bool = False) -> List[Rect]:
         size = room.min_size
         # Get all fitting rects
-        grid = self.boundary.grid if force else self.free_grid
+        grid = self.grid if force else self.free_grid
         fitting_rects = grid.get_fitting_space(size, size)
         return list(fitting_rects)
 
@@ -293,7 +303,7 @@ class Room:
             if not room.boundary:
                 raise RuntimeError('Failed to set an initial boundary for room "' + room.name + '"')
             # Proceed with the expansion of this child room until it reaches its forced area
-            if not room.expand():
+            if not room.fit_to_required_area():
                 room.boundary = None
                 if forced:
                     self.restore_children_backup(backup)
@@ -359,31 +369,51 @@ class Room:
     def get_required_area (self):
         return resolute(self.forced_area - self.area, -2)
 
-    # Expand this room until it reaches the forced area
-    # In case it is not able to expand at some point recover the original situation
-    def expand (self) -> bool:
+    # Expand or contract this room until it reaches the forced area
+    # In case it is not able to fit at some point recover the original situation
+    def fit_to_required_area (self) -> bool:
         # Make a boundary bakcup of this room and all its brothers
         backup = self.parent.make_children_backup()
-        # Keep expanding until the current room reaches the desired area
-        while self.get_required_area() > 0:
-            # Calculate how much area we need to expand
-            required_area = self.get_required_area()
-            # Check the required area is big enought to be meaningfull according to the resolution
-            # i.e. check if expanding a segment with the minimum length would make it move more than the minimum resolution
-            if required_area / self.min_size < minimum_resolution:
-                raise ValueError('The required area is not enought to expand according to resolution: ' + str(required_area))
-            # Set a function to supervise if each expansion step is succesful or not
-            def expand_step () -> bool:
-                # Get the most suitable frontier to expand and try to expand it
-                # If the expansions fails, try with the next one
-                for frontier in self.get_best_expansion_frontier():
-                    if self.expand_frontier(frontier, required_area):
-                        return True
-                return False
-            # Expand
-            if expand_step():
-                continue
-            # In case the expansion failed restore the backup and exit
+        # Calculate how much area we need to expand
+        required_area = self.get_required_area()
+        # Keep expanding or contracting until the current room reaches the desired area
+        # Check the required area is big enought to be meaningfull according to the resolution
+        # i.e. check if expanding a segment with the minimum length would make it move more than the minimum resolution
+        # If not, then we have finished the fitting
+        while abs(required_area / self.min_size) >= minimum_resolution:
+            # If the required are is positive it means we must expand our room
+            if required_area > 0:
+                # Set a function to supervise if each expansion step is succesful or not
+                def expand_step () -> bool:
+                    # Get the most suitable frontier to expand and try to expand it
+                    # If the expansions fails, try with the next one
+                    for frontier in self.get_best_expansion_frontier():
+                        if self.expand_frontier(frontier, required_area):
+                            return True
+                    return False
+                # Expand
+                if expand_step():
+                    # Refresh how much area we need to expand and go for the next step
+                    required_area = self.get_required_area()
+                    continue
+            # If the required are is negative it means we need to contract our room
+            if required_area < 0:
+                # Set a function to supervise if each expansion step is succesful or not
+                def contract_step () -> bool:
+                    # Get the most suitable frontier to contract and try to contract it
+                    # If the contraction fails, try with the next one
+                    # DANI: De momento uso la misma lógica que la de la expansión porque no va mal
+                    # DANI: i.e. evitar contraer fronteras del padre y priorizar fronteras libres es bueno
+                    for frontier in self.get_best_expansion_frontier():
+                        if self.contract_frontier(frontier, -required_area):
+                            return True
+                    return False
+                # Contract
+                if contract_step():
+                    # Refresh how much area we need to expand and go for the next step
+                    required_area = self.get_required_area()
+                    continue
+            # In case the fitting failed restore the backup and exit
             self.parent.restore_children_backup(backup)
             return False
         return True
@@ -477,12 +507,8 @@ class Room:
                 yield frontier
             # If none of the suitable frontiers was expanded successfully then try with the combined ones
             for frontier in hard_frontiers:
-                print('Trying hard frontier')
-                print(frontier)
                 combined_frontiers = get_combined_frontiers(frontier)
                 for combined_frontier in get_combined_frontiers(frontier):
-                    print('COMBINED FRONTIER')
-                    print(combined_frontier)
                     yield combined_frontier
 
         # Find for each brother room the number of colliding rooms we must jump to find free space
@@ -559,11 +585,11 @@ class Room:
         # Get the grid of the rooms we are about to invade as a reference to calculate how much we can expand
         # When the invaded room is self room it means we are expanding over free space
         first_room = rooms[0]
-        grid = first_room.free_grid if first_room == parent_room else first_room.boundary.grid
+        grid = first_room.free_grid if first_room == parent_room else first_room.grid
         # In case this frontier has more than 1 rooms it means it is a combined frontier
         # Create a 'ficticious' room with all implicated rooms as a reference
         for next_room in rooms[1:]:
-            next_grid = next_room.free_grid if next_room == parent_room else next_room.boundary.grid
+            next_grid = next_room.free_grid if next_room == parent_room else next_room.grid
             grid = grid.get_merge_grid(next_grid)
         margin_limit = max([ room.min_size for room in rooms ])
         # Find the maximum rectangles which are in contact with our frontier
@@ -571,11 +597,11 @@ class Room:
         contact_max_rects = [ rect for rect in max_rects if frontier in rect ]
         # In case segment is vertical:
         # - The expansion uses maximum columns
-        # - The expansion 'froward' is the x dimension
+        # - The expansion 'forward' is the x dimension
         # - The expansion 'sides' is the y dimension
         # In case segment is horizontal
         # - The expansion uses maximum rows
-        # - The expansion 'froward' is the y dimension
+        # - The expansion 'forward' is the y dimension
         # - The expansion 'sides' is the x dimension
         # Here 'forward' and 'sides' may mean '0 -> x dimension' or '1 -> y dimension'
         # This is because rectangles size is given in a (x,y) tuple format
@@ -613,17 +639,22 @@ class Room:
         # Now create a function to make a rectangle by pushing a segment (which may change)
         # The forward length of this rectangle will depend on the available area and limits
         # This segment may not be the original frontier, but a variation of it
-        def push_segment (pushed_segment : Segment, greedy : bool = True) -> bool:
+        # The push may happen using 3 different protocols
+        # - Protocol 1 (greedy): It tries to expand as much as it can, respecting the required area
+        # - Protocol 2 (moderate): It tries to expand the minimum possible according to maximum rects
+        # - Protocol 3 (loaned): It tries to expand as much as it can even taking more area than needed
+        def push_segment (pushed_segment : Segment, protocol : int = 1) -> bool:
             push_length = required_area / pushed_segment.length
             # In case this is an insider segment which is not wide enought to be pushed alone,
             # Find out how much we can push this segment
             # i.e. find the connected frontier/s and get the maximum length of these segments
-            if pushed_segment.length < self.min_size:
+            push_limit = None
+            if pushed_segment.length < self.min_size - minimum_resolution:
                 push_limit = None
                 other_segments = [ segment for segment in exterior_polygon.segments if segment != pushed_segment ]
                 for point in pushed_segment.points:
                     if point in inside_corners:
-                        insider = next(segment for segment in other_segments if point in segment.points)
+                        insider = next(segment for segment in other_segments if segment.makes_corner_with(pushed_segment))
                         if not push_limit or push_limit < insider.length:
                             push_limit = insider.length
                 # If the push length exceeds the insider limit then stay in the limit
@@ -631,7 +662,7 @@ class Room:
                     push_length = push_limit
             # First, try to expand using the maximum available space
             # This is risky since it may split the invaded room in two parts or make regions which do not respect the minimum size
-            if greedy:
+            if protocol == 1:
                 # If the length exceeds the maximum limit then stay in the maximum limit
                 if push_length > maximum_forward_limit:
                     push_length = maximum_forward_limit
@@ -641,7 +672,7 @@ class Room:
             # If the greedy try fails use the moderate try
             # Expand only using the closest row/column rectangle
             # This expansion is smaller but safe
-            else:
+            elif protocol == 2:
                 # # If at this point the length exceeds the space limit then stay in the space limit
                 if push_length > space_forward_limit:
                     push_length = space_forward_limit
@@ -651,11 +682,22 @@ class Room:
                 # In case the length is bigger than the margined maximum we stay at the margin
                 if push_length > margined_maximum_forward_limit:
                     push_length = margined_maximum_forward_limit
+            # If the moderate try fails too then use the loaned try
+            # Expand as much as possible not tanking in count the required area
+            # This expansion may fix a situation where a corner is not claimed because the required area is not enought
+            # Note that this room will need to contract further in order to finally get the required area
+            elif protocol == 3:
+                if push_limit:
+                    push_length = push_limit
+                else:                    
+                    push_length = maximum_forward_limit
             # If the push length at this point is 0 or close to it then we can not push
             # WARNING: This usually happens because of forward limits, not because the area was not big enought
             # For this reason, trying to reduce the segment and push again will have no effect almost always
             if push_length < minimum_resolution:
                 print('WARNING: The push length is too small')
+                if protocol != 3:
+                    return push_segment(pushed_segment, 3)
                 return False
             # Create the new rect with the definitive length
             new_point = pushed_segment.a + forward_direction.normalized() * push_length
@@ -682,17 +724,23 @@ class Room:
             # Make a backup of all other room current boundaries
             backup_room_boundaries = [ room.boundary for room in rooms ]
             for room in rooms:
+                # If we claimed parent (free) space there is no need to check anything
                 if room == parent_room:
                     continue
+                # In case we made a loaned push we need to return the extra area now
+                # Otherwise, if we invade other rooms it may happen that there is not free space enought for them to expand after
+                if protocol == 3:
+                    self.fit_to_required_area()
+                # Now invade other rooms
                 current_room_invaded_regions = room.boundary.get_overlap_boundaries(invaded_region)
                 if not room.invade(current_room_invaded_regions):
                     self.boundary = backup_boundary
                     for i, modified_room in enumerate(rooms):
                         modified_room.boundary = backup_room_boundaries[i]
-                    # If the invasion fails then try it again with the non greedy push
-                    # If we are already in the non greedy push then return false
-                    if greedy:
-                        return push_segment(pushed_segment, False)
+                    # If the invasion fails then try it again with the next protocol
+                    # If we are in the last protocol then return False
+                    if protocol == 1:
+                        return push_segment(pushed_segment, 2)
                     return False
             return True
                 
@@ -755,10 +803,189 @@ class Room:
 
         return push_segment(reduced_frontier)
 
+    # Try to contract a specific room frontier
+    # Note that the frontier must contain the room it belongs to
+    # Set the required (maximum) area it can contract
+    # Return True if the contraction was succesful or False if there was no contraction
+    def contract_frontier (self, frontier : Segment, required_area : number) -> bool:
+        # Get the parent room
+        parent_room = self.parent
+        # Get the exterior polygon of the room boundary
+        exterior_polygon = self.boundary.exterior_polygon
+        # Get the inside corners
+        inside_corners = [ corner for corner in exterior_polygon.corners if corner.inside == True ]
+        # Find the maximum rectangles which are in contact with our frontier
+        grid = self.grid
+        max_rects = grid.max_rects
+        contact_max_rects = [ rect for rect in max_rects if frontier in rect ]
+        # In case segment is vertical:
+        # - The expansion uses maximum columns
+        # - The expansion 'forward' is the x dimension
+        # - The expansion 'sides' is the y dimension
+        # In case segment is horizontal
+        # - The expansion uses maximum rows
+        # - The expansion 'forward' is the y dimension
+        # - The expansion 'sides' is the x dimension
+        # Here 'forward' and 'sides' may mean '0 -> x dimension' or '1 -> y dimension'
+        # This is because rectangles size is given in a (x,y) tuple format
+        # So size[0] = x and size[1] = 1
+        if frontier.is_vertical():
+            rects = grid.find_column_rectangles()
+            forward = 0
+            sides = 1
+        elif frontier.is_horizontal():
+            rects = grid.find_row_rectangles()
+            forward = 1
+            sides = 0
+        else:
+            raise ValueError('ERROR: diagonal segments are not supported for room expansion')
+
+        if len(rects) == 0:
+            raise RuntimeError('No pot ser: ' + str(grid))
+
+        # One and only one of the rows/columns will always include the segment
+        space = next((rect for rect in rects if frontier in rect), None)
+        if space == None:
+            # If this happens it may mean there is a problem with the grid
+            raise RuntimeError('Frontier ' + str(frontier) + ' has no space in ' + str(rects))
+        space_contact = next(segment for segment in space.segments if frontier in segment)
+        space_forward_limit = space.get_size()[forward]
+        margin_limit = self.min_size
+        margined_space_forward_limit = space_forward_limit - margin_limit
+
+        # Find the direction of the expansion as a vector
+        forward_direction = space.get_side_direction_to_center(space_contact)
+
+        # Get the forward expansion limit according to maximum rectangles
+        maximum_forward_limit = max([ rect.get_size()[forward] for rect in contact_max_rects ])
+        margined_maximum_forward_limit = maximum_forward_limit - margin_limit
+
+        # Now create a function to make a rectangle by pulling a segment (which may change)
+        # The forward length of this rectangle will depend on the available area and limits
+        # This segment may not be the original frontier, but a variation of it
+        # The pull may happen using 2 different protocols, which are tried in the following order
+        # - Protocol 1 (greedy): It tries to expand as much as it can, respecting the required area
+        # - Protocol 2 (moderate): It tries to expand the minimum possible according to maximum rects
+        def pull_segment (pushed_segment : Segment, protocol : int = 1) -> bool:
+            push_length = required_area / pushed_segment.length
+            # In case this is an insider segment which is not wide enought to be pushed alone,
+            # Find out how much we can push this segment
+            # i.e. find the connected frontier/s and get the maximum length of these segments
+            if pushed_segment.length < self.min_size:
+                push_limit = None
+                other_segments = [ segment for segment in exterior_polygon.segments if segment != pushed_segment ]
+                for point in pushed_segment.points:
+                    if point in inside_corners:
+                        insider = next(segment for segment in other_segments if point in segment.points)
+                        if not push_limit or push_limit < insider.length:
+                            push_limit = insider.length
+                # If the push length exceeds the insider limit then stay in the limit
+                if push_length > push_limit:
+                    push_length = push_limit
+            # First, try to expand using the maximum available space
+            # This is risky since it may split the invaded room in two parts or make regions which do not respect the minimum size
+            if protocol == 1:
+                # If the length exceeds the maximum limit then stay in the maximum limit
+                if push_length > maximum_forward_limit:
+                    push_length = maximum_forward_limit
+                # If the length is between the maximum limit and the margined maximum limit then stay at the margin
+                elif push_length > margined_maximum_forward_limit:
+                    push_length = margined_maximum_forward_limit
+            # If the greedy try fails use the moderate try
+            # Expand only using the closest row/column rectangle
+            # This expansion is smaller but safe
+            elif protocol == 2:
+                # # If at this point the length exceeds the space limit then stay in the space limit
+                if push_length > space_forward_limit:
+                    push_length = space_forward_limit
+                # If the length is between the space limit and the margined space limit then stay at the margin
+                elif push_length > margined_space_forward_limit:
+                    push_length = margined_space_forward_limit
+                # In case the length is bigger than the margined maximum we stay at the margin
+                if push_length > margined_maximum_forward_limit:
+                    push_length = margined_maximum_forward_limit
+            # If the push length at this point is 0 or close to it then we can not push
+            # WARNING: This usually happens because of forward limits, not because the area was not big enought
+            # For this reason, trying to reduce the segment and push again will have no effect almost always
+            if push_length < minimum_resolution:
+                print('WARNING: The pull length is too small: ' + str(push_length))
+                return False
+            # Create the new rect with the definitive length
+            new_point = pushed_segment.a + forward_direction.normalized() * push_length
+            new_side = Segment(pushed_segment.a, new_point)
+            new_rect = Rect.from_segments([pushed_segment, new_side])
+            removed_boundary = Boundary(Polygon.from_rect(new_rect))
+            # We must substract the new rect from this room and check everything is fine after
+            if not self.truncate([removed_boundary]):
+                # If the contraction fails then try it again with the next protocol
+                # If we are in the last protocol then return False
+                if protocol != 2:
+                    return pull_segment(pushed_segment, 2)
+                return False
+            return True
+
+        # ----------------------------------------------------------------------------------------------------
+        # First of all check if frontier points are connected to the space limits
+        # In this case, we do not have to bother about margins
+        # i.e. minimum length between the claimed space and space borders
+        # Otherwise, we must check that borders are respected
+        # ----------------------------------------------------------------------------------------------------
+
+        # Sort points using the space contact 'a' point as reference
+        points = [ frontier.a, frontier.b ]
+        def by_distance(point):
+            return space_contact.a.get_distance_to(point)
+        sorted_points = sorted(points, key=by_distance)
+        point_a = sorted_points[0]
+        point_b = sorted_points[1]
+
+        # Define margins at both sides of the current frontiers
+        margin_a = Segment(space_contact.a, point_a) if space_contact.a != point_a else None
+        margin_b = Segment(space_contact.b, point_b) if space_contact.b != point_b else None
+
+        # If a margin exists and it is not as long as required we have a problem
+        problem_a = margin_a and margin_a.length < margin_limit
+        problem_b = margin_b and margin_b.length < margin_limit
+
+        # If there is no problem we can just push the frontier
+        if not problem_a and not problem_b:
+            return pull_segment(frontier)
+
+        # ----------------------------------------------------------------------------------------------------
+        # If a margin is not respected then we have 2 options (no option will always be possible):
+        # - Cut the frontier to be expanded in order to respect the margin
+        #   * If the cutted frontier is shorter than the minimum size we can not expand
+        # - Claim also all the space between the claimed space and the space border
+        #   * If the expanded space perpendicular space is not equal or longer to the minimum we cannot expand sideways
+        #   * If the extra claimed space exceeds the required expand area we cannot claim it
+        # ----------------------------------------------------------------------------------------------------
+
+        # Try to cut the frontier
+        reduced_frontier = frontier
+        for i, problem in enumerate([ problem_a, problem_b ]):
+            if not problem:
+                continue
+            margin = [ margin_a, margin_b ][i]
+            reduction = margin_limit - margin.length
+            problem_point = sorted_points[i]
+            other_point = next(point for point in reduced_frontier.points if point != problem_point)
+            direction = (problem_point + other_point).normalized()
+            new_point = problem_point + direction * reduction
+            # In case the new pont has passed the other point we stop here
+            if new_point not in reduced_frontier:
+                print('WARNING: The frontier has been fully consumed')
+                return False
+            if new_point.get_distance_to(other_point) < self.min_size:
+                print('WARNING: The reduced frontier is not wide enought')
+                return False
+            reduced_frontier = Segment(new_point, other_point)
+
+        return pull_segment(reduced_frontier)
+
     # Remove part of the room space and check everything is fine after
     def truncate (self, regions : List[Boundary]) -> bool:
         # Calculate the boundary of this room after substracting the invaded regions
-        truncated_grid = self.boundary.grid
+        truncated_grid = self.grid
         for region in regions:
             truncated_grid = truncated_grid.get_substract_grid(region.grid)
         # Check the truncated grid to still respecting the minimum size
@@ -789,7 +1016,7 @@ class Room:
             return False
         # Expand the invaded room as much as the invaded area
         # In case the expansions fails go back
-        if not self.expand():
+        if not self.fit_to_required_area():
             print('WARNING: The invaded room can not expand -> Go back')
             self.boundary = backup_boundary
             return False
@@ -818,7 +1045,7 @@ class Room:
         # Finally expand all truncated children
         for child in children:
             # In case something went wrong with any child expansion recover all children backups and stop
-            if not child.expand():
+            if not child.fit_to_required_area():
                 self.restore_children_backup(backup)
                 return False
         return True
