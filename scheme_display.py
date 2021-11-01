@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 from matplotlib import animation
 from matplotlib.colors import to_rgba 
-from matplotlib.widgets import Slider
+from matplotlib.widgets import Slider, Button
 import matplotlib.patches as mpatches
 
 import math
@@ -44,6 +44,19 @@ def represent (queue):
     axslider = plt.axes([0.25, .03, 0.50, 0.02])
     slider = Slider(axslider, 'Frame', 0, len(frames), valinit=len(frames), valstep=1)
 
+    def previous_frame (event):
+        slider.set_val(slider.val - 1)
+
+    def next_frame (event):
+        slider.set_val(slider.val + 1)
+
+    axprev = plt.axes([0.86, 0.01, 0.06, 0.04])
+    axnext = plt.axes([0.92, 0.01, 0.06, 0.04])
+    bprev = Button(axprev, '<-')
+    bprev.on_clicked(previous_frame)
+    bnext = Button(axnext, '->')
+    bnext.on_clicked(next_frame)
+
     # Animation updater
     def update_frame (i):
         global frames
@@ -51,7 +64,15 @@ def represent (queue):
         # Update frames when the queue is not empty
         if queue.qsize() > 0:
             frames = queue.get()
+        minimum = 0
         maximum = len(frames) - 1
+        # Update the slider val in case it is out of minimum/maximum range
+        # This may happen when using the buttons
+        if slider.val < minimum:
+            slider.set_val(minimum)
+        if slider.val > maximum:
+            slider.set_val(maximum)
+        # Find out if the slider value is the last (current) value
         updated = slider.val == slider.valmax
         # Update the maximum slider value
         slider.valmax = maximum
