@@ -1,7 +1,8 @@
 RAM
 
-Loaned push:
-	Igual hay que plantearse enseñarle a no recuperar area de la frontera que acabamos de pushear gracias a la loan (ni sus dos fronteras adyacentes)
+- get_merge_grid (darle un repaso)
+	* provar un poco y documentar que no funcionaría en caso de overlap
+	** de momento creo que no hace falta dar soporte a estos casos porque nunca pasa
 
 Enseñarle a salir de bucles
 	*** Alomejor ya no es necesario, el loaned push funciona muy bien

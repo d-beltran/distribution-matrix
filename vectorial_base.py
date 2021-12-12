@@ -39,7 +39,13 @@ def resolute(num, base_offset = 0):
     base = base_resolution + base_offset
     resolution = 10**base
     return round(num * resolution) / resolution
+
+# Calculate the minimum resolution
+# i.e. changes below this resolution make no sense
 minimum_resolution = 1 / 10 ** base_resolution
+# Set a function to compare float equality according to the minimum resolution
+def equal (a : float, b : float) -> bool:
+    return a < b + minimum_resolution and a > b - minimum_resolution
 
 # An x,y coordinate
 class Point:
@@ -585,6 +591,9 @@ class Rect:
     def __init__(self, pmin : Point, pmax : Point, segments_color : str = 'black', fill_color : str = 'white'):
         self.pmin = pmin
         self.pmax = pmax
+        self.x_size, self.y_size = self.get_size()
+        if resolute(self.x_size) < minimum_resolution or resolute(self.y_size) < minimum_resolution:
+            raise ValueError('The rectangle has not 2 dimensions: ' + str(self))
         self.segments_color = segments_color
         self.fill_color = fill_color
         self.segments = self.get_segments()
@@ -731,7 +740,7 @@ class Rect:
         if self._area:
             return self._area
         x_size, y_size = self.get_size()
-        self._area = resolute(x_size * y_size, -2)
+        self._area = resolute(x_size * y_size)
         return self._area
 
     # The rectangle area (read only)
@@ -786,6 +795,9 @@ class Rect:
         # WARNING: The doble 'for' loop with generators seems to work wrong
         x_steps = list(pairwise([ pmin.x, *formatted_x_splits, pmax.x ]))
         y_steps = list(pairwise([ pmin.y, *formatted_y_splits, pmax.y ]))
+        # Remove steps where both values are identical
+        x_steps = [ step for step in x_steps if step[0] != step[1] ]
+        y_steps = [ step for step in y_steps if step[0] != step[1] ]
         # Create as many rectangles as required
         for xmin, xmax in x_steps:
             for ymin, ymax in y_steps:
@@ -822,7 +834,6 @@ class Rect:
 
     # Join 2 rectangles by returning a list of all rectangles which define the resulting grid
     # The overlapped region, if exists is transformed to a single rectangle
-    # DANI: No lo he provado desde que lo moví de abajo
     def join_rect (self, rect) -> List['Rect']:
         # Find the overlap between these two rectangles
         overlap = self.get_overlap_rect(rect)
@@ -890,7 +901,12 @@ class Polygon:
         # Color at this moment all segments
         for segment in segments:
             segment.color = color
+        # The size is the length to cross the whole boundary
+        self.size = self.get_box().get_crossing_segment().length
+        # Set internar variables
         self._corners = None
+        self._grid = None
+
 
     # Set a class constant error
     open_polygon_error = ValueError('The polygon is not closed')
@@ -991,16 +1007,32 @@ class Polygon:
 
     # Get the polygon corners
     def get_corners(self):
-        # If rects are previously calculated then return them
+        # If corners were previously calculated then return them
         if self._corners:
             return self._corners
-        # Get all rectangles which form the polygon
+        # Get all corners in the polygon
         corners = self.set_corners()
         self._corners = corners
         return self._corners
 
     # Polygon corners (read only)
     corners = property(get_corners, None, None, "The polygon corners")
+
+    # Get the polygon grid
+    # If grid was previously calculated then return it
+    # Otherwise, get all rectangles which form the polygon and set a new grid with them
+    def get_grid(self):
+        if not self._grid:
+            rects = self.split_in_rectangles()
+            self._grid = Grid(rects)
+        return self._grid
+
+    # Polygon grid (read only)
+    grid = property(get_grid, None, None, "The polygon grid")
+
+    # Get the inside corners
+    def get_inside_corners (self):
+        return [ corner for corner in self.corners if corner.inside ]
 
     # Check if the current segments create a closed polygon or if it is open
     def is_closed(self):
@@ -1182,122 +1214,14 @@ class Polygon:
                     return True
         return False
 
-# A boundary is made of an external polygon and any number of internal polygons which mark the limits of an area
-class Boundary:
-    def __init__(self, exterior_polygon : Polygon, interior_polygons : List[Polygon] = [], color = 'black', fill_color = 'white'):
-        self.exterior_polygon = exterior_polygon
-        self.interior_polygons = interior_polygons
-        self.polygons = [ exterior_polygon, *interior_polygons ]
-        self.segments = [ segment for polygon in self.polygons for segment in polygon.segments ]
-        # Calculate some internal values -------------------------------------------------------------------------
-        # The size is the length to cross the whole boundary
-        self.size = exterior_polygon.get_box().get_crossing_segment().length
-        # Inside corners are the exterior polygon inside corners and the interior polygons outside corners
-        self.exterior_inside_corners = [ corner for corner in exterior_polygon.corners if corner.inside == True ]
-        self.interior_inside_corners = []
-        for polygon in interior_polygons:
-            self.interior_inside_corners += [ corner for corner in polygon.corners if corner.inside == False ]
-        self.inside_corners = self.exterior_inside_corners + self.interior_inside_corners
-        # --------------------------------------------------------------------------------------------------------
-        # Set some display parameters
-        self.color = color
-        self.fill_color = fill_color
-        # --------------------------------------------------------------------------------------------------------
-        self._grid = None
-        self._area = None
-        # Check interior polygons to be inside the exterior polygon
-        self.simple = len(interior_polygons) == 0
-        if not self.simple:
-            self.check()
+    # Split the space inside the perimeter in a list of rectangles in a grid friendly format
+    def split_in_rectangles(self) -> List[Rect]:
 
-    def __contains__(self, other):
-        return other in self.grid
+        # Limit points are inside corners
+        limit_points = self.get_inside_corners()
 
-    # Get the boundary grid
-    def get_grid(self):
-        # If grid already exists then return it
-        if self._grid:
-            return self._grid
-        # Otherwise, set the grid
-        # Split the boundary in rectangles in a grid-friendly format
-        rects = self.split_in_rectangles()
-        # Apply the boundary color to each rectangle
-        for rect in rects:
-            rect.color = self.fill_color
-        # Set, save and return the grid
-        grid = Grid(rects)
-        grid._boundaries = [self]
-        self._grid = grid
-        return grid
-
-    # The boundary grid (read only)
-    grid = property(get_grid, None, None, "The boundary grid")
-
-    # Get the area inside the polygon (read only)
-    def get_area(self):
-        return self.grid.area
-    area = property(get_area, None, None, "The area inside the boundary")
-
-    # Get a boundary made with the exterior polygon only
-    def get_simple_boundary(self):
-        if self.simple:
-            return self
-        return Boundary(self.exterior_polygon)
-
-    # Check all interior polygons to be inside the exterior polygon
-    # Note that this function is called when the self grid is not made yet, so checking this is not that easy
-    # To do so, we calculate the grid of the exterior polygon alone and then we check if each interior polygon is inside
-    def check (self):
-        simple_boundary = self.get_simple_boundary()
-        for polygon in self.interior_polygons:
-            if polygon not in simple_boundary:
-                # Represent polygons in the problematic boundary
-                exterior_segments = self.exterior_polygon.segments
-                for segment in exterior_segments:
-                    segment.color = 'black'
-                interior_segments = polygon.segments
-                for segment in interior_segments:
-                    segment.color = 'red'
-                add_frame(exterior_segments + interior_segments)
-                raise ValueError('At least one interior polygon is not fully inside the exterior polygon')
-
-    # Split the space inside the boundary in a list of rectangles in a grid friendly format
-    def split_in_rectangles(self, exclude_interior_polygons : bool = True) -> List[Rect]:
-
-        # WARNING: If there are no inside corners at this point it means our polygon/s are made only by single rectangles
-        # However those rectangles may be formed by segments longer than the rectangle size, so they may require splitting
-
-        # Check if there are interior polygons
-        # If not, do not consider the exclusion of interior polygons
-        # This way the code runs slightly faster although it is not necessary
-        if exclude_interior_polygons and len(self.interior_polygons) == 0:
-            exclude_interior_polygons = False
-
-        # Limits are the non-overlapping segments and inside corners from both exterior and interior polygons
-        # Limit points are inside corners which are not overlapped with any other polygons
-        limit_points = []
-        if exclude_interior_polygons:
-            for corner in self.inside_corners:
-                count = 0
-                for polygon in self.polygons:
-                    if polygon.in_border(corner):
-                        count += 1
-                # Include this corner only if after all searches it was found only 1 time
-                if count == 1:
-                    limit_points.append(corner)
-        else:
-            limit_points = self.exterior_inside_corners
-
-        # Limit segments are both parent and children segments which do not overlap
-        limit_segments = []
-        if exclude_interior_polygons:
-            for polygon, other_polygons in otherwise(self.polygons):
-                other_segments = [ segment for polygon in other_polygons for segment in polygon.segments ]
-                for segment in polygon.segments:
-                    limit_segments += segment.substract_segments(other_segments)
-        else:
-            limit_segments = self.exterior_polygon.segments
-
+        # Limit segments are perimeter segments
+        limit_segments = self.segments
 
         # Given a polygon corner which is pointing inside,
         # Create two segments opposed to the corner segments but as long as required to cut the polygon at onther segment or corner
@@ -1431,15 +1355,114 @@ class Boundary:
         # Remove duplicates
         final_rectangles = unique(final_rectangles)
 
-        # In some cases, some rectangles may be found inside interior polygons
-        # This will happen with rectangular interior polygons
-        # Find and discard those rectangles
-        for polygon in self.interior_polygons:
-            final_rectangles = [ rect for rect in final_rectangles if polygon != rect ]
-
         #print('Total rectangles: ' + str(len(final_rectangles)))
 
         return final_rectangles
+
+# A boundary is made of an external polygon and any number of internal polygons which mark the limits of an area
+class Boundary:
+    def __init__(self, exterior_polygon : Polygon, interior_polygons : List[Polygon] = [], color = 'black', fill_color = 'white'):
+        self.exterior_polygon = exterior_polygon
+        self.interior_polygons = interior_polygons
+        self.polygons = [ exterior_polygon, *interior_polygons ]
+        self.segments = [ segment for polygon in self.polygons for segment in polygon.segments ]
+        # Calculate some internal values -------------------------------------------------------------------------
+        # The size is the length to cross the whole boundary
+        self.size = exterior_polygon.get_box().get_crossing_segment().length
+        # Inside corners are the exterior polygon inside corners and the interior polygons outside corners
+        self.exterior_inside_corners = [ corner for corner in exterior_polygon.corners if corner.inside == True ]
+        self.interior_inside_corners = []
+        for polygon in interior_polygons:
+            self.interior_inside_corners += [ corner for corner in polygon.corners if corner.inside == False ]
+        self.inside_corners = self.exterior_inside_corners + self.interior_inside_corners
+        # --------------------------------------------------------------------------------------------------------
+        # Set some display parameters
+        self.color = color
+        self.fill_color = fill_color
+        # --------------------------------------------------------------------------------------------------------
+        self._grid = None
+        self._area = None
+        # Check interior polygons to be inside the exterior polygon
+        self.simple = len(interior_polygons) == 0
+        if not self.simple:
+            self.check()
+
+    def __contains__(self, other):
+        return other in self.grid
+
+    def __eq__(self, other):
+        if not other:
+            return False
+        if self.exterior_polygon != other.exterior_polygon:
+            return False
+        if len(self.interior_polygons) != len(other.interior_polygons):
+            return False
+        for self_interior_polygon in self.interior_polygons:
+            if self_interior_polygon not in other.interior_polygons:
+                return False
+        return True
+
+    # Get the boundary grid
+    def get_grid(self):
+        # If grid already exists then return it
+        if self._grid:
+            return self._grid
+        # Otherwise, set the grid
+        # Split the boundary in rectangles in a grid-friendly format
+        rects = self.split_in_rectangles()
+        # Apply the boundary color to each rectangle
+        for rect in rects:
+            rect.color = self.fill_color
+        # Set, save and return the grid
+        grid = Grid(rects)
+        grid._boundaries = [self]
+        self._grid = grid
+        return grid
+
+    # The boundary grid (read only)
+    grid = property(get_grid, None, None, "The boundary grid")
+
+    # Get the area inside the polygon (read only)
+    def get_area(self):
+        return self.grid.area
+    area = property(get_area, None, None, "The area inside the boundary")
+
+    # Get a boundary made with the exterior polygon only
+    def get_simple_boundary(self):
+        if self.simple:
+            return self
+        return Boundary(self.exterior_polygon)
+
+    # Check all interior polygons to be inside the exterior polygon
+    # Note that this function is called when the self grid is not made yet, so checking this is not that easy
+    # To do so, we calculate the grid of the exterior polygon alone and then we check if each interior polygon is inside
+    def check (self):
+        simple_boundary = self.get_simple_boundary()
+        for polygon in self.interior_polygons:
+            if polygon not in simple_boundary:
+                # Represent polygons in the problematic boundary
+                exterior_segments = self.exterior_polygon.segments
+                for segment in exterior_segments:
+                    segment.color = 'black'
+                interior_segments = polygon.segments
+                for segment in interior_segments:
+                    segment.color = 'red'
+                add_frame(exterior_segments + interior_segments)
+                raise ValueError('At least one interior polygon is not fully inside the exterior polygon')
+
+    # Split the space inside the boundary in a list of rectangles in a grid friendly format
+    # It works even if the interior polygons are overlapped
+    def split_in_rectangles (self) -> List[Rect]:
+
+        # Calculate the grid from the exterior polygon
+        final_grid = self.exterior_polygon.grid
+
+        # Calculate the grid for each interior polygon
+        interior_grids = [ polygon.grid for polygon in self.interior_polygons ]
+        for interior_grid in interior_grids:
+            final_grid = final_grid.get_substract_grid(interior_grid)
+
+        return final_grid.rects
     
     # Get the overlap boundaries between 2 boundaries
     def get_overlap_boundaries (self, other : 'Boundary') -> List['Boundary']:
@@ -1579,7 +1602,7 @@ class Grid:
             # Now create the boundary
             boundary = Boundary(exterior_polygon, interior_polygons)
             boundaries.append(boundary)
-        # Split all boundaries in rects and join them a a single grid
+        # Split all boundaries in rects and join them as a single grid
         canonical_rects = []
         for boundary in boundaries:
             canonical_rects += boundary.split_in_rectangles()
@@ -1637,7 +1660,7 @@ class Grid:
         # Otherwise, calculate the area
         # Add the area of all grid rectangle
         rect_areas = [ rect.get_area() for rect in self.rects ]
-        self._area = resolute(sum(rect_areas), -2)
+        self._area = resolute(sum(rect_areas))
         return self._area
     # Grid area (read only)
     area = property(get_area, None, None, "The area of the whole grid")
@@ -1681,6 +1704,14 @@ class Grid:
     def get_boundary_segments (self):
         return [ segment for boundary in self.boundaries for segment in boundary.segments ]
 
+    # Check if a rect is overlapping at some rect in this grid
+    def is_rect_overlapping (self, rect : Rect) -> bool:
+        for self_rect in self.rects:
+            overlap = self_rect.get_overlap_rect(rect)
+            if overlap:
+                return True
+        return False
+
     # Return the overlap space between two grids splitted in rectangles
     # Note that these rectangles will not follow the grid standard rules
     def get_overlap_rects (self, grid : 'Grid') -> List[Rect]:
@@ -1708,8 +1739,10 @@ class Grid:
         return unique(merge_rects)
 
     # Return the resulting grid after merging self grid to other grid
+    # DANI: Esto solo funciona en tanto en cuanto las grids no se overlapan
     def get_merge_grid (self, grid : 'Grid') -> 'Grid':
-        merge_rects = self.get_merge_rects(grid)
+        #merge_rects = self.get_merge_rects(grid)
+        merge_rects = self.rects + grid.rects
         return Grid.non_canonical(merge_rects)
 
     # Return self grid space after substracting other grid space splitted in rectangles
