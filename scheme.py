@@ -254,10 +254,10 @@ class Room:
                 raise RuntimeError('The room ' + room.name + ' fits nowhere')
         # Shuffle the suitable rects
         random.shuffle(suitable_rects)
-        # Sort the suitable rects by minimum size, with the biggest sizes first
+        # Sort the suitable rects by minimum size
         def sort_by_size(rect):
             return min(rect.get_size())
-        sorted_suitable_rects = sorted( suitable_rects, key=sort_by_size, reverse=True )
+        sorted_suitable_rects = sorted( suitable_rects, key=sort_by_size )
 
         # Make a backup in case we have to force since other rooms will be modified
         if forced:

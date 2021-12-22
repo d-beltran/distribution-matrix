@@ -12,7 +12,7 @@ if __name__ == '__main__':
     setup_display()
 
     distribution = Room(
-        boundary=test_boundary_4,
+        boundary=test_boundary_3,
         display=True,
         name='Planta',
         children=[

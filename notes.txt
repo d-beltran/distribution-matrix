@@ -1,5 +1,9 @@
 RAM
 
+- expand corner: intentar que las habitaciones sean más cuadradas
+
+- definir los segmentos pasillo desde el principio para que las nuevas habitaciones nazcan lo más unido posible
+
 - get_merge_grid (darle un repaso)
 	* provar un poco y documentar que no funcionaría en caso de overlap
 	** de momento creo que no hace falta dar soporte a estos casos porque nunca pasa
