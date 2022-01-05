@@ -664,7 +664,7 @@ class Room:
 
         # Set the margin according to the invaded rooms
         room_limits = [ self.parent_free_limit if room == parent_room else room.min_size for room in rooms ]
-        margin_limit = max([ room.min_size for room in rooms ])
+        margin_limit = max(room_limits)
 
         # Use the margin limit to set the margined forward limits
         margined_space_forward_limit = space_forward_limit - margin_limit
