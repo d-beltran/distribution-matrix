@@ -9,7 +9,7 @@ from math import sqrt, inf
 
 # Set the seed and print it
 seed = None
-#seed = 575640
+seed = 660588
 if not seed:
     seed = round(random.random() * 999999)
 print('Seed ' + str(seed))
@@ -43,8 +43,8 @@ class Room:
         self.fill_color = fill_color
         # Set up the hierarchy of rooms
         # Parent is never assigned from the instance itself, but it is assigned by the parent
-        self.parent = None
-        self.children = []
+        self._parent = None
+        self._children = []
         # Set the boundary
         # If the boundary has been forced then update the display with the initial segments
         if boundary:
@@ -62,7 +62,7 @@ class Room:
                 self.forced_area = None
                 self._forced_area_portion = float(forced_area[0:-1]) / 100
             else:
-                raise InputError('Forced area has a non-supported format')
+                raise InputError('Forced area has a non-supported format in room ' + name)
         else:
             self.forced_area = self.area
         # If the forced area does not cover the minimum size it makes no sense
@@ -74,14 +74,76 @@ class Room:
         else:
             self.min_size = 0
         self._forced_max_size = max_size
+        # Parent free limit is set by the parent while setting the child boundary
+        # Parent free limit is the maximum min size of all parent children but this child
+        self.parent_free_limit = None
         # Set up all children rooms
-        self.add_children(children)
+        # This will automatically build children boundaries if not provided
+        self.children = children
 
     def __str__(self):
         return '<Room "' + str(self.name) + '">'
 
     def __repr__(self):
         return '<Room "' + str(self.name) + '">'
+
+    # Get the parent
+    # Just return the internal parent value
+    def get_parent (self):
+        return self._parent
+
+    # The room boundary
+    parent = property(get_parent, None, "The parent room")
+
+    # Get the children rooms
+    # Just return the internal children value
+    def get_children (self):
+        return self._children
+
+    # Set the children rooms
+    # This function triggers the logic to solve children room positions
+    def set_children (self, rooms : list):
+        if len(rooms) == 0:
+            return
+        # Check areas of all children rooms to do not sum up more than the parent area
+        # In addition check if any of the children room has boundary and, if so, check the boundary is inside the parent
+        children_area = 0
+        for room in rooms:
+            # If the children has a percent forced area this is the time to calculate the absolute forced area
+            if room._forced_area_portion:
+                room.forced_area = self.forced_area * room._forced_area_portion
+            children_area += room.forced_area
+        if children_area > self.area:
+            raise InputError('Children together require more area than the parent has')
+        # Check all children are inside the parent boundary, if they have a predefined boundary
+        for room in rooms:
+            if room.boundary and room.boundary not in self.boundary:
+                raise InputError('The child room "' + room.name + '" is out of the parent boundary')
+        # Check all children minim sizes fit in the parent boundary, if they have a predefined minimum size
+        for room in rooms:
+            if not self.does_room_fit(room, force=True):
+                raise InputError('The child room "' + room.name + '" minimum size does not fit in the parent boundary')
+
+        # Sort children rooms by minimum size, with the biggest sizes first
+        def sort_by_size (room):
+            return room.min_size
+        sorted_rooms = sorted( rooms, key=sort_by_size, reverse=True )
+
+        # Set up each room by giving them a position and correct size to match the forced area
+        for room in sorted_rooms:
+            # Update the room hierarchy
+            room._parent = self
+            self._children.append(room)
+            # Configure the child room to respect the parent free min size limit according to its brothers
+            parent_free_limit = max([ other.min_size for other in rooms if other != room ])
+            room.parent_free_limit = parent_free_limit
+            # If the children has no boundary it must be built
+            if not room.boundary:
+                if not self.set_child_room_boundary(room):
+                    raise RuntimeError('Child ' + room.name + ' has failed to be set')
+
+    # The room boundary
+    children = property(get_children, set_children, None, "The children rooms")
 
     # Get the boundary
     # Just return the internal boundary value
@@ -197,44 +259,6 @@ class Room:
         grid = self.grid if force else self.free_grid
         fitting_rects = grid.get_fitting_space(size, size)
         return list(fitting_rects)
-
-    # Add children rooms
-    def add_children (self, rooms : list):
-        if len(rooms) == 0:
-            return
-        # Check areas of all children rooms to do not sum up more than the parent area
-        # In addition check if any of the children room has boundary and, if so, check the boundary is inside the parent
-        children_area = 0
-        for room in rooms:
-            # If the children has a percent forced area this is the time to calculate the absolute forced area
-            if room._forced_area_portion:
-                room.forced_area = self.forced_area * room._forced_area_portion
-            children_area += room.forced_area
-        if children_area > self.area:
-            raise InputError('Children together require more area than the parent has')
-        # Check all children are inside the parent boundary, if they have a predefined boundary
-        for room in rooms:
-            if room.boundary and room.boundary not in self.boundary:
-                raise InputError('The child room "' + room.name + '" is out of the parent boundary')
-        # Check all children minim sizes fit in the parent boundary, if they have a predefined minimum size
-        for room in rooms:
-            if not self.does_room_fit(room, force=True):
-                raise InputError('The child room "' + room.name + '" minimum size does not fit in the parent boundary')
-
-        # Sort children rooms by minimum size, with the biggest sizes first
-        def sort_by_size (room):
-            return room.min_size
-        sorted_rooms = sorted( rooms, key=sort_by_size, reverse=True )
-
-        # Set up each room by giving them a position and correct size to match the forced area
-        for room in sorted_rooms:
-            # Update the room hierarchy
-            room.parent = self
-            self.children.append(room)
-            # If the children has no boundary it must be built
-            if not room.boundary:
-                if not self.set_child_room_boundary(room):
-                    raise RuntimeError('Child ' + room.name + ' has failed to be set')
 
     # Set up a child room boundary
     def set_child_room_boundary (self, room) -> bool:
@@ -365,7 +389,8 @@ class Room:
 
     # Expand or contract this room until it reaches the forced area
     # In case it is not able to fit at some point recover the original situation
-    def fit_to_required_area (self, restricted_segments = []) -> bool:
+    # Restricted segments are segments which must remain as are
+    def fit_to_required_area (self, restricted_segments : list = []) -> bool:
         # Make a boundary backup of this room and all its brothers
         backup = self.parent.make_children_backup()
         # Calculate how much area we need to expand
@@ -435,7 +460,7 @@ class Room:
         # Filter out frontiers which are inside restricted segments
         def is_restricted (segment : Segment) -> bool:
             for restricted_segment in restricted_segments:
-                if segment in restricted_segment or segment == restricted_segment:
+                if segment.get_overlap_segment(restricted_segment):
                     return True
             return False
 
@@ -618,10 +643,10 @@ class Room:
             forward = 1
             sides = 0
         else:
-            raise ValueError('ERROR: diagonal segments are not supported for room expansion')
+            raise ValueError('Diagonal segments are not supported for room expansion')
 
         if len(rects) == 0:
-            raise RuntimeError('No pot ser: ' + str(grid))
+            raise RuntimeError('Empty grid: ' + str(grid))
 
         # One and only one of the rows/columns will always include the segment
         space = next((rect for rect in rects if frontier in rect), None)
@@ -638,6 +663,7 @@ class Room:
         maximum_forward_limit = max([ rect.get_size()[forward] for rect in contact_max_rects ])
 
         # Set the margin according to the invaded rooms
+        room_limits = [ self.parent_free_limit if room == parent_room else room.min_size for room in rooms ]
         margin_limit = max([ room.min_size for room in rooms ])
 
         # Use the margin limit to set the margined forward limits
@@ -737,9 +763,11 @@ class Room:
             # In case we made a loaned push now we may have more area than we need (usually)
             # We need to return the extra area now
             # Otherwise, if we invade other rooms it may happen that there is not free space enought for them to expand after
-            # At this point however there is interior polygons overlap in the parent boundary
-            # This is dangerous since the parent free grid calculation mya fail
-            # For this reason we have to recalculate the free grid now using the non-canonical method
+            # WARNING: Note that this is an exceptional situation and there are a few extra things to take in count
+            # WARNING: At this point there is interior polygons overlap in the parent boundary
+            # WARNING: At this point the room is not coordianted with other rooms or the parent free grid
+            #          The recently pushed segments must remain as they are
+            #          They do not exist for other rooms so me must exlcude them during the fitting to avoid inconsistency
             if protocol == 3 and self.get_required_area() < 0:
                 #print('LOANED PUSH -> NEW REQUIRED AREA: ' + str(self.get_required_area()))
                 if not self.fit_to_required_area(restricted_segments=new_segments):
