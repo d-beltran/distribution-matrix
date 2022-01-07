@@ -1,4 +1,4 @@
-from typing import List, Union, Optional
+from typing import List, Tuple, Union, Optional
 
 from scheme_display import add_frame
 
@@ -396,8 +396,8 @@ class Room:
                 def expand_step () -> bool:
                     # Get the most suitable frontier to expand and try to expand it
                     # If the expansions fails, try with the next one
-                    for frontier in self.get_best_expansion_frontier(restricted_segments):
-                        if self.expand_frontier(frontier, required_area):
+                    for frontier, loan_permission in self.get_best_frontiers(restricted_segments):
+                        if self.expand_frontier(frontier, required_area, loan_permission):
                             return True
                     return False
                 # Expand
@@ -413,7 +413,7 @@ class Room:
                     # If the contraction fails, try with the next one
                     # DANI: De momento uso la misma lógica que la de la expansión porque no va mal
                     # DANI: i.e. evitar contraer fronteras del padre y priorizar fronteras libres es bueno
-                    for frontier in self.get_best_expansion_frontier(restricted_segments):
+                    for frontier, loan_permission in self.get_best_frontiers(restricted_segments, contraction=True):
                         if self.contract_frontier(frontier, -required_area):
                             return True
                     return False
@@ -427,11 +427,17 @@ class Room:
             return False
         return True
 
-    # Yield all room frontiers in the most suitable order
+    # Yield all room frontiers in the most suitable order:
     # - Free frontiers before borther frontiers
     # - Single frontiers before combined frontiers
+    # Expansion (default):
     # - In case of a borther frontier, the one which makes shorter the path to free space
-    def get_best_expansion_frontier (self, restricted_segments) -> Generator[Segment, None, None]:
+    # Contraction:
+    # - Parent frontiers are also suitable, but they are the last try
+    def get_best_frontiers (self,
+        restricted_segments : List[Segment] = [],
+        contraction : bool = False,
+        ) -> Generator[ Tuple[ Segment, bool ], None, None ]:
 
         # Get the exterior polygon of the room boundary
         exterior_polygon = self.boundary.exterior_polygon
@@ -530,9 +536,22 @@ class Room:
                 for combined_frontier in get_combined_frontiers(frontier):
                     yield combined_frontier
 
+        # Ask for all segments first without any loaned push
+        # If all of them fail then retry with the loaned push allowed
+        def first_normal_then_loaned (frontiers : Generator[Segment, None, None]) -> Generator[ Tuple[ Segment, bool ], None, None ]:
+            already_tried_frontiers = []
+            for frontier in frontiers:
+                yield frontier, False
+                already_tried_frontiers.append(frontier)
+            # Pushed loans are not allowed when contracting
+            if contraction:
+                return
+            for frontier in already_tried_frontiers:
+                yield frontier, True
+
         # Find for each brother room the number of colliding rooms we must jump to find free space
         # Then use this value to set the "score" of each brother room frontiers and sort them
-        def sort_by_shortest_path (frontiers_group) -> list:
+        def sort_by_shortest_path (frontiers_group : list) -> list:
             colliding_rooms = unique([ frontier.rooms[0] for frontier in frontiers_group ])
             for colliding_room in colliding_rooms:
                 previous_rooms = [ self ]
@@ -576,23 +595,37 @@ class Room:
         # Start trying to expand free frontiers first
         # First of all and always we shuffle them at random
         random.shuffle(free_frontiers)
-        # Yield free frontiers priorizing single frontiers since they are easier to expand
-        for frontier in priorize_single_frontiers(free_frontiers):
-            yield frontier
+        # Sort free frontiers priorizing single frontiers since they are easier to expand
+        # Try all free frontiers with loaned push not allowed
+        # If all of them fail then try with loaned push allowed
+        sorted_free_frontiers = first_normal_then_loaned(priorize_single_frontiers(free_frontiers))
+        # Yield frontiers and loan permissions
+        for frontier, loan_permission in sorted_free_frontiers:
+            yield frontier, loan_permission
         # Then we try with the brother frontiers
         random.shuffle(brother_frontiers)
-        # Sort them according to the shortes rout to the free space
-        brother_frontiers = sort_by_shortest_path(brother_frontiers)
-        # Yield brother frontiers priorizing single frontiers since they are easier to expand
-        for frontier in priorize_single_frontiers(brother_frontiers):
-            yield frontier
+        # In case we are expanding, sort them according to the shortest route to the free space
+        if not contraction:
+            brother_frontiers = sort_by_shortest_path(brother_frontiers)
+        # Sort brother frontiers priorizing single frontiers since they are easier to expand
+        # Try all brother frontiers with loaned push not allowed
+        # If all of them fail then try with loaned push allowed
+        sorted_brother_frontiers = first_normal_then_loaned(priorize_single_frontiers(brother_frontiers))
+        # Yield frontiers and loan permissions
+        for frontier, loan_permission in sorted_brother_frontiers:
+            yield frontier, loan_permission
+        # In case we are contracting, yield also the parent frontiers
+        # Note that there is no priority sort for this situation
+        if contraction:
+            for frontier in parent_frontiers:
+                yield frontier, False
         print('WARNING: There are no more frontiers available')
 
     # Try to expand a specific room frontier
     # Note that the frontier must contain the room it belongs to
     # Set the required (maximum) area it can expand
     # Return True if the expansion was succesful or False if there was no expansion
-    def expand_frontier (self, frontier : Segment, required_area : number) -> bool:
+    def expand_frontier (self, frontier : Segment, required_area : number, allowed_loan_push : bool = False) -> bool:
         # Get the parent room
         parent_room = self.parent
         # Get the exterior polygon of the room boundary
@@ -722,7 +755,7 @@ class Room:
             # For this reason, trying to reduce the segment and push again will have no effect almost always
             if push_length < minimum_resolution:
                 print('WARNING: The push length is too small for segment ' + str(pushed_segment))
-                if protocol != 3:
+                if protocol != 3 and allowed_loan_push:
                     return push_segment(pushed_segment, 3)
                 return False
             # Create the new rect with the definitive length
