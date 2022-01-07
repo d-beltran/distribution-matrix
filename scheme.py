@@ -9,7 +9,7 @@ from math import sqrt, inf
 
 # Set the seed and print it
 seed = None
-seed = 660588
+#seed = 971252
 if not seed:
     seed = round(random.random() * 999999)
 print('Seed ' + str(seed))
@@ -333,7 +333,6 @@ class Room:
         return True
 
     # Set the initial room boundary as the maximum possible rectangle
-    # This is a shortcut to skip the difficult expansion protocol as much as possible
     # It is useful to set a whole room at the begining, when there is plenty of free space
     def set_maximum_initial_boundary (self, corner : Point, space : Rect) -> Boundary:
         x_space, y_space = space.get_size()
@@ -349,31 +348,22 @@ class Room:
                 return Boundary(Polygon.from_rect(maximum_rect))
             return Boundary(Polygon.from_rect(space))
         # Else, fit the room in the space
-        # First of all create the 3 rule rectangle from the space
-        # i.e. calculate the relation of areas and apply it to the square root to both x and y sizes
-        area_relation = self.forced_area / space.area # At this point the relation is always < 1
-        new_x_size = x_space * sqrt(area_relation)
-        new_y_size = y_space * sqrt(area_relation)
-        # If any of the new sizes is shorter than the maximum size then the rectangle is valid
-        if new_x_size < self.max_size or new_y_size < self.max_size:
-            maximum_rect = Rect.from_corner(corner, new_x_size, new_y_size)
-            return Boundary(Polygon.from_rect(maximum_rect))
-        # If both new sizes are longer than the maximum size we must find another solution
-        # The new rectangle will have the maximum size in one of its sides
-        # Calculate the other side size
-        second_size = self.forced_area / self.max_size
-        # Now set which are the maximum and minimum sizes of the new rect
-        new_sizes = [ self.max_size, second_size ]
-        new_max_size = max(new_sizes)
-        new_min_size = min(new_sizes)
+        # Try to create the most "squared" possible rectangle
+        # Calculate how long would be the side of a perfect square
+        square_side_length = sqrt(self.forced_area)
+        # Set how long will be the short (restricted) side of the rectangle
+        # Then calculate the other side length
+        # The limit may come from the square side limit, the sapce limit or the own room limit
+        first_side_length = min(square_side_length, x_space, y_space, self.max_size)
+        second_side_length = self.forced_area / first_side_length
         # Create the new rect fitting the biggest size in the biggest space and the opposite
         # For each size of the new rect use the calculated size only if it is not longer than the space
         if x_space >= y_space:
-            new_x_size = min(new_max_size, new_x_size)
-            new_y_size = min(new_min_size, new_y_size)
+            new_x_size = second_side_length
+            new_y_size = first_side_length
         else:
-            new_x_size = min(new_min_size, new_x_size)
-            new_y_size = min(new_max_size, new_y_size)
+            new_x_size = first_side_length
+            new_y_size = second_side_length
         maximum_rect = Rect.from_corner(corner, new_x_size, new_y_size)
         return Boundary(Polygon.from_rect(maximum_rect))
 
@@ -682,18 +672,17 @@ class Room:
             # In case this is an insider segment which is not wide enought to be pushed alone,
             # Find out how much we can push this segment
             # i.e. find the connected frontier/s and get the maximum length of these segments
-            push_limit = None
+            corner_push_limit = None
             if pushed_segment.length < self.min_size - minimum_resolution:
-                push_limit = None
                 other_segments = [ segment for segment in exterior_polygon.segments if pushed_segment not in segment]
                 for point in pushed_segment.points:
                     if point in inside_corners:
                         insider = next(segment for segment in other_segments if point in segment)
-                        if not push_limit or push_limit < insider.length:
-                            push_limit = insider.length
+                        if not corner_push_limit or corner_push_limit < insider.length:
+                            corner_push_limit = insider.length
                 # If the push length exceeds the insider limit then stay in the limit
-                if push_length > push_limit:
-                    push_length = push_limit
+                if push_length > corner_push_limit:
+                    push_length = corner_push_limit
             # First, try to expand using the maximum available space
             # This is risky since it may split the invaded room in two parts or make regions which do not respect the minimum size
             if protocol == 1:
@@ -724,10 +713,10 @@ class Room:
             # This expansion may fix a situation where a corner is not claimed because the required area is not enought
             # Note that this room will need to contract further in order to finally get the required area
             elif protocol == 3:
-                if push_limit:
-                    push_length = push_limit
-                else:                    
-                    push_length = maximum_forward_limit
+                limits = [ maximum_forward_limit ]
+                if corner_push_limit != None:
+                    limits.append(corner_push_limit)
+                push_length = min(limits)
             # If the push length at this point is 0 or close to it then we can not push
             # WARNING: This usually happens because of forward limits, not because the area was not big enought
             # For this reason, trying to reduce the segment and push again will have no effect almost always
@@ -919,17 +908,17 @@ class Room:
             # In case this is an insider segment which is not wide enought to be pushed alone,
             # Find out how much we can push this segment
             # i.e. find the connected frontier/s and get the maximum length of these segments
+            corner_push_limit = None
             if pushed_segment.length < self.min_size - minimum_resolution:
-                push_limit = None
                 other_segments = [ segment for segment in exterior_polygon.segments if segment != pushed_segment ]
                 for point in pushed_segment.points:
                     if point in inside_corners:
                         insider = next(segment for segment in other_segments if point in segment.points)
-                        if not push_limit or push_limit < insider.length:
-                            push_limit = insider.length
+                        if not corner_push_limit or corner_push_limit < insider.length:
+                            corner_push_limit = insider.length
                 # If the push length exceeds the insider limit then stay in the limit
-                if push_length > push_limit:
-                    push_length = push_limit
+                if push_length > corner_push_limit:
+                    push_length = corner_push_limit
             # First, try to expand using the maximum available space
             # This is risky since it may split the invaded room in two parts or make regions which do not respect the minimum size
             if protocol == 1:
