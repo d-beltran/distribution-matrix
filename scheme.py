@@ -626,6 +626,8 @@ class Room:
     # Set the required (maximum) area it can expand
     # Return True if the expansion was succesful or False if there was no expansion
     def expand_frontier (self, frontier : Segment, required_area : number, allowed_loan_push : bool = False) -> bool:
+        # Set the push segment protocol according to the loan permission
+        push_protocol = 3 if allowed_loan_push else 1
         # Get the parent room
         parent_room = self.parent
         # Get the exterior polygon of the room boundary
@@ -755,8 +757,6 @@ class Room:
             # For this reason, trying to reduce the segment and push again will have no effect almost always
             if push_length < minimum_resolution:
                 print('WARNING: The push length is too small for segment ' + str(pushed_segment))
-                if protocol != 3 and allowed_loan_push:
-                    return push_segment(pushed_segment, 3)
                 return False
             # Create the new rect with the definitive length
             new_point = pushed_segment.a + forward_direction.normalized() * push_length
@@ -840,7 +840,7 @@ class Room:
 
         # If there is no problem we can just push the frontier
         if not problem_a and not problem_b:
-            return push_segment(frontier)
+            return push_segment(frontier, push_protocol)
 
         # ----------------------------------------------------------------------------------------------------
         # If a margin is not respected then we have 2 options (no option will always be possible):
@@ -871,7 +871,7 @@ class Room:
                 return False
             reduced_frontier = Segment(new_point, other_point)
 
-        return push_segment(reduced_frontier)
+        return push_segment(reduced_frontier, push_protocol)
 
     # Try to contract a specific room frontier
     # Note that the frontier must contain the room it belongs to
@@ -934,25 +934,11 @@ class Room:
         # The forward length of this rectangle will depend on the available area and limits
         # This segment may not be the original frontier, but a variation of it
         # The pull may happen using 2 different protocols, which are tried in the following order
-        # - Protocol 1 (greedy): It tries to expand as much as it can, respecting the required area
-        # - Protocol 2 (moderate): It tries to expand the minimum possible according to maximum rects
+        # - Protocol 1 (greedy): It tries to pull as much as it can, respecting the required area
+        # - Protocol 2 (moderate): It tries to pull the minimum possible according to maximum rects
         def pull_segment (pushed_segment : Segment, protocol : int = 1) -> bool:
             push_length = required_area / pushed_segment.length
-            # In case this is an insider segment which is not wide enought to be pushed alone,
-            # Find out how much we can push this segment
-            # i.e. find the connected frontier/s and get the maximum length of these segments
-            corner_push_limit = None
-            if pushed_segment.length < self.min_size - minimum_resolution:
-                other_segments = [ segment for segment in exterior_polygon.segments if segment != pushed_segment ]
-                for point in pushed_segment.points:
-                    if point in inside_corners:
-                        insider = next(segment for segment in other_segments if point in segment.points)
-                        if not corner_push_limit or corner_push_limit < insider.length:
-                            corner_push_limit = insider.length
-                # If the push length exceeds the insider limit then stay in the limit
-                if push_length > corner_push_limit:
-                    push_length = corner_push_limit
-            # First, try to expand using the maximum available space
+            # First, try to pull using the maximum available space
             # This is risky since it may split the invaded room in two parts or make regions which do not respect the minimum size
             if protocol == 1:
                 # If the length exceeds the maximum limit then stay in the maximum limit
@@ -962,7 +948,7 @@ class Room:
                 elif push_length > margined_maximum_forward_limit:
                     push_length = margined_maximum_forward_limit
             # If the greedy try fails use the moderate try
-            # Expand only using the closest row/column rectangle
+            # Pull only using the closest row/column rectangle
             # This expansion is smaller but safe
             elif protocol == 2:
                 # # If at this point the length exceeds the space limit then stay in the space limit
