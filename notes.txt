@@ -1,5 +1,7 @@
 RAM
 
+- que las habitaciones se vayan posicionando de cara a formar un pasillo pequeño
+
 - expand corner
 	* solucionará uno de los problemas más habituales de la cruz
 	* intentar que las habitaciones sean más cuadradas

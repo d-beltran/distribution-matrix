@@ -11,7 +11,7 @@ if __name__ == '__main__':
     # Represent current rooms tagged as display = True
     setup_display()
 
-    distribution = Room(
+    test = Room(
         boundary=test_boundary_3,
         display=True,
         name='Planta',
@@ -31,23 +31,34 @@ if __name__ == '__main__':
                 fill_color='yellow'),
             Room(
                 #forced_area=1800,
-                forced_area='18.75%',
+                display=True,
+                forced_area='21%',
                 min_size=15,
                 name='Habitación 1',
-                fill_color='red'),
+                fill_color='red',
+                children=[
+                    Room(
+                        forced_area='25%',
+                        min_size=10,
+                        name='Lavabo de habitación',
+                        fill_color='purple',
+                    )
+                ]),
             Room(
                 #forced_area=1800,
-                forced_area='18.75%',
+                forced_area='16.50%',
                 min_size=15,
                 name='Habitación 2',
                 fill_color='orange'),
             Room(
                 #forced_area=800,
                 forced_area='7%',
-                min_size=15,
+                min_size=10,
                 name='Lavabo',
                 fill_color='green')
         ]
     )
+
+    solve(test, display=True)
 
     print('Done!')

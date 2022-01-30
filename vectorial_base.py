@@ -322,7 +322,9 @@ class Segment(Line):
         self.a = a
         self.b = b
         self.color = color
-        super().__init__(a, b - a)
+        vector = a + b
+        super().__init__(a, vector)
+        self.direction = vector.normalized()
         self.length = a.get_distance_to(b)
         # Save both points as a tuple
         self.points = a, b
@@ -1084,6 +1086,7 @@ class Polygon:
         if abs(difference) != 4:
             # If you see this error there may be splitted segments in your polygon
             # Use the non-canonical class method to set your polygon
+            #add_frame(self.segments)
             raise RuntimeError('There is something wrong with the polygon')
 
         # Check if are more corners in the counted direction (true) or the other (false)
