@@ -37,12 +37,12 @@ if __name__ == '__main__':
                 name='Habitación 1',
                 fill_color='red',
                 children=[
-                    Room(
-                        forced_area='25%',
-                        min_size=10,
-                        name='Lavabo de habitación',
-                        fill_color='purple',
-                    )
+                    # Room(
+                    #     forced_area='25%',
+                    #     min_size=10,
+                    #     name='Lavabo de habitación',
+                    #     fill_color='purple',
+                    # )
                 ]),
             Room(
                 #forced_area=1800,

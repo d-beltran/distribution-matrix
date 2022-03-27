@@ -1,4 +1,4 @@
-from typing import List, Tuple, Union, Optional
+from typing import List, Tuple, Dict, Union, Optional
 
 from scheme_display import add_frame
 
@@ -9,7 +9,8 @@ from math import sqrt, inf
 
 # Set the seed and print it
 seed = None
-seed = 157966
+seed = 157966  # Esto da un huequecito minúsculo que me jode la vida, hay que avergiuar como cargarselo
+#seed = 51391  # Esto es rápido
 if not seed:
     seed = round(random.random() * 999999)
 print('Seed ' + str(seed))
@@ -18,20 +19,86 @@ random.seed(seed)
 # Set if the solving process must be displayed
 display_solving_process = False
 
-# A door is a segment in a room boundary which allows crossing to other rooms
+# A door is a point in a room boundary which connects it to another room
 class Door:
     def __init__ (self,
         # Set the id of the room/s connected to this door
-        connection : str,
-        # A start segment may be passed. If no segment is passed then it is assigned automatically
-        # WARNING: This is only supported if the door room boundary is already set and the segment matches on it
-        segment : Optional[Segment] = None,
+        # If it is not set then the connected room will be the parent room
+        # If there is no parent room then the door will be connected to the outside
+        connection : Optional[str] = None,
+        # A point may be passed. If no point is passed then it is assigned automatically
+        # WARNING: This is only supported if the door room boundary is already set and the point matches on it
+        point : Optional[Point] = None,
         # Set how wide the door must be
         width : Optional[number] = None,
         # Set the minimum width of margins on each side of the door
-        margins_width : Optional[number] = None,
-        ):
-        pass
+        margin : Optional[number] = None,
+    ):  
+        self.connection = connection
+        self.point = point
+        self.width = width
+        self.margin = margin
+        self._margined_width = None
+        self._segment = None
+        self._margined_segment = None
+        self.room = None
+        self.connected_room = None
+
+    def __repr__ (self):
+        return '<Door ' + str(self.point) + ' ' + str(self.width) + '(' + str(self.margin) + ')' + '>'
+
+    # Get the margined width
+    def get_margined_width (self):
+        if self._margined_width != None:
+            return self._margined_width
+        if self.width == None:
+            raise ValueError('Door is missing width')
+        if self.margin == None:
+            raise ValueError('Door is missing margin')
+        self._margined_width = self.width + self.margin * 2
+        return self._margined_width
+
+    # The door margined width
+    margined_width = property(get_margined_width, None, None, "The door margined width")
+
+    # Get the door segment
+    def get_segment (self) -> Optional[Segment]:
+        # Return internal value if it exists
+        if self._segment:
+            return self._segment
+        self._segment = self.generate_segment(self.width)
+        return self._segment
+
+    # The door segment
+    segment = property(get_segment, None, None, "The door segment")
+
+    # Get the door margined segment
+    def get_margined_segment (self) -> Optional[Segment]:
+        # Return internal value if it exists
+        if self._margined_segment:
+            return self._margined_segment
+        self._margined_segment = self.generate_segment(self.margined_width)
+        return self._margined_segment
+
+    # The door margined segment
+    margined_segment = property(get_margined_segment, None, None, "The door margined segment")
+
+    # Given a segment width, generate a new
+    # The new segment will be centered in the door point
+    # The new segment will be overlaped with the room segment where the door point is
+    def generate_segment (self, width : number) -> Segment:
+        # If the door point or room are not assigned we can not generate the segment
+        if not self.room or not self.point:
+            return None
+        # Otheriwse, generate the margined segment
+        room_segment = next(segment for segment in self.room.boundary.exterior_polygon.segments if self.point in segment )
+        direction = room_segment.direction
+        half_width = width / 2
+        a = self.point - direction * half_width
+        b = self.point + direction * half_width
+        if a not in room_segment or b not in room_segment:
+            raise ValueError('The door segment does not fit in the room boundary')
+        return Segment(a,b)
         
 # A room is a smart boundary that may contain other boundaries with conservative areas and size restrictions
 class Room:
@@ -45,8 +112,11 @@ class Room:
         min_size : Optional[number] = None,
         # Maximum size in at least one dimension
         max_size : Optional[number] = None,
-        # The main entrance, which will always be only one and will set the origin of possible corridors
-        door : Optional[Door] = None,
+        # The doors to enter the room and start corridors
+        doors : Optional[List[Door]] = None,
+        # The default inputs for all doors whose inputs are not specified
+        # These options are inherited by children rooms whose options are not specified
+        door_args : Optional[Dict] = None,
         # The name and color parameters are only representation parameters and they have no effect in the logic
         display : bool = False,
         name : str = 'Unnamed',
@@ -54,7 +124,7 @@ class Room:
         fill_color : str = 'white',
         # Set other rooms inside this room
         children : List['Room'] = [],
-        ):
+    ):
         # Set internal variables
         self._boundary = None
         self._free_grid = None
@@ -98,7 +168,12 @@ class Room:
         # Parent free limit is set by the parent while setting the child boundary
         # Parent free limit is the maximum min size of all parent children but this child
         self.parent_free_limit = None
-
+        # Save input doors and door args
+        self.doors = doors
+        self.door_args = door_args
+        # Set the room corridor
+        # The corridor is just a list of segments
+        self.corridor = None
 
     def __str__(self):
         return '<Room "' + str(self.name) + '">'
@@ -261,6 +336,10 @@ class Room:
                 if not self.set_child_room_boundary(room):
                     raise RuntimeError('Child ' + room.name + ' has failed to be set')
 
+        # Now that all children bondaries are set we must set the corridor
+        self.set_doors()
+        self.set_corridor()
+
         # Set children boundaries recurisvely if the recursive flag was passed
         if recursive:
             for child in self.children:
@@ -402,6 +481,236 @@ class Room:
         minimum_rect = Rect.from_corner(corner, self.min_size, self.min_size)
         return Boundary(Polygon.from_rect(minimum_rect))
 
+    # Set room doors
+    # This must be done once the room boundary is set and stable
+    def set_doors (self):
+        # If room has no boundary then we can not set rooms
+        if not self.boundary:
+            raise ValueError('Trying to set doors in a room without boundary')
+        # Set the default door arguments in case they were not specified
+        if not self.door_args:
+            # If we are not the root, inherit parent default door arguments
+            if self.parent:
+                self.door_args = self.parent.door_args
+            # Otherwise, we have to guess the most suitable arguments
+            # Make the margined width of all doors equal to the minimum room minimum size
+            # Make the width of all doors the 80% of the margined width
+            margined_width = self.get_min_min_size()
+            width = margined_width * 0.8
+            margin = margined_width * 0.1
+            self.door_args = {
+                'width': width,
+                'margin': margin
+            }
+        # Set the doors in case they were not specified
+        if not self.doors:
+            # Set a single door connected to the parent (to the outside if this is the root)
+            self.doors = [ Door() ]
+        # Set each door
+        for door in self.doors:
+            # Set the door room as self
+            door.room = self
+            # Set missing door args
+            for arg, value in self.door_args.items():
+                current_value = getattr(door, arg)
+                if not current_value:
+                    setattr(door, arg, value)
+            # If the door point is already defined then just generate the margined segment
+            # This is to check that the room does actually fit in the room boundary
+            if door.point:
+                door.margined_segment
+                continue
+            # Otherwise, we must find a suitable point for the door
+            # Find all suitable room segments for the door
+            minimum_segment_length = door.width + 2 * door.margin
+            suitable_segments = [ segment for segment in self.boundary.exterior_polygon.segments if segment.length >= minimum_segment_length ]
+            # If there is no suitable room segments we stop here
+            # This may happen if the minimum size of the room is not enought to fit the door width including its margins
+            if len(suitable_segments) == 0:
+                raise ValueError('There is not a segment wide enought to fit the door')
+            # Find the parent corridor
+            corridor = None
+            if self.parent:
+                corridor = self.parent.corridor
+            # If there is no corridor (i.e. this room is the root) then select any random segment to set the door
+            if not corridor:
+                suitable_segment = suitable_segments[0]
+                door.point = suitable_segment.fit_point(door.margin)
+                door.margined_segment
+                continue
+            # If there is a corridor we must find the closest point and segment
+            # DANI: Antes hay que programar el generar el pasillo
+
+    # Calculate which segments make the shortest path to connect parent doors and all children rooms
+    def set_corridor (self):
+        # Use both self boundary and all children room boundary segments
+        available_segments = []
+        # Split self boundaries at the doors
+        door_points = [ door.point for door in self.doors ]
+        for self_segment in self.boundary.segments:
+            available_segments += self_segment.split_at_points(door_points)
+        # Add all children segments
+        for child in self.children:
+            available_segments += child.boundary.segments
+        # Split and merge available segments according to overlaps
+        splitted_segments = []
+        for available_segment, other_segments in otherwise(available_segments):
+            # For each segment, find all cutting point (overlaps are implicit) with the rest of segments
+            other_points = []
+            for other_segment in other_segments:
+                other_points += other_segment.points
+            splitted_segments += available_segment.split_at_points(other_points)
+        # Remove duplicates
+        # At this point there should be no overlaps between splitted segments  
+        splitted_segments = list(set(splitted_segments))
+        # Now define "nodes"
+        # Nodes are points between splitted segments (with no duplicates)
+        # Each node may have from 2 up to 4 connected segments
+        # Each node may have from 1 up to 4 contact rooms
+        # First find all connected segments as nodes are defined
+        # Create a dictionary with the points as keys
+        nodes = {}
+        for segment in splitted_segments:
+            points = segment.points
+            for point in points:
+                current_node = nodes.get(point, None)
+                if current_node:
+                    current_node['connected_segments'].append(segment)
+                else:
+                    nodes[point] = {'connected_segments': [segment]}
+        # Find which rooms are in contact to each node
+        # Find also which nodes are doors
+        for node_point, node_data in nodes.items():
+            rooms = [ child for child in self.children if node_point in child.boundary ]
+            node_data['rooms'] = rooms
+            node_data['is_door'] = node_point in door_points
+        # Now find "non-redundant" nodes and the "paths" between them
+        # Redundant nodes are those whose contact rooms are already included in all connected nodes
+        # Knwoing this is useful when we are expanding our corridor since a reundant node will never solve the puzzle
+        # When we expand thorugh redundant nodes we can claim several nodes until we find a non-redundant node
+        # Note that nodes with 2 connected segments will always be redundant while others will be non-redundant
+        # IMPORTANT: Doors are also non-redundant nodes
+        for node_data in nodes.values():
+            node_data['is_redundant'] = len(node_data['connected_segments']) == 2 and not node_data['is_door']
+        # Then a path between non-redundant nodes is a list of segments, which are connected by redundant nodes
+        for node_point, node_data in nodes.items():
+            if node_data['is_redundant']:
+                continue
+            # Find all current node paths to other non-redundant nodes
+            paths = []
+            # Save the non-redundant node each path is leading to
+            path_nodes = []
+            for starting_segment in node_data['connected_segments']:
+                last_segment = starting_segment
+                last_point = next(point for point in last_segment.points if point != node_point)
+                last_node = nodes[last_point]
+                path = [ last_segment ]
+                # Keep moving forward until we find a non-redundant node
+                while last_node['is_redundant']:
+                    # If the node is redundant then there will be always only 2 connected segments and one of them will be the last
+                    last_segment = next( segment for segment in last_node['connected_segments'] if segment != last_segment )
+                    last_point = next(point for point in last_segment.points if point != last_point)
+                    last_node = nodes[last_point]
+                    path.append(last_segment)
+                    if last_point == node_point:
+                        raise ValueError('This should never happend. Do we have one room only?')
+                # Once we have the reached a non-redundant node save the accumulated path and the node itself
+                paths.append(path)
+                path_nodes.append(last_point)
+            # Add paths and path nodes to the node data
+            node_data['paths'] = paths
+            node_data['path_nodes'] = path_nodes
+        # Now find all possible path combinations until we cover all doors and rooms
+        # Start to solve the corridor by the first door
+        children_count = len(self.children)
+        current_corridor = None
+        current_corridor_length = None
+        start_point = self.doors[0].point
+        start_node = nodes[start_point]
+        start_rooms = set(start_node['rooms'])
+        start_path = []
+        start_path_points = [ start_point ]
+        start_available_paths = start_node['paths']
+        start_available_path_nodes = start_node['path_nodes']
+        def get_following_paths (
+            current_path : list,
+            current_path_nodes : list,
+            available_paths : list,
+            available_path_nodes : list,
+            current_rooms : set
+        ):
+            nonlocal current_corridor
+            nonlocal current_corridor_length
+            for i, next_path in enumerate(available_paths):
+                # Get the available paths/nodes after substracting the current next path
+                remaining_available_paths = available_paths[0:i] + available_paths[i+1:]
+                remaining_available_path_nodes = available_path_nodes[0:i] + available_path_nodes[i+1:]
+                # The follwoing node will be the other next path's node
+                following_node = available_path_nodes[i]
+                following_node_data = nodes[following_node]
+                # Get the following node paths which are not already included in the current path and its nodes
+                following_node_paths = following_node_data['paths']
+                following_node_path_nodes = following_node_data['path_nodes']
+                following_node_available_paths = []
+                following_node_available_path_nodes = []
+                for j, path in enumerate(following_node_paths):
+                    node = following_node_path_nodes[j]
+                    if node not in current_path_nodes:
+                        following_node_available_paths.append(path)
+                        following_node_available_path_nodes.append(node)
+                # Add the following node paths/nodes to the remaning available paths/nodes
+                # Then we get the available paths/nodes for the following path
+                following_available_paths = remaining_available_paths + following_node_available_paths
+                following_available_path_nodes = remaining_available_path_nodes + following_node_available_path_nodes
+                # Get the new following path after adding the last path while getting the next node
+                following_path = current_path + next_path
+                following_path_nodes = current_path_nodes + [ following_node ]
+                # Get the following path covered rooms
+                following_rooms = current_rooms.union(set(following_node_data['rooms']))
+                # If following path includes all rooms then it is a candidate to be the corridor
+                # DANI: Falta comprovar si cubre todas las puertas
+                if len(following_rooms) == children_count:
+                    # Check if this path is shorter than the current corridor
+                    # The shorter path will remain as the current corridor
+                    following_path_length = sum([ segment.length for segment in following_path ])
+                    if not current_corridor or following_path_length < current_corridor_length:
+                        current_corridor = following_path
+                        current_corridor_length = following_path_length
+                    continue
+                # If the follwoing path does not cover all rooms yet then keep expanding it
+                get_following_paths(
+                    following_path,
+                    following_path_nodes,
+                    following_available_paths,
+                    following_available_path_nodes,
+                    following_rooms
+                )
+        get_following_paths(
+            start_path,
+            start_path_points,
+            start_available_paths,
+            start_available_path_nodes,
+            start_rooms
+        )
+        # Display the final corridor
+        elements_to_display = current_corridor
+        for segment in elements_to_display:
+            segment.color = 'red'
+        self.update_display(extra=elements_to_display)
+        #add_frame(elements_to_display)
+
+
+
+    # Get the minimum of all minimum sizes
+    # Get to the the root and the check all children min sizes recuersively in order to get the minimum
+    # This function is meant to be used only once by the root, so its value is not stored
+    # WARNING: 0 values are removed
+    def get_min_min_size (self) -> number:
+        root = self.get_root_room()
+        all_rooms = root.get_rooms_recuersive()
+        all_min_sizes = [ room.min_size for room in all_rooms if room.min_size > 0 ]
+        return min(all_min_sizes)
+
     # Calculate how much area we need to expand
     def get_required_area (self):
         return resolute(self.forced_area - self.area)
@@ -418,7 +727,13 @@ class Room:
         # Check the required area is big enought to be meaningfull according to the resolution
         # i.e. check if expanding a segment with the minimum length would make it move more than the minimum resolution
         # If not, then we have finished the fitting
-        while abs(required_area / self.min_size) >= minimum_resolution:
+        # The resolution is multiplied by the minimum size since area error will always be bigger than length error
+        # DANI: Esto último es nuevo, hay que ver que tal
+        # DANI: En realidad este problema no tiene solución fácil
+        # DANI: Es mejor con la multiplicación que sin ella. Le da más flexibilidad a la resolución del puzle acelerando así el proceso
+        # DANI: Es muy peligrosos que queden espacios libres sin reclamar (cuando no tenga que haberlos)
+        # DANI: Pero una resolución pequeña no hará que no queden espacios libres, simplemente hará que esos espacios sean muy pequeños
+        while abs(required_area / self.min_size) >= minimum_resolution * self.min_size:
             # If the required are is positive it means we must expand our room
             if required_area > 0:
                 # Set a function to supervise if each expansion step is succesful or not
@@ -1193,15 +1508,14 @@ class Room:
         return free_frontiers, brother_frontiers, parent_frontiers
 
     # Go uppwards in the hyerarchy until you reach the room which has no parent
-    def get_root_room (self):
+    def get_root_room (self) -> 'Room':
         root = self
         while root.parent:
             root = root.parent
         return root
 
     # Get this room and all children rooms recursively
-    # Get only rooms with boundary
-    def get_rooms_recuersive (self):
+    def get_rooms_recuersive (self) -> List['Room']:
         rooms = [self]
         for room in self.children:
             rooms += room.get_rooms_recuersive()

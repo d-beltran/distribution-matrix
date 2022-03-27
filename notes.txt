@@ -1,6 +1,14 @@
 RAM
 
+- tiene que encontrar el pasillo
+	* falta chequear que contenga todas las puertas (fácil)
+	* en caso de no haber puertas asignadas por defecto hay que usar esto en favor del pasillo
+		- que se resuelva el pasillo sin necesidad de cubrir la puerta
+		- al final se busca el punto más cercano del pasillo a una pared exterior
+		- este punto será la puerta (o dará lugar a ella si es una esquina o no cabe)
+
 - que las habitaciones se vayan posicionando de cara a formar un pasillo pequeño
+	** El pasillo se tendrá que resolver con cada child una vez ha acabado de establecer su perímetro
 
 - expand corner
 	* solucionará uno de los problemas más habituales de la cruz

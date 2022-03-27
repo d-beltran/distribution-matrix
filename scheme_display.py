@@ -159,6 +159,12 @@ def get_segments_from_anything (things : list):
                 segments += boundary.exterior_polygon.segments
                 for polygon in boundary.interior_polygons:
                     segments += polygon.segments
+        # If it is a door or somethig that has a segment
+        if hasattr(thing, 'segment'):
+            segment = thing.segment
+            if segment:
+                segment.color = 'white'
+                segments.append(segment)
     return segments
 
 # Mine all possible rectangles from a list of different vectorial_base elements

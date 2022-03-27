@@ -400,9 +400,10 @@ class Segment(Line):
         return len(remaining_segments) == 0
 
     # Split the segment at multiple points and return the splitted segments
-    def split_at_points(self, points : List[Point]) -> list:
-        # Get only thouse points which are cutting the segment
-        cutting_points = [ point for point in points if point in self and point != self.a and point != self.b ]
+    # Duplicated or non-cutting points are discarded
+    def split_at_points(self, points : List[Point]) -> Generator['Segment', None, None]:
+        # Get only those points which are cutting the segment
+        cutting_points = [ point for point in set(points) if point in self and point != self.a and point != self.b ]
         # If no points are cutting the segment then return only the intact segment
         if len(cutting_points) == 0:
             yield self
@@ -535,6 +536,34 @@ class Segment(Line):
         # Find the non-common point in other and build the new segment
         b = next( point for point in other.points if not self.has_point(point) )
         return Segment(a,b)
+
+    # Get a point inside the current segment with a specific margin length
+    def fit_point (self, margin : number) -> 'Point':
+        # Check the margin width to be suitable for self segment length
+        if self.length < 2 * margin:
+            raise ValueError('Margins are not suitable for this segment')
+        # Get a random point inside the segment where the a point of the new segment could be
+        new_limit_a = self.a + self.direction * margin
+        new_limit_b = self.b - self.direction * margin
+        new_region = Segment(new_limit_a, new_limit_b)
+        return new_region.get_random_point()
+
+    # Get a segment inside the current segment with a specific length and margin length
+    def fit_segment (self, width : number, margin : number) -> 'Segment':
+        # Check this segment and the margins widths to be suitable for self segment length
+        if self.length < width + 2 * margin:
+            raise ValueError('Conditions are not suitable for this segment')
+        # Get a random point inside the segment where the a point of the new segment could be
+        new_a_limit_a = self.a + self.direction * margin
+        new_a_limit_b = self.b - self.direction * (width + margin)
+        new_a_region = Segment(new_a_limit_a, new_a_limit_b)
+        new_a = new_a_region.get_random_point()
+        new_b = new_a + self.direction * width
+        return Segment(new_a, new_b)
+
+    # Get a random point inside this segment
+    def get_random_point (self) -> 'Point':
+        return self.a + self.direction * (self.length * random.random())
   
 
 # A corner is a point where 2 non-paralel segments are connected
