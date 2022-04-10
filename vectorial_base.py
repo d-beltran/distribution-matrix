@@ -198,6 +198,10 @@ class Vector:
         same_magnitude = isclose(self.get_magnitude(), other.get_magnitude())
         return same_slope and same_magnitude
 
+    # Given a vector get a new vector where x is y and y is x
+    def reverse (self) -> 'Vector':
+        return Vector(self.y, self.x)
+
 # A line defined by a point and a directional vector
 class Line:
 

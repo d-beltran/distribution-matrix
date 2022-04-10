@@ -101,7 +101,8 @@ def represent (queue):
         for segment in segments:
             xs = [segment.a.x, segment.b.x]
             ys = [segment.a.y, segment.b.y]
-            ploted_segments = ax.plot(xs,ys,color=segment.color)
+            zs = segment.z if hasattr(segment, 'z') else None
+            ploted_segments = ax.plot(xs,ys,color=segment.color, zorder=zs)
 
         # Draw all rect areas
         for rect in rects:
@@ -159,12 +160,20 @@ def get_segments_from_anything (things : list):
                 segments += boundary.exterior_polygon.segments
                 for polygon in boundary.interior_polygons:
                     segments += polygon.segments
-        # If it is a door or somethig that has a segment
-        if hasattr(thing, 'segment'):
-            segment = thing.segment
-            if segment:
-                segment.color = 'white'
-                segments.append(segment)
+        # If it is a room or something with doors
+        if hasattr(thing, 'doors'):
+            doors = thing.doors
+            if doors:
+                for door in doors:
+                    segment = door.segment
+                    if segment:
+                        segment.color = 'white'
+                        segment.z = 17 # Make this segment display in the top layer
+                        segments.append(segment)
+                        # Create a new segment to represent the door open
+                        door_segment = door.get_open_door()
+                        segments.append(door_segment)
+
     return segments
 
 # Mine all possible rectangles from a list of different vectorial_base elements

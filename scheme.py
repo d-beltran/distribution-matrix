@@ -9,8 +9,7 @@ from math import sqrt, inf
 
 # Set the seed and print it
 seed = None
-seed = 157966  # Esto da un huequecito minúsculo que me jode la vida, hay que avergiuar como cargarselo
-#seed = 51391  # Esto es rápido
+#seed = 333853
 if not seed:
     seed = round(random.random() * 999999)
 print('Seed ' + str(seed))
@@ -41,6 +40,7 @@ class Door:
         self._margined_width = None
         self._segment = None
         self._margined_segment = None
+        self._direction = None
         self.room = None
         self.connected_room = None
 
@@ -97,8 +97,30 @@ class Door:
         a = self.point - direction * half_width
         b = self.point + direction * half_width
         if a not in room_segment or b not in room_segment:
-            raise ValueError('The door segment does not fit in the room boundary')
+            raise ValueError('The door segment does not fit in the room boundary: ' + str(Segment(a,b)))
         return Segment(a,b)
+
+    # Get the door direction
+    def get_direction (self) -> Optional[Vector]:
+        # Return internal value if it exists
+        if self._direction:
+            return self._direction
+        if not self.segment:
+            return None
+        direction = self.segment.direction.reverse().normalized()
+        self._direction = direction
+        return direction
+    # The direction crosses the door segment perpendicularly
+    # It is a normalized vector
+    direction = property(get_direction, None, None, "The door direction")
+
+    # Generate a new segment which represents the door open
+    # Note that this function is used for display pourposes only
+    def get_open_door (self) -> 'Segment':
+        segment = self.segment
+        if not segment:
+            return None
+        return Segment(segment.a, segment.a + self.direction * segment.length)
         
 # A room is a smart boundary that may contain other boundaries with conservative areas and size restrictions
 class Room:
@@ -523,9 +545,13 @@ class Room:
             # Otherwise, we must find a suitable point for the door
             # Find all suitable room segments for the door
             minimum_segment_length = door.width + 2 * door.margin
+            # DANI: Esto debería tratar de evitar que la puerta caiga allí donde hay una pared interior
+            # DANI: Además no se evita que se solapen puertas
             suitable_segments = [ segment for segment in self.boundary.exterior_polygon.segments if segment.length >= minimum_segment_length ]
             # If there is no suitable room segments we stop here
             # This may happen if the minimum size of the room is not enought to fit the door width including its margins
+            # DANI: Una vez esto sea lo suficientemente inteligente como para no meter puertas donde hay paredes interiores esto podría pasar
+            # DANI: Tal vez se podría arreglar haciendo pasillo extraen la zona de la puerta y permitirlo igualmente
             if len(suitable_segments) == 0:
                 raise ValueError('There is not a segment wide enought to fit the door')
             # Find the parent corridor
@@ -534,8 +560,8 @@ class Room:
                 corridor = self.parent.corridor
             # If there is no corridor (i.e. this room is the root) then select any random segment to set the door
             if not corridor:
-                suitable_segment = suitable_segments[0]
-                door.point = suitable_segment.fit_point(door.margin)
+                suitable_segment = random.choice(suitable_segments)
+                door.point = suitable_segment.fit_point(door.margined_width / 2)
                 door.margined_segment
                 continue
             # If there is a corridor we must find the closest point and segment
@@ -690,7 +716,7 @@ class Room:
                 following_rooms = current_rooms.union(set(following_node_data['rooms']))
                 # If following path includes all rooms then it is a candidate to be the corridor
                 # DANI: Falta comprovar si cubre todas las puertas
-                if len(following_rooms) == children_count:
+                if len(following_rooms) == children_count and all(door.point in following_path_nodes for door in self.doors):
                     # Check if this path is shorter than the current corridor
                     # The shorter path will remain as the current corridor
                     following_path_length = get_path_length(following_path)

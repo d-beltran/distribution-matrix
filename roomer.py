@@ -15,6 +15,7 @@ if __name__ == '__main__':
         boundary=test_boundary_3,
         display=True,
         name='Planta',
+        doors=[ Door(), Door() ],
         children=[
             Room(
                 #polygon=Polygon.from_corners(test_polygon_6),
