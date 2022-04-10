@@ -613,25 +613,30 @@ class Room:
                     last_node = nodes[last_point]
                     path.append(last_segment)
                     if last_point == node_point:
-                        raise ValueError('This should never happend. Do we have one room only?')
+                        raise ValueError('This should never happen. Do we have one room only?')
                 # Once we have the reached a non-redundant node save the accumulated path and the node itself
-                paths.append(path)
-                path_nodes.append(last_point)
+                # In case the point is already in the list it means we have two paths for the same node
+                # In this case, get the shortest path
+                if last_point in path_nodes:
+                    index = path_nodes.index(last_point)
+                    previous_path = paths[index]
+                    if get_path_length(path) < get_path_length(previous_path):
+                        paths[index] = path
+                else:
+                    path_nodes.append(last_point)
+                    paths.append(path)
             # Add paths and path nodes to the node data
             node_data['paths'] = paths
             node_data['path_nodes'] = path_nodes
         # Now find all possible path combinations until we cover all doors and rooms
-        # Start to solve the corridor by the first door
+        # Set a function to generate corridors by recuersively joining node paths
         children_count = len(self.children)
         current_corridor = None
         current_corridor_length = None
-        start_point = self.doors[0].point
-        start_node = nodes[start_point]
-        start_rooms = set(start_node['rooms'])
-        start_path = []
-        start_path_points = [ start_point ]
-        start_available_paths = start_node['paths']
-        start_available_path_nodes = start_node['path_nodes']
+        # Trak which combinations of path nodes we have tried allready
+        # Combinations of path nodes are equivalent to combinations of paths, but easier to compare
+        # This way we do not analyze the same corridor multiple times
+        already_covered_path_nodes = []
         def get_following_paths (
             current_path : list,
             current_path_nodes : list,
@@ -641,27 +646,43 @@ class Room:
         ):
             nonlocal current_corridor
             nonlocal current_corridor_length
+            nonlocal already_covered_path_nodes
+            # Check if the current path nodes have been covered already and stop here if so
+            current_path_nodes_set = set(current_path_nodes)
+            if any( current_path_nodes_set == set(path_nodes) for path_nodes in already_covered_path_nodes ):
+                return
+            # Add current path nodes to the covered list in order to avoid repeating this path further
+            already_covered_path_nodes.append(current_path_nodes)
+            # Try to expand the current corridor using all available paths
             for i, next_path in enumerate(available_paths):
-                # Get the available paths/nodes after substracting the current next path
-                remaining_available_paths = available_paths[0:i] + available_paths[i+1:]
-                remaining_available_path_nodes = available_path_nodes[0:i] + available_path_nodes[i+1:]
-                # The follwoing node will be the other next path's node
+                # The following node will be the other next path's node
                 following_node = available_path_nodes[i]
+                # Get the corresponding node data
                 following_node_data = nodes[following_node]
+                # Get the remaining available paths/nodes after substracting the current next path
+                following_available_paths = available_paths[0:i] + available_paths[i+1:]
+                following_available_path_nodes = available_path_nodes[0:i] + available_path_nodes[i+1:]
                 # Get the following node paths which are not already included in the current path and its nodes
                 following_node_paths = following_node_data['paths']
                 following_node_path_nodes = following_node_data['path_nodes']
-                following_node_available_paths = []
-                following_node_available_path_nodes = []
-                for j, path in enumerate(following_node_paths):
-                    node = following_node_path_nodes[j]
-                    if node not in current_path_nodes:
-                        following_node_available_paths.append(path)
-                        following_node_available_path_nodes.append(node)
                 # Add the following node paths/nodes to the remaning available paths/nodes
                 # Then we get the available paths/nodes for the following path
-                following_available_paths = remaining_available_paths + following_node_available_paths
-                following_available_path_nodes = remaining_available_path_nodes + following_node_available_path_nodes
+                for j, path in enumerate(following_node_paths):
+                    node = following_node_path_nodes[j]
+                    # If the node is already in the current path nodes list then we skip it
+                    if node in current_path_nodes:
+                        continue
+                    # In case the point is already in the list of available nodes it means we have two paths for the same node
+                    # In this case, get the shortest path
+                    if node in following_available_path_nodes:
+                        index = following_available_path_nodes.index(node)
+                        previous_path = following_available_paths[index]
+                        if get_path_length(path) < get_path_length(previous_path):
+                            following_available_paths[index] = path
+                    # Otherwise, add the current new available path and node to the lists
+                    else:
+                        following_available_paths.append(path)
+                        following_available_path_nodes.append(node)
                 # Get the new following path after adding the last path while getting the next node
                 following_path = current_path + next_path
                 following_path_nodes = current_path_nodes + [ following_node ]
@@ -672,7 +693,7 @@ class Room:
                 if len(following_rooms) == children_count:
                     # Check if this path is shorter than the current corridor
                     # The shorter path will remain as the current corridor
-                    following_path_length = sum([ segment.length for segment in following_path ])
+                    following_path_length = get_path_length(following_path)
                     if not current_corridor or following_path_length < current_corridor_length:
                         current_corridor = following_path
                         current_corridor_length = following_path_length
@@ -685,6 +706,14 @@ class Room:
                     following_available_path_nodes,
                     following_rooms
                 )
+        # Call the function starting to solve the corridor at the first door
+        start_point = self.doors[0].point
+        start_node = nodes[start_point]
+        start_rooms = set(start_node['rooms'])
+        start_path = []
+        start_path_points = [ start_point ]
+        start_available_paths = start_node['paths']
+        start_available_path_nodes = start_node['path_nodes']
         get_following_paths(
             start_path,
             start_path_points,
@@ -1553,3 +1582,11 @@ def solve(room : Room, display : bool = False):
     global display_solving_process
     display_solving_process = display
     room.set_children_boundaries(recursive=True)
+
+# -----------------------------------------------------
+
+# Auxiliar functions
+
+# Given a list of segments (path) return the sum of their lengths
+def get_path_length (path : List['Segment']) -> number:
+    return sum([ segment.length for segment in path ])
