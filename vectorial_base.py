@@ -385,6 +385,14 @@ class Segment(Line):
     def has_point(self, point : Point) -> bool:
         return point == self.a or point == self.b
 
+    # Given a segment point (a or b) return the other one
+    def get_other_point(self, point : Point) -> Point:
+        if point == self.a:
+            return self.b
+        elif point == self.b:
+            return self.a
+        else:
+            raise ValueError('Input point is not one of the segment points')
     # Check if two segments have a point in common
     # WARNING: They may be overlapped
     def is_connected_with(self, other : 'Segment') -> bool:
@@ -463,11 +471,11 @@ class Segment(Line):
         return Point(x, y)
 
     # Get the point in the middle of the segment
-    # This functions is "dangerous"
+    # CRITICAL WARNING: Relying on the result of this function is risky and it may lead to unaccuracies and unstability
+    # CRITICAL WARNING: Do never use this function to solve grid or polygon split calculations
     # According to the resolutution of 0.0001, imagine we have a segment where self.length % 10000 is not 0
-    # Then the middle point of a -> b will be different from the middle point of b -> a although they are the same segment
+    # Then the middle point of a -> b will be different from the middle point of b -> a although they should be the same
     def get_middle_point (self) -> Point:
-        print('WARNING: Using the "get middle point" function is risky and it may lead to unaccuracies and unstability')
         return self.a + self.vector / 2
 
     # Get the overlap segment between two segments
@@ -568,6 +576,18 @@ class Segment(Line):
     # Get a random point inside this segment
     def get_random_point (self) -> 'Point':
         return self.a + self.direction * (self.length * random.random())
+
+    # Get a segment after substracting a margin at both ends
+    def get_margined_segment (self, margin : number) -> 'Segment':
+        # Check the margin width to be suitable for self segment length
+        if self.length < 2 * margin:
+            raise ValueError('Margins (' + str(margin) + ') would consume this segment totally: ' + str(self))
+        if self.length == 2 * margin:
+            raise ValueError('Margins (' + str(margin) + ') would consume this segment exact length: ' + str(self))
+        # Build the margined segment
+        new_a = self.a + self.direction * margin
+        new_b = self.b - self.direction * margin
+        return Segment(new_a, new_b)
   
 
 # A corner is a point where 2 non-paralel segments are connected
@@ -1038,6 +1058,12 @@ class Polygon:
     def __eq__(self, other):
         if isinstance(other, self.__class__) or isinstance(other, Rect):
             return all([ segment in self.segments for segment in other.segments ])
+        return False
+
+    def __contains__(self, other):
+        for segment in self.segments:
+            if other in segment:
+                return True
         return False
 
     # Get the polygon corners
