@@ -1,4 +1,4 @@
-from typing import List, Union, Optional, Generator
+from typing import Union, Optional, List, Tuple, Generator
 
 from scheme_display import add_frame
 
@@ -6,7 +6,7 @@ from functools import reduce
 
 import itertools
 
-from math import sqrt, isclose
+from math import sqrt, isclose, sin, cos, degrees, acos
 
 import random
 colors = [
@@ -202,6 +202,13 @@ class Vector:
     def reverse (self) -> 'Vector':
         return Vector(self.y, self.x)
 
+    # Given a vector and an angle get a new clockwise rotated vector
+    # Source: https://en.wikipedia.org/wiki/Rotation_matrix
+    def rotate (self, angle) -> 'Vector':
+        x = + cos(angle) * self.x + sin(angle) * self.y
+        y = - sin(angle) * self.x + cos(angle) * self.y
+        return Vector(x,y)        
+
 # A line defined by a point and a directional vector
 class Line:
 
@@ -378,42 +385,43 @@ class Segment(Line):
         return Segment(self.b, self.a, self.color)
 
     # Create a new segment identical to this segment but with a specified color
-    def get_colored_segment(self, color : str):
+    def get_colored_segment (self, color : str):
         return Segment(self.a, self.b, color)
 
     # Check if one of the segment points matches a point
-    def has_point(self, point : Point) -> bool:
+    def has_point (self, point : Point) -> bool:
         return point == self.a or point == self.b
 
     # Given a segment point (a or b) return the other one
-    def get_other_point(self, point : Point) -> Point:
+    def get_other_point (self, point : Point) -> Point:
         if point == self.a:
             return self.b
         elif point == self.b:
             return self.a
         else:
             raise ValueError('Input point is not one of the segment points')
+
     # Check if two segments have a point in common
     # WARNING: They may be overlapped
-    def is_connected_with(self, other : 'Segment') -> bool:
+    def is_connected_with (self, other : 'Segment') -> bool:
         return self.has_point(other.a) or self.has_point(other.b)
 
     # Check if two segments form a corner
     # i.e. they have a point in common and both segments are not paralel
-    def makes_corner_with(self, other : 'Segment') -> bool:
+    def makes_corner_with (self, other : 'Segment') -> bool:
         if self.is_paralel_to(other):
             return False
         return self.is_connected_with(other)
 
     # Check if a line is fully covered by a list of segments
     # i.e. substract all segments from self and if there is still a remaining segment it is not covered
-    def is_covered_by(self, segments : List['Segment']) -> bool:
+    def is_covered_by (self, segments : List['Segment']) -> bool:
         remaining_segments = self.substract_segments(segments)
         return len(remaining_segments) == 0
 
     # Split the segment at multiple points and return the splitted segments
     # Duplicated or non-cutting points are discarded
-    def split_at_points(self, points : List[Point]) -> Generator['Segment', None, None]:
+    def split_at_points (self, points : List[Point]) -> Generator['Segment', None, None]:
         # Get only those points which are cutting the segment
         cutting_points = [ point for point in set(points) if point in self and point != self.a and point != self.b ]
         # If no points are cutting the segment then return only the intact segment
@@ -421,7 +429,7 @@ class Segment(Line):
             yield self
             return
         # Sort points by distance with the segment 'a' point
-        def by_distance(point):
+        def by_distance (point):
             return self.a.get_distance_to(point)
         sorted_points = sorted(cutting_points, key=by_distance)
         # Nex create all possible segments with these points
@@ -590,6 +598,31 @@ class Segment(Line):
         return Segment(new_a, new_b)
   
 
+# A corner is a point which makes a corner in a rectangle or polygon
+# It stores additional data:
+#   - segments: The 2 non-paralel segments connected to the corner
+#     i.e. both segments have this point ('a' or 'b') in common
+#     IMPORTANT: It is a standard that the first segment enters the corner while the second exits the corner
+#     i.e. first segment is 'a' -> (corner) and second segment is (corner) -> 'b'
+#   - inside: The inside argument is refered to if this corner points towards the 'inside' of the rectangle/polygon
+class Corner(Point):
+
+    def __init__(self, x : number, y : number, in_segment : Segment, out_segment : Segment, inside : bool = None):
+        super().__init__(x, y)
+        if in_segment.b != self or out_segment.a != self:
+            raise RuntimeError('The corner does not follow the standard')
+        self.in_segment = in_segment
+        self.out_segment = out_segment
+        # Save also both segments as a tuple
+        self.segments = self.in_segment, self.out_segment
+        # Save in addition the extreme points of segments
+        # i.e. the in segment 'a' point and the out segment 'b' point
+        self.in_point = in_segment.a
+        self.out_point = out_segment.b
+        # Save also both points as a tuple
+        self.points = self.in_point, self.out_point
+        self.inside = inside
+
 # A corner is a point where 2 non-paralel segments are connected
 # i.e. both segments have this point ('a' or 'b') in common
 # IMPORTANT: It is a standard that the first segment enters the corner while the second exits the corner
@@ -612,33 +645,6 @@ class Corner(Point):
         # Save also both points as a tuple
         self.points = self.in_point, self.out_point
         self.inside = inside
-
-    # Find out if this corner is continuous with other corner
-    # Is so, return the merge of both continuous segments
-    def get_continuous_segment_with(self, other):
-        # If the corner point is not the same we are over
-        if other != self:
-            return None
-        # Calculate the normalized a (from in) and b (from out) points
-        # i.e. the a and b points if both segments length was 1
-        # Segments which overlap will return identical points
-        self_normalized_a = self - self.in_segment.vector.normalized()
-        self_normalized_b = self + self.out_segment.vector.normalized()
-        self_points = [ self_normalized_a, self_normalized_b ]
-        other_normalized_a = other - other.in_segment.vector.normalized()
-        other_normalized_b = other + other.out_segment.vector.normalized()
-        other_points = [ other_normalized_a, other_normalized_b ]
-        # Find self points which do not match any other point
-        self_different = [ p for p, point in enumerate(self_points) if point not in other_points ]
-        # If there are no identical points or both are identical we are overordered_segmentsnt not in self_points ]
-        # And finally we check that both different points belong to aligned segments
-        # For this we just check if the corner point is between them
-        self_different_point = self.points[self_different[0]]
-        other_different_point = other.points[other_different[0]]
-        continuous_segment = Segment(self_different_point, other_different_point)
-        if self not in continuous_segment:
-            return None
-        return continuous_segment
 
 # A rectangular area defined by 2 coordinates (Points): 'max' and 'min'
 class Rect:
@@ -959,6 +965,7 @@ class Polygon:
         # The size is the length to cross the whole boundary
         self.size = self.get_box().get_crossing_segment().length
         # Set internar variables
+        self._clockwise = None
         self._corners = None
         self._grid = None
 
@@ -1029,7 +1036,7 @@ class Polygon:
 
     # Set the polygon from its corners in order
     @classmethod
-    def from_corners(cls, corners : List[Corner]):
+    def from_corners (cls, corners : List[Corner]):
         # Check that there are at least 4 points
         if len(corners) < 4:
             raise RuntimeError('It is required at least 4 points')
@@ -1043,36 +1050,51 @@ class Polygon:
 
     # Set the polygon from a rectangle
     @classmethod
-    def from_rect(cls, rect : Rect):
+    def from_rect (cls, rect : Rect):
         return cls(rect.segments)
 
-    def __str__(self):
+    def __str__ (self):
         return ', '.join([str(segment) for segment in self.segments])
 
-    def __repr__(self):
+    def __repr__ (self):
         return ', '.join([str(segment) for segment in self.segments])
 
     def __lt__(self, other):
         return self.get_box().area < other.get_box().area
 
-    def __eq__(self, other):
+    def __eq__ (self, other):
         if isinstance(other, self.__class__) or isinstance(other, Rect):
             return all([ segment in self.segments for segment in other.segments ])
         return False
 
-    def __contains__(self, other):
+    def __contains__ (self, other):
         for segment in self.segments:
             if other in segment:
                 return True
         return False
 
+    # Check if the poligon is clockwise or counterclockwise
+    def is_clockwise (self):
+        # If clockwise was previously calculated then return it
+        if self._clockwise:
+            return self._clockwise
+        # Find out if the polygon is clockwise and set is corners
+        clockwise, corners = self.setup()
+        self._clockwise = clockwise
+        self._corners = corners
+        return self._clockwise
+
+    # Polygon clockwise (read only)
+    clockwise = property(is_clockwise, None, None, "Get if the polygon is clockwise or counterclockwise")
+
     # Get the polygon corners
-    def get_corners(self):
+    def get_corners (self):
         # If corners were previously calculated then return them
         if self._corners:
             return self._corners
-        # Get all corners in the polygon
-        corners = self.set_corners()
+        # Find out if the polygon is clockwise and set is corners
+        clockwise, corners = self.setup()
+        self._clockwise = clockwise
         self._corners = corners
         return self._corners
 
@@ -1082,7 +1104,7 @@ class Polygon:
     # Get the polygon grid
     # If grid was previously calculated then return it
     # Otherwise, get all rectangles which form the polygon and set a new grid with them
-    def get_grid(self):
+    def get_grid (self):
         if not self._grid:
             rects = self.split_in_rectangles()
             self._grid = Grid(rects)
@@ -1096,7 +1118,7 @@ class Polygon:
         return [ corner for corner in self.corners if corner.inside ]
 
     # Check if the current segments create a closed polygon or if it is open
-    def is_closed(self):
+    def is_closed (self):
         # Check that each segment ends in the same point that the next segment starts
         for current, nextone in pairwise(self.segments, retro=True):
             if current.b != nextone.a:
@@ -1108,7 +1130,7 @@ class Polygon:
     # Check each polygon segment to not be diagonal
     # Otherwise return an error, since polygons with diagonal segments are not yet supported
     # DANI: En principio algun día se podría hacer esto
-    def check(self):
+    def check (self):
         # Check the polygon to be closed
         if not self.is_closed():
             raise self.open_polygon_error
@@ -1121,7 +1143,9 @@ class Polygon:
     # The 'segments' variable defines the two segments of the polygon which form the corner itself
     # The 'inside' variable defines if the corner is "pointing" to the inside of the polygon
     # (e.g. rectangles have no inside corners while an 'L' has one inside corner)
-    def set_corners(self):
+    # DANI: OBSOLETO -> Ahora se usa la función 'setup'
+    # DANI: Este sistema no soporta lineas diagonales aunque es más rápido
+    def set_corners_obsolete (self):
         # For each segment, save the end point and if the direction of the next segment is left
         # Count how many corners are there in one direction (left in this case)
         precorners = []
@@ -1141,11 +1165,9 @@ class Polygon:
         difference = 2*left_count - len(precorners)
 
         # There should be always 4 more corners in one direction than in the other (may be left or right)
-        # DANI: Esto es para el desarrollo. Una vez esté comprobado que los perímteros son estables quitaré esto porque retrasa el cálculo
         if abs(difference) != 4:
             # If you see this error there may be splitted segments in your polygon
             # Use the non-canonical class method to set your polygon
-            #add_frame(self.segments)
             raise RuntimeError('There is something wrong with the polygon')
 
         # Check if are more corners in the counted direction (true) or the other (false)
@@ -1161,13 +1183,73 @@ class Polygon:
             corners.append(corner)
         return corners
 
+    # Understand which is the inside and which is the outside of the polygon
+    # Set the polygon corners as points with additional stored values
+    #   - The 'segments' variable defines the two segments of the polygon which form the corner itself
+    #   - The 'inside' variable defines if the corner is "pointing" to the inside of the polygon
+    #     (e.g. rectangles have no inside corners while an 'L' has one inside corner)
+    # Set the polygon sides as segments with additional stored values
+    #   - The 'inside_left'
+    # In order to know which is the inside and which is the outside we do the following:
+    # First we count the angle difference between each pair of segments
+    # When the further segment is rotated clockwise respect to the previous segment the difference is positive
+    # When the further segment is rotated counterclockwise respect to the previous segment the difference is negative
+    # If all differences are added then they will always sum -360 (counterclockwise polygon) or 360 (clockwise polygon)
+    #   * Note that the "clockwise" or "counterclockwise" polygon term referes only to the sense of the segments it is made of
+    #     It could be inverted easily by exchanging the a and b points of every segment, but this is useless
+    # If we have a clockwise polygon then all segments clockwise direction points to the inside of the polygon and vice versa
+    # If we have a counterclockwise polygon then all segments counterclockwise direction points to the inside of the polygon and vice versa
+    def setup (self) -> Tuple[bool, List['Corner']]:
+        # For each segment, save the end point and if the direction of the next segment is left
+        # Count how many corners are there in one direction (left in this case)
+        precorners = []
+        angle_count = 0
+        for current, nextone in pairwise(self.segments, retro=True):
+            point = current.b
+            # Given two continue segment vectors, find out the angle between them
+            # By normalizing vectors we skip having to divide the dot product by the vector magnitudes product
+            a = current.vector.normalized()
+            b = nextone.vector.normalized()
+            dot_product = a.x * b.x + a.y * b.y
+            angle = degrees(acos(dot_product))
+            # If the second segment is pointing counterclockwise respect to the first vector then turn the angle negative
+            cz = a.x * b.y - a.y * b.x
+            if cz > 0:
+                angle = -angle
+            if angle == 0:
+                # If you see this error there may be splitted segments in your polygon
+                # Use the non-canonical class method to set your polygon
+                raise ValueError('There are 2 aligned segments: ' + str(current) + ' and ' + str(nextone))
+            clockwise = angle > 0
+            angle_count += angle
+            precorners.append((point, [current, nextone], clockwise))
+
+        # There should be always 360 more grades in one direction than in the other (may be clockwise or counterclockwise)
+        if abs(angle_count) != 360:
+            # If you see this error there may be splitted segments in your polygon
+            # Use the non-canonical class method to set your polygon
+            raise RuntimeError('There is something wrong with the polygon')
+
+        # Check if are more corners in the counted direction (true) or the other (false)
+        clockwise_polygon = angle_count > 0
+
+        # Now set the real corners and save them in the global variable 'corners'
+        # Corners with the minoritarian direction will be set as 'inside = True'
+        corners = []
+        for precorner in precorners:
+            point, segments, clockwise = precorner
+            inside = clockwise != clockwise_polygon
+            corner = Corner(*point.coords, *segments, inside)
+            corners.append(corner)
+        return clockwise_polygon, corners
+
     # Get all polygon points
-    # DANI: Obsoleto
-    def get_points(self):
+    # DANI: Obsoleto -> Usa las corners
+    def get_points (self) -> List['Point']:
         return [ segment.a for segment in self.segments ]
 
     # Get a rectangle which contains the whole polygon
-    def get_box(self):
+    def get_box (self) -> 'Rect':
         points = self.get_points()
         x_coords = [ point.x for point in points ]
         y_coords = [ point.y for point in points ]
@@ -1184,7 +1266,7 @@ class Polygon:
         return sum([ segment.length for segment in self.segments ])
 
     # Find out if a point is in the border of the polygon (segments and corners)
-    def in_border(self, point : Point) -> bool:
+    def in_border (self, point : Point) -> bool:
         for corner in self.corners:
             if point == corner:
                 return True
@@ -1203,13 +1285,29 @@ class Polygon:
                 return segment
         return None
 
+    # Get a specific polygon segment by specifying a segment that overlaps partial or totally this segment
+    def get_border_segment (self, segment : Segment):
+        for polygon_segment in self.segments:
+            overlap = polygon_segment.get_overlap_segment(segment)
+            if overlap:
+                return polygon_segment
+        return None
+
+    # Given a segment which overlaps the polygon, get a vector which s perpendicular to this segment and points into de inside of the polygon
+    def get_border_inside (self, segment : Segment):
+        polygon_segment = self.get_border_segment(segment)
+        if not polygon_segment:
+            raise ValueError('The segment is not in the polyigon')
+        angle = 90 if self.clockwise else -90
+        return polygon_segment.direction.rotate(angle)
+
     # Return all points in the polygon segments which intersect with a given segment
     # Points are sorted according to their distance with the 'a' point of the segment (from less to more distance)
     # WARNING: Intersection of paralel (overlapping) segments is not detected
     # WARNING: If the origen point is in a corner/segment it may return or not the origen as intersection point
     # DANI: No se ha probado a fondo
     # DANI: Actualmente NO está en uso
-    def get_segment_intersection_points(self, segment : Segment) -> Optional[list]:
+    def get_segment_intersection_points (self, segment : Segment) -> Optional[list]:
         # Get the intersection point of the specfied segment with each polygon limit
         intersection_points = []
         for limit in self.segments:
@@ -1235,7 +1333,7 @@ class Polygon:
     # DANI: No se ha probado
     # DANI: No está acabado. No se contempla la posibilidad de que el segmento que intersecta empieze dentro del perímetro
     # DANI: Actualmente NO está en uso
-    def get_segment_intersection_segments(self, segment : Segment) -> Optional[list]:
+    def get_segment_intersection_segments (self, segment : Segment) -> Optional[list]:
         # Get the intersection points
         sorted_points = self.get_segment_intersection_points(segment)
         # If no points are found return None
@@ -1277,7 +1375,7 @@ class Polygon:
         return False
 
     # Split the space inside the perimeter in a list of rectangles in a grid friendly format
-    def split_in_rectangles(self) -> List[Rect]:
+    def split_in_rectangles (self) -> List[Rect]:
 
         # Limit points are inside corners
         limit_points = self.get_inside_corners()
@@ -1288,7 +1386,7 @@ class Polygon:
         # Given a polygon corner which is pointing inside,
         # Create two segments opposed to the corner segments but as long as required to cut the polygon at onther segment or corner
         # This two segments will always be inside the polygon
-        def get_corner_insider_segments(corner : Corner) -> list:
+        def get_corner_insider_segments (corner : Corner) -> list:
 
             # Get the oppoiste segments to the corner segments but as long as the boundary size
             # NEVER FORGET: The corner point is the entry segment 'b' point and the exit segment 'a' point

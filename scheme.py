@@ -185,6 +185,8 @@ class Room:
         min_size : Optional[number] = None,
         # Maximum size in at least one dimension
         max_size : Optional[number] = None,
+        # Corridor size (the minimum size by default)
+        corridor_size : Optional[number] = None,
         # The doors to enter the room and start corridors
         doors : Optional[List[Door]] = None,
         # The default inputs for all doors whose inputs are not specified
@@ -249,9 +251,8 @@ class Room:
         # Set each door room
         for door in self.doors:
             door.room = self
-        # Set the room corridor
-        # The corridor is list of segments
-        self.corridor = None
+        # Set the room corridor size
+        self.corridor_size = corridor_size
 
     def __str__(self):
         return '<Room "' + str(self.name) + '">'
@@ -590,9 +591,12 @@ class Room:
         minimum_rect = Rect.from_corner(corner, self.min_size, self.min_size)
         return Boundary(Polygon.from_rect(minimum_rect))
 
-    # Set the corridor nodes
-    # This is a preprocessing step which is required to find the shortest corridor and other similar calculations
-    def set_corridor_nodes (self) -> dict:
+    # Calculate which segments make the shortest path to connect parent doors and all children rooms
+    def set_corridor (self):
+
+        # Set the corridor nodes
+        # This is a preprocessing step which is required to find the shortest corridor and other similar calculations
+        
         # Use both self boundary and all children room boundary segments
         available_segments = []
         # Split self boundaries at the doors
@@ -628,11 +632,12 @@ class Room:
                     current_node['connected_segments'].append(segment)
                 else:
                     nodes[point] = {'connected_segments': [segment]}
-        # Find which rooms are in contact to each node
+        # Find which rooms are in contact to each node and if nodes are in the exterior boundary
         # Find also which nodes are doors
+        exterior_polygon = self.boundary.exterior_polygon
         for node_point, node_data in nodes.items():
             rooms = [ child for child in self.children if node_point in child.boundary.exterior_polygon ]
-            if node_point in self.boundary.exterior_polygon:
+            if node_point in exterior_polygon:
                 rooms.append(self)
             node_data['rooms'] = rooms
             node_data['is_door'] = node_point in door_points
@@ -680,11 +685,9 @@ class Room:
             # Add paths and path nodes to the node data
             node_data['paths'] = paths
             node_data['path_nodes'] = path_nodes
-        return nodes
 
-    # Calculate which segments make the shortest path to connect parent doors and all children rooms
-    def set_corridor (self):
-        nodes = self.set_corridor_nodes()
+        # ------------------------------------------------------------------------------------------------------------------------------
+
         # Now find all possible path combinations until we cover all doors and rooms
         # Set the rooms which must be reached by the corridor
         required_children_rooms = [ child for child in self.children if len(child.doors) > 0 ]
@@ -832,6 +835,8 @@ class Room:
             segment.color = 'red'
         self.update_display(extra=elements_to_display)
 
+        # ------------------------------------------------------------------------------------------------------------------------------
+
         # Now we have to set doors which are not set already in children rooms and expand the current corridor to cover these doors
         for door in unset_doors:
             # Get the corridor non redundant nodes in contact with the door room
@@ -890,6 +895,7 @@ class Room:
                     current_point = start_segment.get_other_point(node)
                     while current_point not in split_points:
                         current_segment = next((segment for segment in splitted_segments if next_point in segment and segment != current_segment ))
+                        path.append(current_segment)
                         current_point = current_segment.get_other_point(current_point)
                     # If another node is found while joining segments then skip this path
                     if current_point in room_nodes:
@@ -897,8 +903,14 @@ class Room:
                     # If this path is shorter than the current path then keep this path as the current
                     path_length = get_path_length(path)
                     if not current_path or path_length < current_path_length:
-                        current_path = path
                         current_path_length = path_length
+                        # Edit the last segment in the path in order to cover the whole door with the corridor
+                        previous_point = current_segment.get_other_point(current_point)
+                        current_direction = (previous_point + current_point).normalized()
+                        last_segment = Segment(previous_point, current_point + current_direction * door.margined_width / 2)
+                        path[-1] = last_segment
+                        # Update the current path and the door point
+                        current_path = path
                         door.point = current_point
             # Now add the current path to the whole corridor
             current_corridor += current_path
@@ -908,9 +920,77 @@ class Room:
         for segment in elements_to_display:
             segment.color = 'red'
         self.update_display(extra=elements_to_display)
-        #add_frame(elements_to_display)
 
+        # ------------------------------------------------------------------------------------------------------------------------------
 
+        # Build the corridor by claiming area around the corridor path
+        # To do so we must set a boundary
+        # With the current implementation there should never be cyclic (closed) corridors
+        # For this reason the boundary should only have an exterior polygon
+        # However if this happens in the future there should be no problem since boundaries have interior polygons as well
+
+        # Set the corridor size (width)
+        corridor_size = self.corridor_size
+        if not corridor_size:
+            corridor_size = self.min_size
+        if not corridor_size:
+            corridor_size = self.get_min_min_size()
+
+        # Generate data for each point between segments (similar to nodes) by recording the connected segments
+        # Generate data also for each segment by recording if they are in the parent perimiter and, if so, the direction to the inside side
+        point_connected_segments = {}
+        segment_inside_direction = {}
+        for segment in current_corridor:
+            # Get the points connected segments
+            points = segment.points
+            for point in points:
+                connected_segments = point_connected_segments.get(point, None)
+                if connected_segments:
+                    connected_segments.append(segment)
+                else:
+                    point_connected_segments[point] = [segment]
+            # Get the segments inside direction
+            if segment in exterior_polygon:
+                segment_inside_direction[segment] = exterior_polygon.get_border_inside(segment)
+            else:
+                segment_inside_direction[segment] = None
+
+        # Now for each segment in the corridor get the segments of the boundary
+        boundary_segments = []
+        for segment in current_corridor:
+            inside_direction = segment_inside_direction[segment]
+            # For each segment point, check if it is an extreme or it has other segments connected
+            # The connected points will result in an extra margin for the boundary point
+            point_margins = []
+            for point in segment.points:
+                if len(point_connected_segments[point]) > 1:
+                    margin = corridor_size
+                else:
+                    margin = 0
+                point_margins.append(margin)
+            # If the segment is in the exterior polygon one boundary is in the perimeter and the other one is fully in the child room
+            if inside_direction:
+                boundary_offsets = [ None, inside_direction * corridor_size ]
+            # If the segment is between child rooms boundaries are splitted half on each child
+            else:
+                half_corridor_size = corridor_size / 2
+                first_offset = segment.direction.rotate(90) * half_corridor_size
+                second_offset = segment.direction.rotate(-90) * half_corridor_size
+                boundary_offsets = [ first_offset, second_offset ]
+            for offset in boundary_offsets:
+                a = segment.a - (point_margins[0] * segment.direction)
+                b = segment.b + (point_margins[1] * segment.direction)
+                if offset:
+                    a = a + offset
+                    b = b + offset
+                boundary_segment = Segment(a,b)
+                boundary_segments.append(boundary_segment)
+
+        # Display the corridor boundary
+        elements_to_display = boundary_segments
+        for segment in elements_to_display:
+            segment.color = 'red'
+        self.update_display(extra=elements_to_display)
 
     # Get the minimum of all minimum sizes
     # Get to the the root and the check all children min sizes recuersively in order to get the minimum
