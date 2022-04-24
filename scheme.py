@@ -9,7 +9,7 @@ from math import sqrt, inf
 
 # Set the seed and print it
 seed = None
-#seed = 4528
+seed = 876718
 if not seed:
     seed = round(random.random() * 999999)
 print('Seed ' + str(seed))
@@ -935,11 +935,12 @@ class Room:
             corridor_size = self.min_size
         if not corridor_size:
             corridor_size = self.get_min_min_size()
+        print('Corridor size: ' + str(corridor_size))
 
         # Generate data for each point between segments (similar to nodes) by recording the connected segments
-        # Generate data also for each segment by recording if they are in the parent perimiter and, if so, the direction to the inside side
+        # Generate data for each segment by generating 2 boundary lines in the corridor
         point_connected_segments = {}
-        segment_inside_direction = {}
+        segment_lines = {}
         for segment in current_corridor:
             # Get the points connected segments
             points = segment.points
@@ -950,41 +951,147 @@ class Room:
                 else:
                     point_connected_segments[point] = [segment]
             # Get the segments inside direction
-            if segment in exterior_polygon:
-                segment_inside_direction[segment] = exterior_polygon.get_border_inside(segment)
-            else:
-                segment_inside_direction[segment] = None
-
-        # Now for each segment in the corridor get the segments of the boundary
-        boundary_segments = []
-        for segment in current_corridor:
-            inside_direction = segment_inside_direction[segment]
-            # For each segment point, check if it is an extreme or it has other segments connected
-            # The connected points will result in an extra margin for the boundary point
-            point_margins = []
-            for point in segment.points:
-                if len(point_connected_segments[point]) > 1:
-                    margin = corridor_size
-                else:
-                    margin = 0
-                point_margins.append(margin)
-            # If the segment is in the exterior polygon one boundary is in the perimeter and the other one is fully in the child room
+            inside_direction = None
+            overlap_segment = next(exterior_polygon.get_overlap_segments(segment), None)
+            if overlap_segment:
+                inside_direction = exterior_polygon.get_border_inside(segment)
+            # Set the segment boundary lines
+            # Each segment will have 2 lines: one on each side
+            # We call these sides as clockwise and counter-clockwise sides
+            segment_direction = segment.direction
+            clockwise_direction = segment_direction.rotate(90)
+            counterclockwise_direction = segment_direction.rotate(-90)
             if inside_direction:
-                boundary_offsets = [ None, inside_direction * corridor_size ]
-            # If the segment is between child rooms boundaries are splitted half on each child
+                if inside_direction == clockwise_direction:
+                    clockwise_point = segment.a + clockwise_direction * corridor_size
+                    counterclockwise_point = segment.a
+                else:
+                    clockwise_point = segment.a
+                    counterclockwise_point = segment.a + counterclockwise_direction * corridor_size
             else:
                 half_corridor_size = corridor_size / 2
-                first_offset = segment.direction.rotate(90) * half_corridor_size
-                second_offset = segment.direction.rotate(-90) * half_corridor_size
-                boundary_offsets = [ first_offset, second_offset ]
-            for offset in boundary_offsets:
-                a = segment.a - (point_margins[0] * segment.direction)
-                b = segment.b + (point_margins[1] * segment.direction)
-                if offset:
-                    a = a + offset
-                    b = b + offset
-                boundary_segment = Segment(a,b)
-                boundary_segments.append(boundary_segment)
+                clockwise_point = segment.a + clockwise_direction * half_corridor_size
+                counterclockwise_point = segment.a + counterclockwise_direction * half_corridor_size
+            clockwise_line = Line(clockwise_point, segment_direction)
+            counterclockwise_line = Line(counterclockwise_point, segment_direction)
+            # Save both lines in a data dictionary
+            data = { 'clockwise': clockwise_line, 'counterclockwise': counterclockwise_line }
+            # Save the data dictionary inside another dictionary where the key is the segment itself
+            segment_lines[segment] = data
+
+        # Now for each segment in the corridor get the segments of the boundary
+        # First, segments must be built by finding the intersection point between segment lines
+        boundary_segments = []
+        for point, connected_segments in point_connected_segments.items():
+            # In case we have only 1 connected segment it means this is a death end of the corridor
+            # In this case we generate a new segment perpendicular to the only segment and which crosses the point itself
+            # This segment will be generated from a line which intersects both of the boundary lines in the only segment
+            if len(connected_segments) == 1:
+                segment = connected_segments[0]
+                is_segment_pointing_outside = point == segment.a
+                lines = segment_lines[segment]
+                clockwise_line = lines['clockwise'] if is_segment_pointing_outside else lines['counterclockwise']
+                counterclockwise_line = lines['counterclockwise'] if is_segment_pointing_outside else lines['clockwise']
+                perpendicular_vector = clockwise_line.vector.rotate(90)
+                perpendicular_line = Line(point, perpendicular_vector)
+                clockwise_line_intersection = clockwise_line.get_intersection_point(perpendicular_line)
+                counterclockwise_line_intersection = counterclockwise_line.get_intersection_point(perpendicular_line)
+                clockwise_point_key = 'clockwise_a' if is_segment_pointing_outside else 'counterclockwise_b'
+                counterclockwise_point_key = 'counterclockwise_a' if is_segment_pointing_outside else 'clockwise_b'
+                lines[clockwise_point_key] = clockwise_line_intersection
+                lines[counterclockwise_point_key] = counterclockwise_line_intersection
+                new_segment = Segment(clockwise_line_intersection, counterclockwise_line_intersection)
+                boundary_segments.append(new_segment)
+                continue
+            # Sort segments according to their order around the point
+            reference_vector = Vector(0,1) # This could be any vector
+            def get_reference_angle (segment : 'Segment') -> number:
+                return reference_vector.get_angle_with(segment.vector)
+            sorted_connected_segments = sorted(connected_segments, key=get_reference_angle)
+            # print('SORTED ' + str(point))
+            # print([ segment.vector for segment in sorted_connected_segments ])
+
+            # For each pair of segments, there is a pair of boundary lines (one from each segment) which must intersect
+            # As an exception, if segments are paralel, we must check if lines are the same line
+            # In this case there the intersection point will be the middle point (bot segments will be merged further)
+            # Otherwise, we will have to add a perpendicular segment to intercept both lines to close the corridor at some point
+            for current, nextone in pairwise(sorted_connected_segments, retro=True):
+                # Using the current point as the reference point of view:
+                # Get the intersection point between the line in the clockwise side of the current segment and
+                #   the line in the counterclockwise side of the next one
+                is_current_pointing_outside = point == current.a
+                current_side = 'clockwise' if is_current_pointing_outside else 'counterclockwise'
+                current_lines = segment_lines[current]
+                current_clockwise_line = current_lines[current_side]
+                is_nextone_pointing_outside = point == nextone.a
+                nextone_side = 'counterclockwise' if is_nextone_pointing_outside else 'clockwise'
+                nextone_lines = segment_lines[nextone]
+                nextone_counterclockwise_line = nextone_lines[nextone_side]
+                intersection = current_clockwise_line.get_intersection_point(nextone_counterclockwise_line)
+                # Now save this point in both segment 'lines' data
+                current_point_key = 'clockwise_a' if is_current_pointing_outside else 'counterclockwise_b'
+                nextone_point_key = 'counterclockwise_a' if is_nextone_pointing_outside else 'clockwise_b'
+                if intersection:
+                    current_lines[current_point_key] = intersection
+                    nextone_lines[nextone_point_key] = intersection
+                # If lines are paralel
+                else:
+                    same_line = current_clockwise_line.same_line_as(nextone_counterclockwise_line)
+                    # If they are the same line then set the closest point in the line to the current point as the intersection
+                    if same_line:
+                        perpendicular_vector = current_clockwise_line.vector.rotate(90)
+                        perpendicular_line = Line(point, perpendicular_vector)
+                        intersection = current_clockwise_line.get_intersection_point(perpendicular_line)
+                        current_lines[current_point_key] = intersection
+                        nextone_lines[nextone_point_key] = intersection
+                    # Otherwise, generate a new paralel segment which cuts both lines thus closing the corridor
+                    else:
+                        perpendicular_vector = current_clockwise_line.vector.rotate(90)
+                        # Find which line is closer to the point and find if this line 
+                        current_line_distance = current_clockwise_line.get_distance_to(point)
+                        nextone_line_distance = nextone_counterclockwise_line.get_distance_to(point)
+                        current_is_closer = current_line_distance < nextone_line_distance
+                        closer_line = current_clockwise_line if current_is_closer else nextone_counterclockwise_line
+                        # If the line is intersecting with the point itself then the new segment must start at the point itself
+                        # (Note that we are in a corner of the parent exterior boundary)
+                        if point in closer_line:
+                            new_line = Line(point, perpendicular_vector)
+                        # Otherwise, the new line must be pushed in one direction in order to make space for the corridor
+                        # The direction of the push must be through where is the segment whom the closer line comes from
+                        else:
+                            if current_is_closer:
+                                offset_direction = current.direction
+                                if not is_current_pointing_outside:
+                                    offset_direction = -offset_direction
+                            else:
+                                offset_direction = nextone.direction
+                                if not is_nextone_pointing_outside:
+                                    offset_direction = -offset_direction
+                            offset = offset_direction * corridor_size
+                            offset_point = point + offset
+                            new_line = Line(offset_point, perpendicular_vector)
+                        # Find the intersection points with each line and create a new segment from both interactions
+                        current_line_intersection = current_clockwise_line.get_intersection_point(new_line)
+                        nextone_line_intersection = nextone_counterclockwise_line.get_intersection_point(new_line)
+                        current_lines[current_point_key] = current_line_intersection
+                        nextone_lines[nextone_point_key] = nextone_line_intersection
+                        new_segment = Segment(current_line_intersection, nextone_line_intersection)
+                        boundary_segments.append(new_segment)
+        # Build segments out of all found intersection points
+        for segment, segment_data in segment_lines.items():
+            # DANI: Los puntos repetidos suceden cuando un pasillo desplazado por colindar con el padre se come un mini pasillo para una puerta
+            if segment_data['clockwise_a'] == segment_data['clockwise_b']:
+                print('WARNING: Identical point in segment ' + str(segment))
+                print(segment_data['clockwise_a'])
+            else:
+                clockwise_segment = Segment(segment_data['clockwise_a'], segment_data['clockwise_b'])
+                boundary_segments.append(clockwise_segment)
+            if segment_data['counterclockwise_a'] == segment_data['counterclockwise_b']:
+                print('WARNING: Identical point in segment ' + str(segment))
+                print(segment_data['counterclockwise_a'])
+            else:
+                counterclockwise_segment = Segment(segment_data['counterclockwise_a'], segment_data['counterclockwise_b'])
+                boundary_segments.append(counterclockwise_segment)
 
         # Display the corridor boundary
         elements_to_display = boundary_segments

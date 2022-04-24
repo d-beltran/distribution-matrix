@@ -2,6 +2,13 @@ RAM
 
 - tiene que encontrar el pasillo
 	* construir el pasillo persé
+		-> a veces quedan rincocnillos, hay que darle una vuelta
+		-> pensar tema puntos repetidos (igual se puede quedar así)
+	* desplazar puertas hasta el nuevo pasillo
+		-> debería hacer fácil que las puertas, desde que se colocan, tengan la representación de la puerta en el lado correcto
+			* visagra en el lado que esté más cerca de la pared
+			* dirección de apertura de la puerta hacia el interior de la habitación
+			** ambos parámetros deberían ser opcionales también, de cara a poder definirlos a mano si el segmento está definido a mano también
 
 - que las habitaciones se vayan posicionando de cara a formar un pasillo pequeño (OPCIONAL)
 	** El pasillo se tendrá que resolver con cada child una vez ha acabado de establecer su perímetro

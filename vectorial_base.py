@@ -6,7 +6,7 @@ from functools import reduce
 
 import itertools
 
-from math import sqrt, isclose, sin, cos, degrees, acos
+from math import sqrt, isclose, sin, cos, degrees, radians, acos
 
 import random
 colors = [
@@ -198,6 +198,19 @@ class Vector:
         same_magnitude = isclose(self.get_magnitude(), other.get_magnitude())
         return same_slope and same_magnitude
 
+    # Get the angle between this vector and other vector
+    def get_angle_with (self, other : 'Vector') -> number:
+        # By normalizing vectors we skip having to divide the dot product by the vector magnitudes product
+        a = self.normalized()
+        b = other.normalized()
+        dot_product = a.x * b.x + a.y * b.y
+        angle = degrees(acos(dot_product))
+        # If the second segment is pointing counterclockwise respect to the first vector then turn the angle negative
+        cz = a.x * b.y - a.y * b.x
+        if cz > 0:
+            angle = -angle
+        return angle
+
     # Given a vector get a new vector where x is y and y is x
     def reverse (self) -> 'Vector':
         return Vector(self.y, self.x)
@@ -205,9 +218,12 @@ class Vector:
     # Given a vector and an angle get a new clockwise rotated vector
     # Source: https://en.wikipedia.org/wiki/Rotation_matrix
     def rotate (self, angle) -> 'Vector':
-        x = + cos(angle) * self.x + sin(angle) * self.y
-        y = - sin(angle) * self.x + cos(angle) * self.y
-        return Vector(x,y)        
+        angle_sin = sin(radians(angle))
+        angle_cos = cos(radians(angle))
+        x = + angle_cos * self.x + angle_sin * self.y
+        y = - angle_sin * self.x + angle_cos * self.y
+        #print(str(self) + ' (' + str(angle) + ') ' + str(Vector(x,y)))
+        return Vector(x,y)
 
 # A line defined by a point and a directional vector
 class Line:
@@ -323,6 +339,38 @@ class Line:
         intercept = self.get_y_intercept()
         y = point.x * slope + intercept
         return resolute(y) == point.y
+
+    # Get the intersection point between two lines
+    # DANI: Esto está hecho en la libreta
+    def get_intersection_point (self, line : 'Line') -> Optional[Point]:
+        if self.is_paralel_to(line):
+            return None
+        # Asuming 2 vector equation of the line, which can be equaled since they are intersecting, we have isolated one of their "alphas"
+        # In this case it is the alpha of 'line', not 'self'
+        a1 = self.point.x
+        b1 = self.point.y
+        x1 = self.vector.x
+        y1 = self.vector.y
+        a2 = line.point.x
+        b2 = line.point.y
+        x2 = line.vector.x
+        y2 = line.vector.y
+        alpha = ( a2*y1 - a1*y1 - b2*x1 + b1*x1 ) / ( y2*x1 - x2*y1 )
+        # Now solve the corresponding point in the line
+        x = a2 + x2 * alpha
+        y = b2 + y2 * alpha
+        return Point(x, y)
+
+    # Get the angle between this line and other line
+    def get_angle_with (self, other : 'Line') -> number:
+        return self.vector.get_angle_with(other.vector)
+
+    # Get the distance from this line to other specified point (i.e. from the locser point in the line)
+    def get_distance_to (self, other : 'Point') -> number:
+        perpendicular_vector = self.vector.rotate(90)
+        perpendicular_line = Line(other, perpendicular_vector)
+        intersection = self.get_intersection_point(perpendicular_line)
+        return intersection.get_distance_to(other)
         
 # A segment defined by 2 coordinates (Points): 'a' and 'b'
 class Segment(Line):
@@ -1205,23 +1253,15 @@ class Polygon:
         precorners = []
         angle_count = 0
         for current, nextone in pairwise(self.segments, retro=True):
-            point = current.b
             # Given two continue segment vectors, find out the angle between them
-            # By normalizing vectors we skip having to divide the dot product by the vector magnitudes product
-            a = current.vector.normalized()
-            b = nextone.vector.normalized()
-            dot_product = a.x * b.x + a.y * b.y
-            angle = degrees(acos(dot_product))
-            # If the second segment is pointing counterclockwise respect to the first vector then turn the angle negative
-            cz = a.x * b.y - a.y * b.x
-            if cz > 0:
-                angle = -angle
+            angle = current.get_angle_with(nextone)
             if angle == 0:
                 # If you see this error there may be splitted segments in your polygon
                 # Use the non-canonical class method to set your polygon
                 raise ValueError('There are 2 aligned segments: ' + str(current) + ' and ' + str(nextone))
             clockwise = angle > 0
             angle_count += angle
+            point = current.b
             precorners.append((point, [current, nextone], clockwise))
 
         # There should be always 360 more grades in one direction than in the other (may be clockwise or counterclockwise)
@@ -1293,7 +1333,7 @@ class Polygon:
                 return polygon_segment
         return None
 
-    # Given a segment which overlaps the polygon, get a vector which s perpendicular to this segment and points into de inside of the polygon
+    # Given a segment which overlaps the polygon, get a vector which is perpendicular to this segment and points into de inside of the polygon
     def get_border_inside (self, segment : Segment):
         polygon_segment = self.get_border_segment(segment)
         if not polygon_segment:
@@ -1352,15 +1392,23 @@ class Polygon:
             intersecting_segments.append(last_intersection_segment)
         return intersecting_segments
 
+    # Find overlap segments between self polygon segments and other segment
+    # If the other segment is inside the area of the polygon it will not be considered
+    def get_overlap_segments (self, other : 'Segment') -> Generator[Segment, None, None]:
+        for segment in self.segments:
+            overlap_segment = segment.get_overlap_segment(other)
+            if overlap_segment:
+                yield overlap_segment
+
     # Find overlap segments between polygons
     # Get overlapping regions between polygon segments
     # However, if one segment is inside the area of the other polygon it will not be considered
-    def get_overlap_segments (self, other : 'Polygon') -> List[Segment]:
+    def get_polygon_overlap_segments (self, other : 'Polygon') -> List[Segment]:
         overlap_segments = []
         for segment in self.segments:
             for other_segment in other.segments:
                 overlap_segment = self.get_overlap_segment(other)
-                if overlap:
+                if overlap_segment:
                     overlap_segments.append(overlap_segment)
 
     # Check if self polygon is colliding with other polygon
@@ -1637,7 +1685,7 @@ class Boundary:
     def merge_boundary (self, other : 'Boundary', min_size = None) -> 'Boundary':
         # Check if both boundaries are colliding
         # i.e. both external polygons have overlapping segments
-        colliding_segments = self.exterior_polygon.get_overlap_segments(other.exterior_polygon)
+        colliding_segments = self.exterior_polygon.get_polygon_overlap_segments(other.exterior_polygon)
         if len(colliding_segments) == 0:
             raise ValueError('Boundaries are not colliding')
         # In case there is a minimum size restriction check that the colliding segment is as long as required
