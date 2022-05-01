@@ -950,7 +950,7 @@ class Room:
                     current_segment = start_segment
                     current_point = start_segment.get_other_point(node)
                     while current_point not in split_points:
-                        current_segment = next((segment for segment in splitted_segments if next_point in segment and segment != current_segment ))
+                        current_segment = next((segment for segment in splitted_segments if current_point in segment and segment != current_segment ))
                         path.append(current_segment)
                         current_point = current_segment.get_other_point(current_point)
                     # If another node is found while joining segments then skip this path
