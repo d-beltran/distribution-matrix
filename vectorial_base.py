@@ -211,10 +211,6 @@ class Vector:
             angle = -angle
         return angle
 
-    # Given a vector get a new vector where x is y and y is x
-    def reverse (self) -> 'Vector':
-        return Vector(self.y, self.x)
-
     # Given a vector and an angle get a new clockwise rotated vector
     # Source: https://en.wikipedia.org/wiki/Rotation_matrix
     def rotate (self, angle) -> 'Vector':
@@ -245,12 +241,21 @@ class Line:
             return self.same_line_as(other)
         return False
 
+    def __hash__(self):
+        return hash(self.get_hash())
+
     def __contains__(self, other):
         if isinstance(other, Point):
             return self.line_contains_point(other)
         if isinstance(other, Segment):
             return self.same_line_as(other)
         return False
+
+    # Get a value which is always the same for equal lines, no matter the specific point and vector
+    def get_hash(self) -> tuple:
+        slope = self.get_slope()
+        intercept = self.get_intercept_point()
+        return slope, intercept
 
     # Get the vector from the line
     # Return None in case the line is vertical
@@ -418,7 +423,7 @@ class Segment(Line):
             return other.a in self and other.b in self
         return False
 
-    # Get a value which is always the same no matter the order of a and b
+    # Get a value which is always the same for equal segments no matter the order of a and b
     def get_hash(self) -> tuple:
         def sort_by_x(point):
             return point.x
@@ -568,7 +573,7 @@ class Segment(Line):
 
     # Get current segment after substracting other segments
     # Return an empty list if self segment is fully substracted
-    def substract_segments (self, others : List['Segment']) -> list:
+    def substract_segments (self, others : List['Segment']) -> List['Segment']:
         # Filter others to be in the same line that self segment
         inline_segments = [ segment for segment in others if self.same_line_as(segment) ]
         # Order segment points and check how they alternate
@@ -613,6 +618,9 @@ class Segment(Line):
         # Get a random point inside the segment where the a point of the new segment could be
         new_limit_a = self.a + self.direction * margin
         new_limit_b = self.b - self.direction * margin
+        # If margins fit perfectly in the segment then the segment center is the only available point
+        if new_limit_a == new_limit_b:
+            return new_limit_a
         new_region = Segment(new_limit_a, new_limit_b)
         return new_region.get_random_point()
 
@@ -644,32 +652,12 @@ class Segment(Line):
         new_a = self.a + self.direction * margin
         new_b = self.b - self.direction * margin
         return Segment(new_a, new_b)
-  
 
-# A corner is a point which makes a corner in a rectangle or polygon
-# It stores additional data:
-#   - segments: The 2 non-paralel segments connected to the corner
-#     i.e. both segments have this point ('a' or 'b') in common
-#     IMPORTANT: It is a standard that the first segment enters the corner while the second exits the corner
-#     i.e. first segment is 'a' -> (corner) and second segment is (corner) -> 'b'
-#   - inside: The inside argument is refered to if this corner points towards the 'inside' of the rectangle/polygon
-class Corner(Point):
-
-    def __init__(self, x : number, y : number, in_segment : Segment, out_segment : Segment, inside : bool = None):
-        super().__init__(x, y)
-        if in_segment.b != self or out_segment.a != self:
-            raise RuntimeError('The corner does not follow the standard')
-        self.in_segment = in_segment
-        self.out_segment = out_segment
-        # Save also both segments as a tuple
-        self.segments = self.in_segment, self.out_segment
-        # Save in addition the extreme points of segments
-        # i.e. the in segment 'a' point and the out segment 'b' point
-        self.in_point = in_segment.a
-        self.out_point = out_segment.b
-        # Save also both points as a tuple
-        self.points = self.in_point, self.out_point
-        self.inside = inside
+    # Get a segment after translating the current segment
+    def translate (self, direction : 'Vector') -> 'Segment':
+        new_a = self.a + direction
+        new_b = self.b + direction
+        return Segment(new_a, new_b)
 
 # A corner is a point where 2 non-paralel segments are connected
 # i.e. both segments have this point ('a' or 'b') in common
@@ -1404,12 +1392,12 @@ class Polygon:
     # Get overlapping regions between polygon segments
     # However, if one segment is inside the area of the other polygon it will not be considered
     def get_polygon_overlap_segments (self, other : 'Polygon') -> List[Segment]:
-        overlap_segments = []
+        overall_overlap_segments = []
         for segment in self.segments:
             for other_segment in other.segments:
-                overlap_segment = self.get_overlap_segment(other)
-                if overlap_segment:
-                    overlap_segments.append(overlap_segment)
+                overlap_segments = list(self.get_overlap_segments(other_segment))
+                overall_overlap_segments += overlap_segments
+        return list(set(overall_overlap_segments))
 
     # Check if self polygon is colliding with other polygon
     # i.e. one of their segments is totally or partially overlapping
@@ -2357,6 +2345,37 @@ def connect_segments (segments : List[Segment]) -> Generator[Polygon, None, None
                 discarded_segments = polygon_segments[0:closing_segment]
                 previous_segments += discarded_segments
                 break
+
+# Get the non overlap segments between a list of segments
+# Segments must all be in the same line
+def get_non_overlap_segments (segments : 'Segment') -> List['Segment']:
+    # If all segments are not in the same line we cannot proceed
+    if not all( current.same_line_as(nextone) for current, nextone in pairwise(segments) ):
+        raise ValueError('Segments are not all in the same line')
+    # Otherwise, order all segment points and check those regions between points where only 1 segment exists
+    points = unique(sum([ list(segment.points) for segment in segments ], []))
+    def sort_by_x(point):
+        return point.x
+    def sort_by_y(point):
+        return point.y
+    sorted_points = sorted( sorted( points, key=sort_by_x), key=sort_by_y)
+    # Track from which point only 1 segment is in
+    first_point = None
+    in_segments = { segment: False for segment in segments }
+    non_overlap_segments = []
+    for point in sorted_points:
+        in_count = 0
+        for segment in segments:
+            if point in segment.points:
+                in_segments[segment] = not in_segments[segment]
+        if first_point:
+            new_segment = Segment(first_point, point)
+            non_overlap_segments.append(new_segment)
+            first_point = None
+        if sum(in_segments.values()) == 1:
+            first_point = point
+    # If segments do not overlap at any moment then return None
+    return non_overlap_segments
 
 # Given two catets, get the hipotenuse
 def get_hipotenuse (segment_1 : Segment, segment_2 : Segment) -> Segment:
