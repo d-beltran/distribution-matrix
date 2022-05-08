@@ -163,16 +163,18 @@ def get_segments_from_anything (things : list):
         # If it is a room or something with doors
         if hasattr(thing, 'doors'):
             doors = thing.doors
-            if doors:
-                for door in doors:
-                    segment = door.segment
-                    if segment:
-                        segment.color = 'white'
-                        segment.z = 17 # Make this segment display in the top layer
-                        segments.append(segment)
-                        # Create a new segment to represent the door open
-                        door_segment = door.get_open_door()
-                        segments.append(door_segment)
+            if not doors:
+                continue
+            for door in doors:
+                segment = door.segment
+                if not segment:
+                    continue
+                segment.color = 'white'
+                segment.z = 17 # Make this segment display in the top layer
+                segments.append(segment)
+                # Create a new segment to represent the door open
+                open_door_segment = door.get_open_door()
+                segments.append(open_door_segment)
 
     return segments
 

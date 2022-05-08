@@ -4,6 +4,9 @@ RAM
 	* construir el pasillo persé
 		-> a veces quedan rincocnillos, hay que darle una vuelta
 
+- que en caso de no haber perímetro fijado en el padre coloque las habitaciones libremente
+	** se puede utilizar esto a nuestro favor para que todo cuadre super bien
+
 - que las habitaciones se vayan posicionando de cara a formar un pasillo pequeño (OPCIONAL)
 	** El pasillo se tendrá que resolver con cada child una vez ha acabado de establecer su perímetro
 

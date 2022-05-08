@@ -47,6 +47,15 @@ minimum_resolution = 1 / 10 ** base_resolution
 def equal (a : float, b : float) -> bool:
     return a < b + minimum_resolution and a > b - minimum_resolution
 
+# Set another function to check if two numbers are very close, out of resolution matters
+# We do the double check because the 'isclose' function may fail for values close to 0
+# see https://stackoverflow.com/questions/35324893/using-math-isclose-function-with-values-close-to-0
+def same_number(a : number, b : number) -> bool:
+    # DANI: Esto debería funcionar siempre pero son 4 operaciones
+    #return isclose(a,b) or isclose(a+1,b+1)
+    # Esto debería funcionar bien
+    return isclose(a,b, abs_tol=minimum_resolution)
+
 # An x,y coordinate
 class Point:
 
@@ -117,7 +126,7 @@ class Vector:
 
     def __eq__(self, other):
         if isinstance(other, self.__class__):
-            return isclose(self.x, other.x) and isclose(self.y, other.y)
+            return same_number(self.x, other.x) and same_number(self.y, other.y)
         return False
 
     def __hash__(self):
@@ -171,7 +180,7 @@ class Vector:
         return sqrt( self.x**2 + self.y**2 )
 
     def get_slope(self) -> Optional[number]:
-        if isclose(self.x, 0):
+        if same_number(self.x, 0):
             return None
         return self.y / self.x
 
@@ -182,10 +191,10 @@ class Vector:
 
     # Find out if the vector is totally vertical
     def is_vertical(self) -> bool:
-        return isclose(self.x, 0)
+        return same_number(self.x, 0)
     # Find out if the segment is totally horizontal
     def is_horizontal(self) -> bool:
-        return isclose(self.y, 0)
+        return same_number(self.y, 0)
 
     # Find out if the segment is diagonal
     def is_diagonal(self) -> bool:
@@ -194,8 +203,8 @@ class Vector:
     # Find out if two vectors are equivalent
     # i.e. they have the same direction and magnitude, no matter the sense
     def is_equivalent_to (self, other : 'Vector') -> bool:
-        same_slope = isclose(self.get_slope(), other.get_slope())
-        same_magnitude = isclose(self.get_magnitude(), other.get_magnitude())
+        same_slope = same_number(self.get_slope(), other.get_slope())
+        same_magnitude = same_number(self.get_magnitude(), other.get_magnitude())
         return same_slope and same_magnitude
 
     # Get the angle between this vector and other vector
@@ -418,7 +427,7 @@ class Segment(Line):
             # Now that we know the point is in the line, check if it is between both segment points
             distance1 = self.a.get_distance_to(other)
             distance2 = self.b.get_distance_to(other)
-            return isclose(distance1 + distance2, self.length)
+            return same_number(distance1 + distance2, self.length)
         if isinstance(other, self.__class__):
             return other.a in self and other.b in self
         return False
@@ -576,6 +585,8 @@ class Segment(Line):
     def substract_segments (self, others : List['Segment']) -> List['Segment']:
         # Filter others to be in the same line that self segment
         inline_segments = [ segment for segment in others if self.same_line_as(segment) ]
+        if len(inline_segments) == 0:
+            return [self]
         # Order segment points and check how they alternate
         self_points = [self.a, self.b]
         other_points = []
@@ -1382,22 +1393,33 @@ class Polygon:
 
     # Find overlap segments between self polygon segments and other segment
     # If the other segment is inside the area of the polygon it will not be considered
-    def get_overlap_segments (self, other : 'Segment') -> Generator[Segment, None, None]:
+    def get_segment_overlap_segments (self, other : 'Segment') -> Generator[Segment, None, None]:
         for segment in self.segments:
             overlap_segment = segment.get_overlap_segment(other)
             if overlap_segment:
                 yield overlap_segment
 
-    # Find overlap segments between polygons
-    # Get overlapping regions between polygon segments
-    # However, if one segment is inside the area of the other polygon it will not be considered
-    def get_polygon_overlap_segments (self, other : 'Polygon') -> List[Segment]:
+    # Given a group of segments, find overlaps with the polygon segments
+    def get_segments_overlap_segments (self, segments : List[Segment]) -> List[Segment]:
         overall_overlap_segments = []
         for segment in self.segments:
-            for other_segment in other.segments:
-                overlap_segments = list(self.get_overlap_segments(other_segment))
+            for other_segment in segments:
+                overlap_segments = list(self.get_segment_overlap_segments(other_segment))
                 overall_overlap_segments += overlap_segments
         return list(set(overall_overlap_segments))
+
+    # Get overlapping regions between polygon segments
+    # Note that segments inside the area of the polygon will not be considered, just the perimeter
+    def get_polygon_overlap_segments (self, other : 'Polygon') -> List[Segment]:
+        return self.get_segments_overlap_segments(other.segments)
+
+    # Get polygon segments after substracting the overlap region with another polygon
+    def get_non_overlap_segments (self, segments : List[Segment]) -> List[Segment]:
+        overall_non_overlap_segments = []
+        for segment in self.segments:
+            non_overlap_segments = segment.substract_segments(segments)
+            overall_non_overlap_segments += non_overlap_segments
+        return overall_non_overlap_segments
 
     # Check if self polygon is colliding with other polygon
     # i.e. one of their segments is totally or partially overlapping
@@ -2288,6 +2310,42 @@ class Grid:
             rects_to_group = [ rect for rect in rects_to_group if rect not in new_group ]
             rect_groups.append(new_group)
         return rect_groups
+
+    # Given a segment, get all segment regions which overlap the grid
+    def get_segment_overlap_segments (self, segment : Segment) -> List[Segment]:
+        # Get all points where the segment cuts self boundary
+        cut_points = []
+        for boundary_segment in self.get_boundary_segments():
+            intersection = boundary_segment.get_intersection_point(segment, in_extremis=0)
+            if intersection:
+                cut_points.append(intersection)
+        # Sort the cut points in the segment from a to b
+        def by_distance (point):
+            return segment.a.get_distance_to(point)
+        sorted_points = sorted(cut_points, key=by_distance)
+        # Now each cut in the boundary defines when the sub-segment changes from beeing in the grid to beeing outside and vice versa
+        points = [ segment.a, *sorted_points, segment.b ]
+        # Check if the first point (i.e. the segment a point) starts inside of the grid
+        inside = points[0] in self
+        overlap_segments = []
+        for point_a, point_b in pairwise(points):
+            if inside:
+                overlap_segment = Segment(point_a, point_b)
+                overlap_segments.append(overlap_segment)
+            inside = not inside
+        return overlap_segments
+
+    # Given a polygon, for each segment in the polygon, get all segment regions which overlap the grid
+    def get_segments_overlap_segments (self, segments : List[Segment]) -> List[Segment]:
+        overall_overlap_segments = []
+        for segment in segments:
+            overlap_segments = self.get_segment_overlap_segments(segment)
+            overall_overlap_segments += overlap_segments
+        return overall_overlap_segments
+
+    # Given a polygon, for each segment in the polygon, get all segment regions which overlap the grid
+    def get_polygon_overlap_segments (self, polygon : Polygon) -> List[Segment]:
+        return self.get_segments_overlap_segments(polygon.segments)
 
 
 # Auxiliar functions ---------------------------------------------------------------

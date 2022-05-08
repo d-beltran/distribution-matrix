@@ -9,6 +9,7 @@ from math import sqrt, inf
 
 # Set the seed and print it
 seed = None
+#seed = 728886 # (perimetro 1) puerta no se puede recolocar a la primera
 #seed = 580352 # Corridor lines overlap
 #seed = 353360 # Queda un recobeco
 #seed = 181783 # Otro recobeco
@@ -20,7 +21,8 @@ random.seed(seed)
 # Set if the solving process must be displayed
 display_solving_process = False
 
-# A door is a point in a room boundary which connects it to another room
+# A door is a segment in a polygon
+# When boundaries are transformed to walls with tickness, doors become holes in the wall
 class Door:
     def __init__ (self,
         # A point may be passed. If no point is passed then it is assigned automatically
@@ -43,6 +45,7 @@ class Door:
         self._margined_segment = None
         self._direction = direction
         self._pivot = pivot
+        # The room this door belongs to
         self.room = None
 
     def __repr__ (self):
@@ -74,10 +77,12 @@ class Door:
         self._point = point
         self._segment = None
         self._margined_segment = None
+        self._direction = None
         self._pivot = None
         if point:
             self.segment
             self.margined_segment
+            self.direction
             self.pivot
 
     # The door segment
@@ -107,33 +112,37 @@ class Door:
 
     # Given a segment width, generate a new
     # The new segment will be centered in the door point
-    # The new segment will be overlaped with the room segment where the door point is
+    # The new segment will be overlaped with the polygon segment where the door point is
     def generate_segment (self, width : number) -> Segment:
-        # If the door point or room are not assigned we can not generate the segment
-        if not self.room or not self.point:
+        # If the door point or polygon are not assigned we can not generate the segment
+        room_polygon = self.get_room_polygon()
+        if not room_polygon or not self.point:
             return None
         # Otheriwse, generate the margined segment
-        room_segment = next(( segment for segment in self.room.boundary.exterior_polygon.segments if self.point in segment ), None)
-        if not room_segment:
-            raise ValueError('The door point (' + str(self.point) + ') is not over the room boundary (' + self.room.name + ')')
-        direction = room_segment.direction
+        polygon_segment = next(( segment for segment in room_polygon.segments if self.point in segment ), None)
+        if not polygon_segment:
+            raise ValueError('The door point ' + str(self.point) + ' is not over its polygon (' + self.room.name + ')')
+        direction = polygon_segment.direction
         half_width = width / 2
         a = self.point - direction * half_width
         b = self.point + direction * half_width
-        if a not in room_segment or b not in room_segment:
-            raise ValueError('The door segment does not fit in the room boundary: ' + str(Segment(a,b)))
+        if a not in polygon_segment or b not in polygon_segment:
+            raise ValueError('The door segment (' + str(Segment(a,b)) + ') does not fit in its room polygon (' + self.room.name + ')')
         return Segment(a,b)
 
     # Get the door direction
     # i.e. the direction the door is open thorugh
-    # By default the direction points to the door room inside side
+    # By default the direction points to the door polygon inside side
     def get_direction (self) -> Optional[Vector]:
         # Return internal value if it exists
         if self._direction:
             return self._direction
-        if not self.segment or not self.room:
+        if not self.segment:
             return None
-        direction = self.room.boundary.exterior_polygon.get_border_inside(self.segment)
+        room_polygon = self.get_room_polygon()
+        if not room_polygon:
+            return None
+        direction = room_polygon.get_border_inside(self.segment)
         self._direction = direction
         return direction
     # The direction crosses the door segment perpendicularly
@@ -147,13 +156,15 @@ class Door:
         # Return internal value if it exists
         if self._pivot:
             return self._pivot
-        if not self.segment or not self.room:
+        if not self.segment:
+            return None
+        room_polygon = self.get_room_polygon()
+        if not room_polygon:
             return None
         door_points = self.segment.points
-        room_polygon = self.room.boundary.exterior_polygon
-        room_segment = next( segment for segment in room_polygon.segments if self.point in segment )
-        room_segment_points = room_segment.points
-        outside_corners = [ corner for corner in room_polygon.corners if corner in room_segment_points and not corner.inside ]
+        polygon_segment = next( segment for segment in room_polygon.segments if self.point in segment )
+        polygon_segment_points = polygon_segment.points
+        outside_corners = [ corner for corner in room_polygon.corners if corner in polygon_segment_points and not corner.inside ]
         # If both segment corners are inside corners then just set the first segment point as the pivot
         if len(outside_corners) == 0:
             self._pivot = door_points[0]
@@ -171,6 +182,16 @@ class Door:
     # The door pivot
     pivot = property(get_pivot, None, None, "The door pivot")
 
+    # Get the polygon where the door is meant to be
+    def get_room_polygon (self) -> Optional[Polygon]:
+        room = self.room
+        if not room:
+            return None
+        boundary = room.boundary
+        if not boundary:
+            return None
+        return boundary.exterior_polygon
+
     # Generate a new segment which represents the door open
     # Note that this function is used for display pourposes only
     def get_open_door (self) -> 'Segment':
@@ -187,39 +208,41 @@ class Door:
     # - The door does not overlap with other doors (margins may overlap)
     # Note that there is no problem if the door is in contact with more than one parent/children room
     # Corridors are meant to fix these situations
-    def find_suitable_regions (self) -> Tuple[ List['Segment'], List['Point'] ]:
-        # The door must have a room and the room must have a boundary to find a point
-        room = self.room
-        if not room:
-            raise ValueError('Cannot find a suitable point for a door without room')
-        boundary = self.room.boundary
-        if not boundary:
-            raise ValueError('Cannot find a suitable point for a door from a room without boundary')
-        # Get all the available regions to set the doors
+    def find_suitable_regions (self, available_segments : Optional[List[Segment]] = None) -> Tuple[ List['Segment'], List['Point'] ]:
         # Set the minimum length a segment must have in order to fit the door and its margins
         minimum_segment_length = self.margined_width
-        # Set the doors which must be substracted from the suitable segments (i.e. doors already set)
-        already_set_door_segments = [ door.segment for door in room.doors if door.point ]
-        # Get segments in the exterior boundary polygon which are wide enought for the door
-        candidate_segments = [ segment for segment in boundary.exterior_polygon.segments if segment.length >= minimum_segment_length ]
-        fit_segments = []
-        for segment in candidate_segments:
-            # Substract already set doors (without their margins) from the current segment
-            free_segments = segment.substract_segments(already_set_door_segments)
-            new_fit_segments = [ segment for segment in free_segments if segment.length >= minimum_segment_length ]
-            fit_segments += new_fit_segments
-        # If there is not wide enought room segments we stop here
-        # This may happen if the minimum size of the room is not enought to fit the door width including its margins
-        if len(fit_segments) == 0:
-            raise ValueError('There is not a segment wide enought to fit the door')
+        # If not available segments are passed then we use the room exterior polygon segments after substracting other doors
+        if available_segments == None:
+            # The door must have a polygon
+            room_polygon = self.get_room_polygon()
+            if not room_polygon:
+                raise ValueError('Cannot find a suitable region for a door without polygon')
+            # Get segments in its polygon which are wide enought for the door
+            candidate_segments = [ segment for segment in room_polygon.segments if segment.length >= minimum_segment_length ]
+            # Set the doors which must be substracted from the suitable segments (i.e. other doors already set)
+            already_set_door_segments = [ door.segment for door in self.room.doors if door != self and door.point ]
+            # Substract the neighbour doors from the available segments
+            fit_segments = []
+            for segment in candidate_segments:
+                # Substract already set doors (without their margins) from the current segment
+                free_segments = segment.substract_segments(already_set_door_segments)
+                new_fit_segments = [ segment for segment in free_segments if segment.length >= minimum_segment_length ]
+                fit_segments += new_fit_segments
+            # If there is not wide enought room segments we stop here
+            # This may happen if the minimum size of the room is not enought to fit the door width including its margins
+            if len(fit_segments) == 0:
+                raise ValueError('There is not a segment wide enought to fit the door')
+            available_segments = fit_segments
         # Get from each suitable segment the region where the door may fit (i.e. the margined suitable segment)
         # Wide segments will provide a suitable segment
         # Exact segments (i.e. same length that the margined door) will provide a suitable point
         suitable_segments = []
         suitable_points = []
-        for segment in fit_segments:
+        for segment in available_segments:
+            if segment.length < minimum_segment_length:
+                continue
             # Cut the margins of all available segments for the reminaing segments to be available to store the door point (center)
-            if segment.length == minimum_segment_length:
+            elif segment.length == minimum_segment_length:
                 suitable_point = segment.get_middle_point()
                 suitable_points.append(suitable_point)
             else:
@@ -893,45 +916,20 @@ class Room:
 
         # ------------------------------------------------------------------------------------------------------------------------------
 
-        # Now we have to set doors which are not set already in children rooms and expand the current corridor to cover these doors
-        for door in unset_doors:
+        # Now we have to set doors which are not set already in children rooms and expand the current corridor to cover these doors if needed
+
+        # Set a function to find the closest point to the corridor in a list of suitable segments to place a door
+        # Then find the path to this point and add it to the current corridor
+        # This is used to place a door which can not be placed in the current corridor because it does not fit anywhere
+        def expand_corridor_to_place_door (door : 'Door', suitable_segments : List[Segment], suitable_points : List[Point]):
+            nonlocal current_corridor
+            nonlocal current_corridor_nodes
+            nonlocal nodes
             # Get the corridor non redundant nodes in contact with the door room
             room = door.room
             room_nodes = [ node for node in current_corridor_nodes if not nodes[node]['is_redundant'] and room in nodes[node]['rooms'] ]
-            # Check if any node is suitable to fit the door
-            suitable_segments, suitable_points = door.find_suitable_regions()
-            final_point = None
-            for node in room_nodes:
-                if node in suitable_points:
-                    final_point = node
-                    break
-                suitable_segment = next((segment for segment in suitable_segments if node in segment), None)
-                if suitable_segment:
-                    final_point = node
-                    break
-            if final_point:
-                door.point = final_point
-                continue
-            # If not, we must check if there is any path between those nodes and try to fit the door in this path
-            for segment in current_corridor:
-                suitable_point = next((point for point in suitable_points if point in segment), None)
-                if suitable_point:
-                    final_point = suitable_point
-                    break
-                for suitable_segment in suitable_segments:
-                    overlap = segment.get_overlap_segment(suitable_segment)
-                    if overlap:
-                        final_point = overlap.get_random_point()
-                        break
-                if final_point:
-                    break
-            if final_point:
-                door.point = final_point
-                continue
-            # If not, we must find a point as close as posible to the corridor nodes
-            # We must also find the path from the closest node to this closest point
             # The closest point will be always one of the ends of one of the suitable segments
-            suitable_points = list(set(sum([ list(segment.points) for segment in suitable_segments ], [])))
+            suitable_points += list(set(sum([ list(segment.points) for segment in suitable_segments ], [])))
             # In order to find the shortest path, first, get the room exterior perimeter
             perimetral_segments = room.boundary.exterior_polygon.segments
             # Now split those segments by both nodes and suitable points
@@ -963,13 +961,59 @@ class Room:
                         # Edit the last segment in the path in order to cover the whole door with the corridor
                         previous_point = current_segment.get_other_point(current_point)
                         current_direction = (previous_point + current_point).normalized()
-                        last_segment = Segment(previous_point, current_point + current_direction * door.margined_width / 2)
+                        further_point = current_point + current_direction * door.margined_width / 2
+                        last_segment = Segment(previous_point, further_point)
                         path[-1] = last_segment
                         # Update the current path and the door point
                         current_path = path
                         door.point = current_point
             # Now add the current path to the whole corridor
             current_corridor += current_path
+            # Add the node and a fake node data in order to make the corridor further expansable at this new point
+            # WARNING: The fake node data coontains way less data than other nodes and it is not fully functional
+            current_corridor_nodes.append(further_point)
+            nodes[further_point] = {'is_redundant': False, 'rooms': [room]}
+
+        # For each door whose point is not yet set, set its point now
+        for door in unset_doors:
+            # Get the corridor non redundant nodes in contact with the door room
+            room = door.room
+            room_nodes = [ node for node in current_corridor_nodes if not nodes[node]['is_redundant'] and room in nodes[node]['rooms'] ]
+            # Check if any node is suitable to fit the door
+            # Note that there is no problem if the door is in contact with more than one parent/children room
+            # Corridors are meant to fix these situations
+            suitable_segments, suitable_points = door.find_suitable_regions()
+            final_point = None
+            for node in room_nodes:
+                if node in suitable_points:
+                    final_point = node
+                    break
+                suitable_segment = next((segment for segment in suitable_segments if node in segment), None)
+                if suitable_segment:
+                    final_point = node
+                    break
+            if final_point:
+                door.point = final_point
+                continue
+            # If not, we must check if there is any path between those nodes and try to fit the door in this path
+            for segment in current_corridor:
+                suitable_point = next((point for point in suitable_points if point in segment), None)
+                if suitable_point:
+                    final_point = suitable_point
+                    break
+                for suitable_segment in suitable_segments:
+                    overlap = segment.get_overlap_segment(suitable_segment)
+                    if overlap:
+                        final_point = overlap.get_random_point()
+                        break
+                if final_point:
+                    break
+            if final_point:
+                door.point = final_point
+                continue
+            # If not, we must find a point as close as posible to the corridor nodes
+            # We must also find the path from the closest node to this closest point
+            expand_corridor_to_place_door(door, suitable_segments, suitable_points)
 
         # Display the final corridor
         elements_to_display = current_corridor
@@ -1004,206 +1048,253 @@ class Room:
         # Set the children doors
         # These doors are susceptible of beeing moved while the corridor is build
         children_doors = sum([ child.doors for child in required_children_rooms ], [])
-        # Generate data for each point between segments (similar to nodes) by recording the connected segments
-        # Generate data for each segment by generating 2 boundary lines in the corridor
-        point_connected_segments = {}
-        segment_lines = {}
-        for segment in current_corridor:
-            # Get the points connected segments
-            points = segment.points
-            for point in points:
-                connected_segments = point_connected_segments.get(point, None)
-                if connected_segments:
-                    connected_segments.append(segment)
-                else:
-                    point_connected_segments[point] = [segment]
-            # Get the children doors inside the current segment
-            segment_doors = [ door for door in children_doors if door.point in segment and door.segment.same_line_as(segment) ]
-            # Get the segments inside direction
-            inside_direction = None
-            overlap_segment = next(exterior_polygon.get_overlap_segments(segment), None)
-            if overlap_segment:
-                inside_direction = exterior_polygon.get_border_inside(segment)
-            # Set the segment boundary lines
-            # Each segment will have 2 lines: one on each side
-            # We call these sides as clockwise and counter-clockwise sides
-            segment_direction = segment.direction
-            clockwise_direction = segment_direction.rotate(90)
-            counterclockwise_direction = segment_direction.rotate(-90)
-            # Use segment 'a' point as a reference to set each line point, but it could be the segment 'b' point as well
-            if inside_direction:
-                if inside_direction == clockwise_direction:
-                    clockwise_point = segment.a + clockwise_direction * corridor_size
-                    counterclockwise_point = segment.a
-                    for door in segment_doors:
-                        if door.direction == clockwise_direction:
-                            setattr(door, 'offset', corridor_size)
-                else:
-                    clockwise_point = segment.a
-                    counterclockwise_point = segment.a + counterclockwise_direction * corridor_size
-                    for door in segment_doors:
-                        if door.direction == counterclockwise_direction:
-                            setattr(door, 'offset', corridor_size)
-            else:
-                half_corridor_size = corridor_size / 2
-                clockwise_point = segment.a + clockwise_direction * half_corridor_size
-                counterclockwise_point = segment.a + counterclockwise_direction * half_corridor_size
-                for door in segment_doors:
-                    setattr(door, 'offset', half_corridor_size)
-            clockwise_line = Line(clockwise_point, segment_direction)
-            counterclockwise_line = Line(counterclockwise_point, segment_direction)
-            # Save both lines in a data dictionary
-            data = { 'clockwise': clockwise_line, 'counterclockwise': counterclockwise_line }
-            # Save the data dictionary inside another dictionary where the key is the segment itself
-            segment_lines[segment] = data
 
-        # Join all segment lines together in a dictionary where lines are the keys
-        # Each line value will be a list of intersections which will be set empty at this moment
-        # At the end of the next step each line must have exactly 2 intersections
-        # Note that duplicated lines will remain as a single key
-        line_intersections = {}
-        for lines in segment_lines.values():
-            clockwise_line = lines['clockwise']
-            counterclockwise_line = lines['counterclockwise']
-            for line in [ clockwise_line, counterclockwise_line ]:
-                line_intersections[line] = []
-
-        # Now for each segment in the corridor get the segments of the boundary
-        # First, segments must be built by finding the intersection point between segment lines
-        boundary_segments = []
-        for point, connected_segments in point_connected_segments.items():
-            # In case we have only 1 connected segment it means this is a death end of the corridor
-            # In this case we generate a new segment perpendicular to the only segment and which crosses the point itself
-            # This segment will be generated from a line which intersects both of the boundary lines in the only segment
-            if len(connected_segments) == 1:
-                segment = connected_segments[0]
-                # Using the current point as the reference point of view
-                is_segment_pointing_outside = point == segment.a
-                lines = segment_lines[segment]
-                clockwise_line = lines['clockwise'] if is_segment_pointing_outside else lines['counterclockwise']
-                counterclockwise_line = lines['counterclockwise'] if is_segment_pointing_outside else lines['clockwise']
-                perpendicular_vector = clockwise_line.vector.rotate(90)
-                perpendicular_line = Line(point, perpendicular_vector)
-                clockwise_line_intersection = clockwise_line.get_intersection_point(perpendicular_line)
-                counterclockwise_line_intersection = counterclockwise_line.get_intersection_point(perpendicular_line)
-                line_intersections[clockwise_line].append((clockwise_line_intersection, segment))
-                line_intersections[counterclockwise_line].append((counterclockwise_line_intersection, segment))
-                new_segment = Segment(clockwise_line_intersection, counterclockwise_line_intersection)
-                boundary_segments.append(new_segment)
-                continue
-            # Using the current point as the reference point of view:
-            # Sort segments according to their order around the point
-            reference_vector = Vector(0,1) # This could be any vector
-            def get_reference_angle (segment : 'Segment') -> number:
-                pointing_outside_vector = segment.vector if point == segment.a else -segment.vector
-                return reference_vector.get_angle_with(pointing_outside_vector)
-            sorted_connected_segments = sorted(connected_segments, key=get_reference_angle)
-            # print('SORTED ' + str(point))
-            # print([ segment.vector for segment in sorted_connected_segments ])
-
-            # For each pair of segments, there is a pair of boundary lines (one from each segment) which must intersect
-            # As an exception, if segments are paralel, we must check if lines are the same line
-            # In this case there the intersection point will be the middle point (bot segments will be merged further)
-            # Otherwise, we will have to add a perpendicular segment to intercept both lines to close the corridor at some point
-            for current, nextone in pairwise(sorted_connected_segments, retro=True):
-                # Using the current point as the reference point of view:
-                # Get the intersection point between the line in the clockwise side of the current segment and
-                #   the line in the counterclockwise side of the next one
-                is_current_pointing_outside = point == current.a
-                current_side = 'clockwise' if is_current_pointing_outside else 'counterclockwise'
-                current_lines = segment_lines[current]
-                current_clockwise_line = current_lines[current_side]
-                is_nextone_pointing_outside = point == nextone.a
-                nextone_side = 'counterclockwise' if is_nextone_pointing_outside else 'clockwise'
-                nextone_lines = segment_lines[nextone]
-                nextone_counterclockwise_line = nextone_lines[nextone_side]
-                intersection = current_clockwise_line.get_intersection_point(nextone_counterclockwise_line)
-                # If there is an intersection then save this point as an intersection for both lines
-                if intersection:
-                    line_intersections[current_clockwise_line].append((intersection, current))
-                    line_intersections[nextone_counterclockwise_line].append((intersection, nextone))
-                # If there is no intersection it means lines are paralel
-                else:
-                    # If they are the same line then there is no intersection at this point
-                    if current_clockwise_line == nextone_counterclockwise_line:
-                        continue
-                    # Otherwise, generate a new paralel segment which cuts both lines thus closing the corridor
-                    perpendicular_vector = current_clockwise_line.vector.rotate(90)
-                    # Find which line is closer to the point and find if this line 
-                    current_line_distance = current_clockwise_line.get_distance_to(point)
-                    nextone_line_distance = nextone_counterclockwise_line.get_distance_to(point)
-                    current_is_closer = current_line_distance < nextone_line_distance
-                    closer_line = current_clockwise_line if current_is_closer else nextone_counterclockwise_line
-                    # If the line is intersecting with the point itself then the new segment must start at the point itself
-                    # (Note that we are in a corner of the parent exterior boundary)
-                    if point in closer_line:
-                        new_line = Line(point, perpendicular_vector)
-                    # Otherwise, the new line must be pushed in one direction in order to make space for the corridor
-                    # The direction of the push must be through where is the segment whom the closer line comes from
+        # Set a function to generate the corridor boundary
+        # This process is wrapped in a function because we may have to change the corridor and redo the boundary further
+        # e.g. a door can not be relocated in the boundary so it must be relocated now and the corridor will change
+        def generate_corridor_boundary ():
+            # Generate data for each point between segments (similar to nodes) by recording the connected segments
+            # Generate data for each segment by generating 2 boundary lines in the corridor
+            point_connected_segments = {}
+            segment_lines = {}
+            for segment in current_corridor:
+                # Get the points connected segments
+                points = segment.points
+                for point in points:
+                    connected_segments = point_connected_segments.get(point, None)
+                    if connected_segments:
+                        connected_segments.append(segment)
                     else:
-                        if current_is_closer:
-                            offset_direction = current.direction
-                            if not is_current_pointing_outside:
-                                offset_direction = -offset_direction
-                        else:
-                            offset_direction = nextone.direction
-                            if not is_nextone_pointing_outside:
-                                offset_direction = -offset_direction
-                        offset = offset_direction * corridor_size
-                        offset_point = point + offset
-                        new_line = Line(offset_point, perpendicular_vector)
-                    # Find the intersection points with each line and create a new segment from both interactions
-                    current_line_intersection = current_clockwise_line.get_intersection_point(new_line)
-                    nextone_line_intersection = nextone_counterclockwise_line.get_intersection_point(new_line)
-                    line_intersections[current_clockwise_line].append((current_line_intersection, current))
-                    line_intersections[nextone_counterclockwise_line].append((nextone_line_intersection, nextone))
-                    new_segment = Segment(current_line_intersection, nextone_line_intersection)
+                        point_connected_segments[point] = [segment]
+                # Get the children doors inside the current segment
+                segment_doors = [ door for door in children_doors if door.point in segment and door.segment.same_line_as(segment) ]
+                # Get the segments inside direction
+                inside_direction = None
+                overlap_segment = next(exterior_polygon.get_segment_overlap_segments(segment), None)
+                if overlap_segment:
+                    inside_direction = exterior_polygon.get_border_inside(segment)
+                # Set the segment boundary lines
+                # Each segment will have 2 lines: one on each side
+                # We call these sides as clockwise and counter-clockwise sides
+                segment_direction = segment.direction
+                clockwise_direction = segment_direction.rotate(90)
+                counterclockwise_direction = segment_direction.rotate(-90)
+                # Use segment 'a' point as a reference to set each line point, but it could be the segment 'b' point as well
+                if inside_direction:
+                    if inside_direction == clockwise_direction:
+                        clockwise_point = segment.a + clockwise_direction * corridor_size
+                        counterclockwise_point = segment.a
+                        for door in segment_doors:
+                            if door.direction == clockwise_direction:
+                                setattr(door, 'offset', corridor_size)
+                    else:
+                        clockwise_point = segment.a
+                        counterclockwise_point = segment.a + counterclockwise_direction * corridor_size
+                        for door in segment_doors:
+                            if door.direction == counterclockwise_direction:
+                                setattr(door, 'offset', corridor_size)
+                else:
+                    half_corridor_size = corridor_size / 2
+                    clockwise_point = segment.a + clockwise_direction * half_corridor_size
+                    counterclockwise_point = segment.a + counterclockwise_direction * half_corridor_size
+                    for door in segment_doors:
+                        setattr(door, 'offset', half_corridor_size)
+                clockwise_line = Line(clockwise_point, segment_direction)
+                counterclockwise_line = Line(counterclockwise_point, segment_direction)
+                # Save both lines in a data dictionary
+                data = { 'clockwise': clockwise_line, 'counterclockwise': counterclockwise_line }
+                # Save the data dictionary inside another dictionary where the key is the segment itself
+                segment_lines[segment] = data
+
+            # Join all segment lines together in a dictionary where lines are the keys
+            # Each line value will be a list of intersections which will be set empty at this moment
+            # At the end of the next step each line must have exactly 2 intersections
+            # Note that duplicated lines will remain as a single key
+            line_intersections = {}
+            for lines in segment_lines.values():
+                clockwise_line = lines['clockwise']
+                counterclockwise_line = lines['counterclockwise']
+                for line in [ clockwise_line, counterclockwise_line ]:
+                    line_intersections[line] = []
+
+            # Now for each segment in the corridor get the segments of the boundary
+            # First, segments must be built by finding the intersection point between segment lines
+            boundary_segments = []
+            for point, connected_segments in point_connected_segments.items():
+                # In case we have only 1 connected segment it means this is a death end of the corridor
+                # In this case we generate a new segment perpendicular to the only segment and which crosses the point itself
+                # This segment will be generated from a line which intersects both of the boundary lines in the only segment
+                if len(connected_segments) == 1:
+                    segment = connected_segments[0]
+                    # Using the current point as the reference point of view
+                    is_segment_pointing_outside = point == segment.a
+                    lines = segment_lines[segment]
+                    clockwise_line = lines['clockwise'] if is_segment_pointing_outside else lines['counterclockwise']
+                    counterclockwise_line = lines['counterclockwise'] if is_segment_pointing_outside else lines['clockwise']
+                    perpendicular_vector = clockwise_line.vector.rotate(90)
+                    perpendicular_line = Line(point, perpendicular_vector)
+                    clockwise_line_intersection = clockwise_line.get_intersection_point(perpendicular_line)
+                    counterclockwise_line_intersection = counterclockwise_line.get_intersection_point(perpendicular_line)
+                    line_intersections[clockwise_line].append((clockwise_line_intersection, segment))
+                    line_intersections[counterclockwise_line].append((counterclockwise_line_intersection, segment))
+                    new_segment = Segment(clockwise_line_intersection, counterclockwise_line_intersection)
                     boundary_segments.append(new_segment)
-
-        # Build segments out of all found intersection points
-        for line, intersections in line_intersections.items():
-            # In the majority of the ocasions we will have 2 intersections per line
-            if len(intersections) == 2:
-                intersection_points = [ intersection[0] for intersection in intersections ]
-                # It may happen in a fe ocassions that a line has the same intersection twice
-                # This happens when a full offset corridor eats a perpendicular small corridor with the exact length of the corridor size
-                if intersection_points[0] == intersection_points[1]:
                     continue
-                new_segment = Segment(intersection_points[0], intersection_points[1])
-                boundary_segments.append(new_segment)
-                continue
-            # It may happen in a few ocassions that a line has more than 2 intersections (e.g. 4)
-            # This happens when corridor boundaries overlap in a 'U' shaped corridor
-            original_segments = list(set([ intersection[1] for intersection in intersections ]))
-            new_segments = []
-            for original_segment in original_segments:
-                intersection_points = [ intersection[0] for intersection in intersections if intersection[1] == original_segment ]
-                # At this point there should be always 2 intersections only
-                if len(intersection_points) != 2:
-                    raise ValueError('The line ' + str(line) + ' has a different number of intersections than 2: ' + str(intersections))
-                if intersection_points[0] == intersection_points[1]:
+                # Using the current point as the reference point of view:
+                # Sort segments according to their order around the point
+                reference_vector = Vector(0,1) # This could be any vector
+                def get_reference_angle (segment : 'Segment') -> number:
+                    pointing_outside_vector = segment.vector if point == segment.a else -segment.vector
+                    return reference_vector.get_angle_with(pointing_outside_vector)
+                sorted_connected_segments = sorted(connected_segments, key=get_reference_angle)
+                # print('SORTED ' + str(point))
+                # print([ segment.vector for segment in sorted_connected_segments ])
+
+                # For each pair of segments, there is a pair of boundary lines (one from each segment) which must intersect
+                # As an exception, if segments are paralel, we must check if lines are the same line
+                # In this case there the intersection point will be the middle point (bot segments will be merged further)
+                # Otherwise, we will have to add a perpendicular segment to intercept both lines to close the corridor at some point
+                for current, nextone in pairwise(sorted_connected_segments, retro=True):
+                    # Using the current point as the reference point of view:
+                    # Get the intersection point between the line in the clockwise side of the current segment and
+                    #   the line in the counterclockwise side of the next one
+                    is_current_pointing_outside = point == current.a
+                    current_side = 'clockwise' if is_current_pointing_outside else 'counterclockwise'
+                    current_lines = segment_lines[current]
+                    current_clockwise_line = current_lines[current_side]
+                    is_nextone_pointing_outside = point == nextone.a
+                    nextone_side = 'counterclockwise' if is_nextone_pointing_outside else 'clockwise'
+                    nextone_lines = segment_lines[nextone]
+                    nextone_counterclockwise_line = nextone_lines[nextone_side]
+                    intersection = current_clockwise_line.get_intersection_point(nextone_counterclockwise_line)
+                    # If there is an intersection then save this point as an intersection for both lines
+                    if intersection:
+                        line_intersections[current_clockwise_line].append((intersection, current))
+                        line_intersections[nextone_counterclockwise_line].append((intersection, nextone))
+                    # If there is no intersection it means lines are paralel
+                    else:
+                        # If they are the same line then there is no intersection at this point
+                        if current_clockwise_line == nextone_counterclockwise_line:
+                            continue
+                        # Otherwise, generate a new paralel segment which cuts both lines thus closing the corridor
+                        perpendicular_vector = current_clockwise_line.vector.rotate(90)
+                        # Find which line is closer to the point and find if this line 
+                        current_line_distance = current_clockwise_line.get_distance_to(point)
+                        nextone_line_distance = nextone_counterclockwise_line.get_distance_to(point)
+                        current_is_closer = current_line_distance < nextone_line_distance
+                        closer_line = current_clockwise_line if current_is_closer else nextone_counterclockwise_line
+                        # If the line is intersecting with the point itself then the new segment must start at the point itself
+                        # (Note that we are in a corner of the parent exterior boundary)
+                        if point in closer_line:
+                            new_line = Line(point, perpendicular_vector)
+                        # Otherwise, the new line must be pushed in one direction in order to make space for the corridor
+                        # The direction of the push must be through where is the segment whom the closer line comes from
+                        else:
+                            if current_is_closer:
+                                offset_direction = current.direction
+                                if not is_current_pointing_outside:
+                                    offset_direction = -offset_direction
+                            else:
+                                offset_direction = nextone.direction
+                                if not is_nextone_pointing_outside:
+                                    offset_direction = -offset_direction
+                            offset = offset_direction * corridor_size
+                            offset_point = point + offset
+                            new_line = Line(offset_point, perpendicular_vector)
+                        # Find the intersection points with each line and create a new segment from both interactions
+                        current_line_intersection = current_clockwise_line.get_intersection_point(new_line)
+                        nextone_line_intersection = nextone_counterclockwise_line.get_intersection_point(new_line)
+                        line_intersections[current_clockwise_line].append((current_line_intersection, current))
+                        line_intersections[nextone_counterclockwise_line].append((nextone_line_intersection, nextone))
+                        new_segment = Segment(current_line_intersection, nextone_line_intersection)
+                        boundary_segments.append(new_segment)
+
+            # Build segments out of all found intersection points
+            for line, intersections in line_intersections.items():
+                # In the majority of the ocasions we will have 2 intersections per line
+                if len(intersections) == 2:
+                    intersection_points = [ intersection[0] for intersection in intersections ]
+                    # It may happen in a fe ocassions that a line has the same intersection twice
+                    # This happens when a full offset corridor eats a perpendicular small corridor with the exact length of the corridor size
+                    if intersection_points[0] == intersection_points[1]:
+                        continue
+                    new_segment = Segment(intersection_points[0], intersection_points[1])
+                    boundary_segments.append(new_segment)
                     continue
-                new_segment = Segment(intersection_points[0], intersection_points[1])
-                new_segments.append(new_segment)
-            # In case the new segments overlap, remove the overlapping region
-            # Note that this step is performed in order to make the corridor boundary clean but,
-            #   if not done, the segment would be removed anyway since the polygon is set through the non canonical pathway
-            final_segments = get_non_overlap_segments(new_segments)
-            boundary_segments += final_segments
+                # It may happen in a few ocassions that a line has more than 2 intersections (e.g. 4)
+                # This happens when corridor boundaries overlap in a 'U' shaped corridor
+                original_segments = list(set([ intersection[1] for intersection in intersections ]))
+                new_segments = []
+                for original_segment in original_segments:
+                    intersection_points = [ intersection[0] for intersection in intersections if intersection[1] == original_segment ]
+                    # At this point there should be always 2 intersections only
+                    if len(intersection_points) != 2:
+                        # Display the corridor
+                        elements_to_display = current_corridor
+                        for segment in elements_to_display:
+                            segment.color = 'red'
+                        self.update_display(extra=elements_to_display)
+                        print('Line ' + str(line) + ' from the original segment ' + str(original_segment))
+                        raise ValueError('Different number of intersections than 2: ' + str(intersection_points))
+                    if intersection_points[0] == intersection_points[1]:
+                        continue
+                    new_segment = Segment(intersection_points[0], intersection_points[1])
+                    new_segments.append(new_segment)
+                # In case the new segments overlap, remove the overlapping region
+                # Note that this step is performed in order to make the corridor boundary clean but,
+                #   if not done, the segment would be removed anyway since the polygon is set through the non canonical pathway
+                final_segments = get_non_overlap_segments(new_segments)
+                boundary_segments += final_segments
 
-        # Display the corridor boundary
-        elements_to_display = boundary_segments
-        for segment in elements_to_display:
-            segment.color = 'red'
-        self.update_display(extra=elements_to_display)
+            # Display the corridor boundary
+            elements_to_display = boundary_segments
+            for segment in elements_to_display:
+                segment.color = 'red'
+            self.update_display(extra=elements_to_display)
 
-        # Generate a boundary from the previous segments
-        # DANI: Con la implementación actual debería haber siempre un único polígono
-        # DANI: Es posible que esto cambie en el futuro
-        polygons = list(connect_segments(boundary_segments))
-        if len(polygons) > 1:
-            raise ValueError('There should be only 1 polygon at this point')
-        corridor_boundary = Boundary(polygons[0])
+            # Generate a boundary from the previous segments
+            # DANI: Con la implementación actual debería haber siempre un único polígono
+            # DANI: Es posible que esto cambie en el futuro
+            polygons = list(connect_segments(boundary_segments))
+            if len(polygons) > 1:
+                raise ValueError('There should be only 1 polygon at this point')
+            corridor_boundary = Boundary(polygons[0])
+            return corridor_boundary
+
+        # Run the function above to generate the corridor
+        corridor_boundary = generate_corridor_boundary()
+        corridor_polygon = corridor_boundary.exterior_polygon
+
+        # Check doors to be able to relocate into this new boundary before proceeding to claim it
+        for door in children_doors:
+            # Check the door to fit and, in case it does not fit, exapand the corridor (this usually does not happend)
+            # Repeat this process until the door fits (if it happens, it happens usually 1 time to be solved)
+            while True:
+                # Get those corridor segments which are not in the parent exterior perimeter
+                # WARNING: This is important since these segments in the corridor may overlap the current door room polygon
+                # WARNING: However, they will not exist once the corridor has been set (it is hard to imagine if you don't see it)
+                corridor_segments = [ segment for segment in corridor_polygon.segments if segment not in exterior_polygon ]
+                common_segments = door.room.grid.get_segments_overlap_segments(corridor_segments)
+                suitable_segments, suitable_points = door.find_suitable_regions(common_segments)
+                if len(suitable_segments) > 0 or len(suitable_points) > 0:
+                    break
+                # In case there is not available space to relocate the door in the boundary we must relocate the door now
+                # Then we will expand the corridor to cover the door and remake the boundary
+                print('WARNING: A door from ' + door.room.name + ' could not be relocated to the corridor boundary so it must be expanded')
+                # Get the segments of the door room after substracting the corridor from them
+                uncommon_segments = door.get_room_polygon().get_non_overlap_segments(current_corridor)
+                suitable_segments, suitable_points = door.find_suitable_regions(uncommon_segments)
+                if len(suitable_segments) == 0 and len(suitable_points) == 0:
+                    raise ValueError('There is no place to relocate a door from ' + door.room.name)
+                # Expand the corridor to place the door somewhere in these segments
+                expand_corridor_to_place_door(door, suitable_segments, suitable_points)
+                # Remake the boundary now that the corridor has been expaned
+                corridor_boundary = generate_corridor_boundary()
+                # WARNING: We must get the corridor polygon again
+                corridor_polygon = corridor_boundary.exterior_polygon
+            # Save the already found suitable segments and points in case we need them further
+            setattr(door, 'suitable_segments', suitable_segments)
+            setattr(door, 'suitable_points', suitable_points)
 
         # Substract this region from the rest of rooms and claim it back for the parent
         # Note that other rooms will not expand to compensate the lost are this time
@@ -1211,28 +1302,30 @@ class Room:
             if not child.truncate([corridor_boundary], force=True, skip_update_display=True):
                 raise ValueError('The space required by the corridor cannot be truncated from ' + child.name)
 
-        self.update_display()
-
+        # Show the corridor area
+        #self.update_display()
+        
         # Finally relocate doors to the new corridor boundary
         for door in doors:
             offset = getattr(door, 'offset', None)
             if not offset:
                 continue
-            # Check where the new segment would be in the corridor boundary
+            # Try to simply push the door as much as the corrdior was expanded
+            # If it does not work then we relocate the door in any other available segment/point
+            suitable_segments = getattr(door, 'suitable_segments', None)
+            suitable_points = getattr(door, 'suitable_points', None)
             push = door.direction * offset
-            new_segment = door.margined_segment.translate(push)
-            if new_segment in corridor_boundary.exterior_polygon:
-                door.point = door.point + push
+            new_point = door.point + push
+            if new_point in suitable_points or any(new_point in segment for segment in suitable_segments):
+                door.point = new_point
                 continue
             # If it is not in the corridor boundary then we must relocate it
-            corridor_polygon = corridor_boundary.exterior_polygon
-            room_polygon = door.room.boundary.exterior_polygon
-            common_segments = corridor_polygon.get_polygon_overlap_segments(room_polygon)
-            fit_segment = next(( segment for segment in common_segments if segment.length >= door.margined_width ), None)
-            if not fit_segment:
-                raise ValueError('Can not recolate door for '+ door.room.name +' after building corridor')
-            door.point = fit_segment.fit_point(margin=door.margined_width / 2)
+            # There should always be space for the door a this point since we have already checked this
+            suitable_segment_points = sum([ list(segment.points) for segment in suitable_segments ], [])
+            available_points = suitable_points + suitable_segment_points
+            door.point = random.choice(available_points)
 
+        # Show the corrdior are and the relocated doors
         self.update_display()
 
     # Get the minimum of all minimum sizes
