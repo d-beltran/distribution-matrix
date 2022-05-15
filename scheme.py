@@ -18,8 +18,25 @@ if not seed:
 print('Seed ' + str(seed))
 random.seed(seed)
 
+# Set overall solving options
+
 # Set if the solving process must be displayed
 display_solving_process = False
+# Sets how much greater is the effective minimum size in the steps previous to corridor and wall tickness build
+# The most preventive margin we have, the most respect for the minimum size but the less flexibility when solving the puzzle
+# This means a strict protocol may have not solution
+# 0 - Use the minimum size as it is
+#     This is prone to not respect minimum size at several regions
+#     Moderate risk of large room space loose during the corridor build
+# 1 - Use the minimum size + half the corridor size
+#     This is prone to not respect minimum size at a few regions
+#     Lesser risk of large room space loose during the corridor build
+# 2 - Use the minimum size + the corridor size
+#     This should respect minimum size in most cases
+#     Negligible risk of large room space loose during the corridor build
+# 3 - Use the minimum size + twice the corridor size
+#     This should respect minimum size even in the worst possible scenario
+preventive_min_size_protocol = 0
 
 # A door is a segment in a polygon
 # When boundaries are transformed to walls with tickness, doors become holes in the wall
@@ -317,7 +334,8 @@ class Room:
             self.min_size = min_size
         else:
             self.min_size = 0
-        self._forced_max_size = max_size
+        # Save the input max size
+        self.input_max_size = max_size
         # Parent free limit is set by the parent while setting the child boundary
         # Parent free limit is the maximum min size of all parent children but this child
         self.parent_free_limit = None
@@ -331,6 +349,59 @@ class Room:
             door.room = self
         # Set the room corridor size
         self.corridor_size = corridor_size
+        if not self.corridor_size:
+            self.corridor_size = self.min_size
+        if not self.corridor_size:
+            self.corridor_size = self.get_min_min_size()
+        # In order to respect the minimum size we are going to use a greater minimum size at the first steps
+        # This is done to have margin for performing invasive steps (e.g. corridor and wall thickness build)
+        if preventive_min_size_protocol == 0:
+            self.preventive_min_size = self.min_size
+        elif preventive_min_size_protocol == 1:
+            self.preventive_min_size = self.min_size + self.corridor_size / 2
+        elif preventive_min_size_protocol == 2:
+            self.preventive_min_size = self.min_size + self.corridor_size
+        elif preventive_min_size_protocol == 3:
+            self.preventive_min_size = self.min_size + self.corridor_size * 2
+        else:
+            raise SystemExit('Preventive min size protocol ' + str(preventive_min_size_protocol) + ' not defined')
+        # Now set some parameters in children
+        for child in self.children:
+            child._post_init(self)
+        # Check areas of all children rooms to do not sum up more than the parent area
+        # In addition check if any of the children room has boundary and, if so, check the boundary is inside the parent
+        children_area = sum([ child.forced_area for child in self.children ])
+        if children_area > self.area + minimum_resolution:
+            raise InputError('Children together require more area than the parent has')
+        # In case children do not cover the whole parent area set a new dummy room to cover this free area first
+        if children_area < self.area - minimum_resolution:
+            remaining_area = self.area - children_area
+            dummy_room_name = self.name + ' (free)'
+            dummy_room = Room(forced_area=remaining_area, min_size=self.min_size, name=dummy_room_name, fill_color=self.fill_color)
+            self.children = [ dummy_room ] + self.children
+
+    # Set a function which sets other initial values once the parent has been set
+    # This function is called by the parent once it has been initiated
+    def _post_init (self, parent):
+        # Set the absolute forced area in case the area was set as a percent of the parent area
+        if self._forced_area_portion:
+            self.forced_area = parent.forced_area * self._forced_area_portion
+        # Set the maximium size
+        # Calculate the coherent max size, which is the forced area divided by the minimum size
+        # i.e. the maximum possible size in case the boundary was the thinest rectangle
+        self.max_size = self.forced_area / self.preventive_min_size
+        # In case there was a forced maximum size and it is smaller than the coherent max size, apply it
+        if self.input_max_size and self.input_max_size < self.max_size:
+            self.max_size = self.input_max_size
+        # If the preventive min size is bigger than the maximum size we have to adapt to it
+        if self.preventive_min_size > self.max_size:
+            self.preventive_min_size = self.max_size
+        # Check this room is inside the parent boundary, if they have a predefined boundary
+        if self.boundary and self.boundary not in parent.boundary:
+            raise InputError('The child room "' + self.name + '" is out of the parent boundary')
+        # Check if this rooms minimum size fits in the parent boundary
+        if not parent.does_room_fit(self, force=True):
+            raise InputError('The child room "' + self.name + '" minimum size does not fit in the parent boundary')
 
     def __str__(self):
         return '<Room "' + str(self.name) + '">'
@@ -429,61 +500,16 @@ class Room:
         return self.free_grid.area
     free_area = property(get_free_area, None, None, "Free space area (read only)")
 
-    # Get the maximum size
-    # If there is a forced maximum size then return it
-    # Otherwise calculate it by dividing the forced area between the minimum size
-    # i.e. return the maximum possible size in case the boundary was the thinest rectangle
-    def get_maximum_area (self):
-        if self._forced_max_size:
-            return self._forced_max_size
-        elif self.forced_area and self.min_size and self.min_size != 0:
-            return self.forced_area / self.min_size
-        else:
-            return None
-    # Force the maximum size
-    def set_maximum_size (self, value):
-        self._forced_max_size = value
-    max_size = property(get_maximum_area, set_maximum_size, None, "Maximum possible size")
-
     # Set the children boundaries according to the room configuration
     # This function triggers the logic to solve room distributions
     # If the recursive flag is passed then set each child's children boundaries and so on recursively
     # All children rooms must have their boundary fully set before solving the next generation of children
     def set_children_boundaries (self, recursive : bool = False):
         rooms = self.children
-        if len(rooms) == 0:
-            return
-        # Check areas of all children rooms to do not sum up more than the parent area
-        # In addition check if any of the children room has boundary and, if so, check the boundary is inside the parent
-        children_area = 0
-        for room in rooms:
-            # If the children has a percent forced area this is the time to calculate the absolute forced area
-            if room._forced_area_portion:
-                room.forced_area = self.forced_area * room._forced_area_portion
-            children_area += room.forced_area
-        if children_area > self.area + minimum_resolution:
-            raise InputError('Children together require more area than the parent has')
-        # In case children do not cover the whole parent area set a new dummy room to cover this free area first
-        if children_area < self.area - minimum_resolution:
-            remaining_area = self.area - children_area
-            dummy_room_name = self.name + ' (free)'
-            dummy_room = Room(forced_area=remaining_area, min_size=self.min_size, name=dummy_room_name, fill_color=self.fill_color)
-            self.children = [ dummy_room ] + self.children
-            rooms = self.children
-        # Check all children are inside the parent boundary, if they have a predefined boundary
-        for room in rooms:
-            if room.boundary and room.boundary not in self.boundary:
-                raise InputError('The child room "' + room.name + '" is out of the parent boundary')
-        # Check all children minim sizes fit in the parent boundary, if they have a predefined minimum size
-        for room in rooms:
-            if not self.does_room_fit(room, force=True):
-                raise InputError('The child room "' + room.name + '" minimum size does not fit in the parent boundary')
-
         # Sort children rooms by minimum size, with the biggest sizes first
         def sort_by_size (room):
             return room.min_size
         sorted_rooms = sorted( rooms, key=sort_by_size, reverse=True )
-
         # Set up each room by giving them a position and correct size to match the forced area
         for room in sorted_rooms:
             # Configure the child room to respect the parent free min size limit according to its brothers
@@ -492,7 +518,7 @@ class Room:
             # If the children has no boundary it must be built
             if not room.boundary:
                 if not self.set_child_room_boundary(room):
-                    raise RuntimeError('Child ' + room.name + ' has failed to be set')
+                    raise SystemExit('Child ' + room.name + ' has failed to be set')
 
         # Now that all children bondaries are set we must set the doors and the corridor
 
@@ -527,12 +553,13 @@ class Room:
                         setattr(door, arg, value)
 
         # Set the corridor
-        self.set_corridor()
+        if len(rooms) > 0:
+            self.set_corridor()
 
         # Set children boundaries recurisvely if the recursive flag was passed
         if recursive:
-            for child in self.children:
-                child.set_children_boundaries(recursive=True)
+            for room in rooms:
+                room.set_children_boundaries(recursive=True)
 
     # Check if a room fits in this room according to its minimum size
     # Check free space by default and all space if the argument 'force' is passed
@@ -618,16 +645,14 @@ class Room:
                 continue
             previous_initial_boundary = room.boundary
             # Proceed with the expansion of this child room until it reaches its forced area
-            if not room.fit_to_required_area():
-                room.boundary = None
-                if forced:
-                    self.restore_children_backup(backup)
-                continue
-            break
+            if room.fit_to_required_area():
+                return True
+            # If the expansion failed then clean the boundary (i.e. the initial boundary)
+            room.boundary = None
+            if forced:
+                self.restore_children_backup(backup)
         # If at this point we still have no boundary it means there is no available place to set the perimeter
-        if room.boundary == None:
-            return False
-        return True
+        return False
 
     # Set the initial room boundary as the maximum possible rectangle
     # It is useful to set a whole room at the begining, when there is plenty of free space
@@ -667,7 +692,7 @@ class Room:
     # Set the initial room boundary as the minimum possible rectangle
     # This is used when the initial boundary must be forced over other children rooms
     def set_minimum_initial_boundary (self, corner : Point, space : Rect) -> Boundary:
-        minimum_rect = Rect.from_corner(corner, self.min_size, self.min_size)
+        minimum_rect = Rect.from_corner(corner, self.preventive_min_size, self.preventive_min_size)
         return Boundary(Polygon.from_rect(minimum_rect))
 
     # Calculate which segments make the shortest path to connect parent doors and all children rooms
@@ -749,6 +774,7 @@ class Room:
                     last_node = nodes[last_point]
                     path.append(last_segment)
                     if last_point == node_point:
+                        print(self.name)
                         raise ValueError('This should never happen. Do we have one room only?')
                 # Once we have the reached a non-redundant node save the accumulated path and the node itself
                 # In case the point is already in the list it means we have two paths for the same node
@@ -1031,11 +1057,6 @@ class Room:
 
         # Set the corridor size (width)
         corridor_size = self.corridor_size
-        if not corridor_size:
-            corridor_size = self.min_size
-        if not corridor_size:
-            corridor_size = self.get_min_min_size()
-        #print('Corridor size: ' + str(corridor_size))
 
         # Split corridor segments at the parent exterior perimter inside corners
         # This is to avoid segments which are partially in the parent to get the full offset in the whole segment
@@ -1360,7 +1381,7 @@ class Room:
         # DANI: Es mejor con la multiplicación que sin ella. Le da más flexibilidad a la resolución del puzle acelerando así el proceso
         # DANI: Es muy peligrosos que queden espacios libres sin reclamar (cuando no tenga que haberlos)
         # DANI: Pero una resolución pequeña no hará que no queden espacios libres, simplemente hará que esos espacios sean muy pequeños
-        while abs(required_area / self.min_size) >= minimum_resolution * self.min_size:
+        while abs(required_area / self.preventive_min_size) >= minimum_resolution * self.preventive_min_size:
             # If the required are is positive it means we must expand our room
             if required_area > 0:
                 # Set a function to supervise if each expansion step is succesful or not
@@ -1448,7 +1469,7 @@ class Room:
         # As an exception, short frontiers connected to at least 1 inside corner may be expanded
         # However these frontiers will have a push length limit
         def is_suitable (frontier : Segment) -> bool:
-            return frontier.length >= self.min_size or frontier.a in inside_corners or frontier.b in inside_corners
+            return frontier.length >= self.preventive_min_size or frontier.a in inside_corners or frontier.b in inside_corners
 
         # Short frontiers could be also expanded together with other connected and aligned frontiers
         # These compound frontiers must be taken in count also although they are harder to expand
@@ -1460,7 +1481,7 @@ class Room:
                 implicated_rooms = frontier.rooms
                 next_point = point
                 # Join connected frontiers until we have enough length or the next frontier is not aligned
-                while combined_frontier.length < self.min_size:
+                while combined_frontier.length < self.preventive_min_size:
                     # Find the next connected frontier
                     # There may be no next connected frontier if next would be a parent frontier
                     connected_frontier = next((seg for seg in other_frontiers if seg.has_point(next_point)), None)
@@ -1473,14 +1494,14 @@ class Room:
                     implicated_rooms += connected_frontier.rooms
                     next_point = next(p for p in connected_frontier.points if p != next_point)
                 # If the combined frontier reaches the minimum length add it to the list to be returned
-                if combined_frontier.length >= self.min_size:
+                if combined_frontier.length >= self.preventive_min_size:
                     # Get unique implicated rooms
                     implicated_rooms = unique(implicated_rooms)
                     # Create a fit combined frontier which takes the minimum possible part from the last added frontier
                     # This way the expansion takes as much possible from the main frontier room
                     extended_direction = (point + next_point).normalized()
                     oposite_point = next(p for p in frontier.points if p != point)
-                    fit_combined_frontier = Segment(oposite_point, oposite_point + extended_direction * self.min_size)
+                    fit_combined_frontier = Segment(oposite_point, oposite_point + extended_direction * self.preventive_min_size)
                     # Add all combined frontier rooms to the fit combined frontier
                     fit_combined_frontier.rooms = implicated_rooms
                     yield fit_combined_frontier
@@ -1680,15 +1701,15 @@ class Room:
             if push_length < minimum_resolution:
                 print('WARNING: The push length is too small for segment ' + str(pushed_segment))
                 new_point_a = pushed_segment.a
-                new_point_b = pushed_segment.a + pushed_segment.direction * self.min_size
+                new_point_b = pushed_segment.a + pushed_segment.direction * self.preventive_min_size
                 pushed_segment = Segment(new_point_a, new_point_b)
                 print('WARNING: segment has been reduced to ' + str(pushed_segment))
-                push_length = required_area / self.min_size
+                push_length = required_area / self.preventive_min_size
             # In case this is an insider segment which is not wide enought to be pushed alone,
             # Find out how much we can push this segment
             # i.e. find the connected frontier/s and get the maximum length of these segments
             corner_push_limit = None
-            if pushed_segment.length < self.min_size - minimum_resolution:
+            if pushed_segment.length < self.preventive_min_size - minimum_resolution:
                 other_segments = [ segment for segment in exterior_polygon.segments if pushed_segment not in segment]
                 for point in pushed_segment.points:
                     if point in inside_corners:
@@ -1844,7 +1865,7 @@ class Room:
             if new_point not in reduced_frontier:
                 print('WARNING: The frontier has been fully consumed')
                 return False
-            if new_point.get_distance_to(other_point) < self.min_size:
+            if new_point.get_distance_to(other_point) < self.preventive_min_size:
                 print('WARNING: The reduced frontier is not wide enought')
                 return False
             reduced_frontier = Segment(new_point, other_point)
@@ -1898,7 +1919,7 @@ class Room:
             raise RuntimeError('Frontier ' + str(frontier) + ' has no space in ' + str(rects))
         space_contact = next(segment for segment in space.segments if frontier in segment)
         space_forward_limit = space.get_size()[forward]
-        margin_limit = self.min_size
+        margin_limit = self.preventive_min_size
         margined_space_forward_limit = space_forward_limit - margin_limit
 
         # Find the direction of the expansion as a vector
@@ -2009,7 +2030,7 @@ class Room:
             if new_point not in reduced_frontier:
                 print('WARNING: The frontier has been fully consumed')
                 return False
-            if new_point.get_distance_to(other_point) < self.min_size:
+            if new_point.get_distance_to(other_point) < self.preventive_min_size:
                 print('WARNING: The reduced frontier is not wide enought')
                 return False
             reduced_frontier = Segment(new_point, other_point)
@@ -2026,7 +2047,7 @@ class Room:
         for region in regions:
             truncated_grid = truncated_grid.get_substract_grid(region.grid)
         # Check the truncated grid to still respecting the minimum size
-        if not force and not truncated_grid.check_minimum(self.min_size):
+        if not force and not truncated_grid.check_minimum(self.preventive_min_size):
             print('WARNING: The room is not respecting the minimum size -> Go back')
             return False
         truncated_boundaries = truncated_grid.find_boundaries()
@@ -2094,7 +2115,7 @@ class Room:
         if self.boundary == None:
             self.boundary = boundary
         else:
-            self.boundary = self.boundary.merge_boundary(boundary, self.min_size)
+            self.boundary = self.boundary.merge_boundary(boundary, self.preventive_min_size)
 
     # Get all overlapped segments between the current room and others
     def get_frontiers_with (self, other : 'Room') -> list:

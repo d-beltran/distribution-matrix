@@ -2040,18 +2040,20 @@ class Grid:
                 free_borders += segment.substract_segments(limits)            
             # Check free borders to respect the minimum size
             for s, segment in enumerate(free_borders):
+                # If the segment is wide enough then skip it
+                if segment.length >= minimum:
+                    continue
+                # If the segment is not wide enough it may make a corner with other free regions thus beeing correct
                 # Find out if the free border is making a corner
                 corner_segment = next((border for border in free_borders[s+1:] if border.makes_corner_with(segment)), None)
                 # In case it is, use the hipotenuse of the border to check the minimum size
                 if corner_segment:
                     free_borders.remove(corner_segment) # Remove the corner segment from the list
                     size = sqrt( segment.length**2 + corner_segment.length**2 )
-                # Otherwise, use the size of the segment itself
-                else:
-                    size = segment.length
-                # Check the size to respect the minimum
-                if size < minimum:
-                    return False
+                    if size >= minimum:
+                        continue
+                # Otherwise, we are not respecting the minimum size
+                return False
         return True
 
     # One by one for each *available rectangle, where available rectangles are the splitted rectangles
