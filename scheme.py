@@ -745,6 +745,18 @@ class Room:
             room.boundary = room.set_maximum_initial_boundary(corner, space)
             return True
 
+    # Build a provisional exterior perimeter from the child boundaries
+    # This function is meant to be used only when the parent room has not boundary
+    def get_provisional_exterior_polygon (self) -> 'Polygon':
+        child_boundary_segments = []
+        for child in self.children:
+            if not child.boundary:
+                continue
+            child_boundary_segments += child.boundary.exterior_polygon.segments
+        exterior_polygon_segments = get_non_overlap_segments(child_boundary_segments)
+        exterior_polygon = Polygon.non_canonical(exterior_polygon_segments)
+        return exterior_polygon
+
     # Set the initial room boundary as the maximum possible rectangle
     # It is useful to set a whole room at the begining, when there is plenty of free space
     def set_maximum_initial_boundary (self, corner : Point, space : Rect) -> Boundary:
@@ -840,7 +852,7 @@ class Room:
                     nodes[point] = {'connected_segments': [segment]}
         # Find which rooms are in contact to each node and if nodes are in the exterior boundary
         # Find also which nodes are doors
-        exterior_polygon = self.boundary.exterior_polygon if self.boundary else None
+        exterior_polygon = self.boundary.exterior_polygon if self.boundary else self.get_provisional_exterior_polygon()
         for node_point, node_data in nodes.items():
             rooms = []
             for child in self.children:
@@ -848,7 +860,7 @@ class Room:
                     continue
                 if node_point in child.boundary.exterior_polygon:
                     rooms.append(child)
-            if exterior_polygon and node_point in exterior_polygon:
+            if self.boundary and node_point in exterior_polygon:
                 rooms.append(self)
             node_data['rooms'] = rooms
             node_data['is_door'] = node_point in door_points
@@ -1175,7 +1187,8 @@ class Room:
         corridor_size = self.corridor_size
 
         # Split corridor segments at the parent exterior perimter inside corners
-        # This is to avoid segments which are partially in the parent to get the full offset in the whole segment
+        # This is to avoid segments which are partially in the parent to get the full offset* in the whole segment
+        # * Offset means the wall displacement when claiming the corridor area, it is explained below
         cut_points = [ corner for corner in exterior_polygon.corners if corner.inside ]
         for segment in current_corridor:
             cutted_segments = list(segment.split_at_points(cut_points))
@@ -1433,11 +1446,13 @@ class Room:
             setattr(door, 'suitable_segments', suitable_segments)
             setattr(door, 'suitable_points', suitable_points)
 
+
         # Substract this region from the rest of rooms and claim it back for the parent
-        # Note that other rooms will not expand to compensate the lost are this time
+        # Note that, in case the parent has a boundary, other rooms will not expand to compensate the lost at this time
+        claiming_function = child.truncate if self.boundary else child.invade
         for child in self.children:
-            if not child.truncate([corridor_boundary], force=True, skip_update_display=True):
-                raise ValueError('The space required by the corridor cannot be truncated from ' + child.name)
+            if not claiming_function([corridor_boundary], force=True, skip_update_display=True):
+                raise ValueError('The space required by the corridor cannot be claimed from ' + child.name)
 
         # Show the corridor area
         #self.update_display()
@@ -2181,10 +2196,10 @@ class Room:
 
     # Invade this room by substracting part of its space
     # Then this room must expand to recover the lost area
-    def invade (self, regions : List[Boundary]) -> bool:
+    def invade (self, regions : List[Boundary], force : bool = False, skip_update_display : bool = False) -> bool:
         # Truncate the room boundary but save a backup in case we have to go back further
         backup_boundary = self.boundary
-        if not self.truncate(regions):
+        if not self.truncate(regions, force, skip_update_display):
             print('WARNING: The invaded region can not be truncated -> Go back')
             self.boundary = backup_boundary
             return False
@@ -2249,30 +2264,50 @@ class Room:
 
     # Get all self frontiers segments
     # They come inside a tuple separated by free frontiers, brother frontiers and parent frontiers respectively
+    # i.e. "free of conflict" frontiers, "conflict" frontiers and "forbidden" frontiers respectively
     def get_frontiers (self) -> tuple:
         parent_room = self.parent
-        exterior_polygon = self.boundary.exterior_polygon
-        # The parent limits are not allowed for expansion
-        parent_frontiers = self.get_frontiers_with(parent_room)
-        # Other rooms inside the same parent may be displaced if there is no free space available
-        brother_rooms = [ room for room in parent_room.children if room is not self and room.boundary ]
-        brother_frontiers = []
-        for room in brother_rooms:
-            # This function assign the frontier.rooms already
-            frontiers = self.get_frontiers_with(room)
-            if frontiers:
-                brother_frontiers += frontiers
-        # The prefered limits to expand are those connected to free space inside the current parent
-        # First of all get all already found frontier segments
-        conflict_frontiers = [*parent_frontiers, *brother_frontiers]
-        # Now susbstract all previous frontiers from the rest of the external polygon to find free frontiers
-        free_frontiers = []
-        for segment in exterior_polygon.segments:
-            free_frontiers += segment.substract_segments(conflict_frontiers)
-        # Set the room all free segment belong to as None
-        for frontier in free_frontiers:
-            frontier.rooms = [parent_room]
-        return free_frontiers, brother_frontiers, parent_frontiers
+        # In case we have a parent boundary, frontiers with this boundary are totally forbidden to expansion
+        if parent_room.boundary:
+            # The parent limits are not allowed for expansion
+            parent_frontiers = self.get_frontiers_with(parent_room)
+            # Other rooms inside the same parent may be displaced if there is no free space available
+            brother_rooms = [ room for room in parent_room.children if room is not self and room.boundary ]
+            brother_frontiers = []
+            for room in brother_rooms:
+                # This function assign the frontier.rooms already
+                frontiers = self.get_frontiers_with(room)
+                if frontiers:
+                    brother_frontiers += frontiers
+            # The prefered limits to expand are those connected to free space inside the current parent
+            # First of all get all already found frontier segments
+            conflict_frontiers = [*parent_frontiers, *brother_frontiers]
+            # Now susbstract all previous frontiers from the rest of the external polygon to find free frontiers
+            free_frontiers = []
+            for segment in self.boundary.exterior_polygon.segments:
+                free_frontiers += segment.substract_segments(conflict_frontiers)
+            # Set the room all free segment belong to as None
+            for frontier in free_frontiers:
+                frontier.rooms = [parent_room]
+            return free_frontiers, brother_frontiers, parent_frontiers
+        # If there is no paren boundary then any frontier which has no brothers conflict is suitable for expansion
+        else:
+            # Other rooms inside the same parent may be displaced if there is no free space available
+            brother_rooms = [ room for room in parent_room.children if room is not self and room.boundary ]
+            brother_frontiers = []
+            for room in brother_rooms:
+                # This function assign the frontier.rooms already
+                frontiers = self.get_frontiers_with(room)
+                if frontiers:
+                    brother_frontiers += frontiers
+            # Now susbstract all previous frontiers from the rest of the external polygon to find free frontiers
+            free_frontiers = []
+            for segment in self.boundary.exterior_polygon.segments:
+                free_frontiers += segment.substract_segments(brother_frontiers)
+            # Set the room all free segment belong to as None
+            for frontier in free_frontiers:
+                frontier.rooms = [parent_room]
+            return free_frontiers, brother_frontiers, []
 
     # Go uppwards in the hyerarchy until you reach the room which has no parent
     def get_root_room (self) -> 'Room':
