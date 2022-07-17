@@ -416,6 +416,9 @@ class Segment(Line):
     def __hash__(self):
         return hash(self.get_hash())
 
+    def __neg__(self):
+        return self.inverted
+
     def __contains__(self, other):
         if isinstance(other, Point):
             # First of all check that the point is in the line
@@ -816,7 +819,7 @@ class Rect:
 
     # Return all rectangle points in a 'polygon-friendly' order
     # Each point contains its two adjacent segments
-    def get_corners(self) -> list:
+    def get_corners(self) -> List['Corner']:
         points = self.get_points()
         segments = [ Segment(a,b) for a, b in pairwise(points, retro=True) ]
         segment_pairs = list(pairwise(segments, retro=True))
@@ -828,6 +831,14 @@ class Rect:
             corners.append(corner)
             #point.segments = segment_pairs[p]
         return corners
+
+    # Get a corner from its point
+    def get_corner(self, point : 'Point') -> Optional['Corner']:
+        corners = self.get_corners()
+        corner = next((corner for corner in corners if corner == point), None)
+        if not corner:
+            return None
+        return corner
 
     # Get horizontal size
     def get_x_size(self) -> number:
@@ -1148,6 +1159,14 @@ class Polygon:
     # Polygon corners (read only)
     corners = property(get_corners, None, None, "The polygon corners")
 
+    # Get a corner from its point
+    def get_corner(self, point : 'Point') -> Optional['Corner']:
+        corners = self.get_corners()
+        corner = next((corner for corner in corners if corner == point), None)
+        if not corner:
+            return None
+        return corner
+
     # Get the polygon grid
     # If grid was previously calculated then return it
     # Otherwise, get all rectangles which form the polygon and set a new grid with them
@@ -1315,7 +1334,7 @@ class Polygon:
         return False
 
     # Get a specific polygon corner or segment by specifying a point that matches this element
-    def get_border_element (self, point : Point):
+    def get_border_element (self, point : Point) -> Optional[Union[Point,Segment]]:
         for corner in self.corners:
             if point == corner:
                 return corner
@@ -1325,7 +1344,7 @@ class Polygon:
         return None
 
     # Get a specific polygon segment by specifying a segment that overlaps partial or totally this segment
-    def get_border_segment (self, segment : Segment):
+    def get_border_segment (self, segment : Segment) -> Optional[Segment]:
         for polygon_segment in self.segments:
             overlap = polygon_segment.get_overlap_segment(segment)
             if overlap:
@@ -1333,7 +1352,7 @@ class Polygon:
         return None
 
     # Given a segment which overlaps the polygon, get a vector which is perpendicular to this segment and points into de inside of the polygon
-    def get_border_inside (self, segment : Segment):
+    def get_border_inside (self, segment : Segment) -> Vector:
         polygon_segment = self.get_border_segment(segment)
         if not polygon_segment:
             raise ValueError('The segment is not in the polyigon')
@@ -1701,7 +1720,7 @@ class Boundary:
         # In case there is a minimum size restriction check that the colliding segment is as long as required
         if min_size and all([ segment.length < min_size for segment in colliding_segments ]):
             raise ValueError('Some colliding region is not wide enough')
-        # Check that there are not overlaping areas between both boundaries
+        # Check that there are not overlapping areas between both boundaries
         overlaps = self.get_overlap_boundaries(other)
         if len(overlaps) == 0:
             raise ValueError('Boundaries are overlapping')
@@ -2408,7 +2427,7 @@ def connect_segments (segments : List[Segment]) -> Generator[Polygon, None, None
 
 # Get the non overlap segments between a list of segments
 # Segments must all be in the same line
-def get_non_overlap_segments (segments : 'Segment') -> List['Segment']:
+def get_line_non_overlap_segments (segments : 'Segment') -> List['Segment']:
     # If all segments are not in the same line we cannot proceed
     if not all( current.same_line_as(nextone) for current, nextone in pairwise(segments) ):
         raise ValueError('Segments are not all in the same line')
@@ -2435,6 +2454,22 @@ def get_non_overlap_segments (segments : 'Segment') -> List['Segment']:
         if sum(in_segments.values()) == 1:
             first_point = point
     # If segments do not overlap at any moment then return None
+    return non_overlap_segments
+
+
+# Get the non overlap segments between a list of segments
+def get_non_overlap_segments (segments : 'Segment') -> List['Segment']:
+    pool = [ *segments ]
+    non_overlap_segments = []
+    while len(pool) > 0:
+        # Start from the first segment in the pool and find segments in the same line
+        start_segment = pool[0]
+        inline_segments = [ start_segment ] + [ other_segment for other_segment in pool[1:-1] if other_segment.same_line_as(start_segment) ]
+        current_non_overlap_segments = get_line_non_overlap_segments(inline_segments)
+        non_overlap_segments += current_non_overlap_segments
+        # Remove current segments from the pool
+        for segment in inline_segments:
+            pool.remove(segment)
     return non_overlap_segments
 
 # Given two catets, get the hipotenuse

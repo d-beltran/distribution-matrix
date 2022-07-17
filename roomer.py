@@ -12,28 +12,28 @@ if __name__ == '__main__':
     setup_display()
 
     test = Room(
-        boundary=test_boundary_3,
+        #boundary=test_boundary_3,
         display=True,
         name='Planta',
         #doors=[ Door(), Door() ],
         children=[
             Room(
                 #polygon=Polygon.from_corners(test_polygon_6),
-                #forced_area=3600,
-                forced_area='37.5%',
+                forced_area=3600,
+                #forced_area='37.5%',
                 min_size=15,
                 name='Comedor',
                 fill_color='blue'),
             Room(
-                #forced_area=1600,
-                forced_area='18%',
+                forced_area=1600,
+                #forced_area='18%',
                 min_size=15,
                 name='Cocina',
                 fill_color='yellow'),
             Room(
-                #forced_area=1800,
+                forced_area=1800,
+                #forced_area='21%',
                 display=True,
-                forced_area='21%',
                 min_size=15,
                 name='Habitación 1',
                 fill_color='red',
@@ -46,14 +46,14 @@ if __name__ == '__main__':
                     # )
                 ]),
             Room(
-                #forced_area=1800,
-                forced_area='16.50%',
+                forced_area=1800,
+                #forced_area='16.50%',
                 min_size=15,
                 name='Habitación 2',
                 fill_color='orange'),
             Room(
-                #forced_area=800,
-                forced_area='7%',
+                forced_area=800,
+                #forced_area='7%',
                 min_size=10,
                 name='Lavabo',
                 fill_color='green')

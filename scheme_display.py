@@ -94,6 +94,13 @@ def represent (queue):
         #ax.segments = []
         ax.clear()
 
+        # In case something went wrong in the solving process and there are no frames from the begining
+        # Prevent error logs from the display to be shown in the console
+        # But do not close the display window (i.e. do not call raise SystemExit)
+        # It is better for the developer to see an empty display to understand that it failed before returning any frame
+        if len(frames) == 0:
+            return
+
         # Get everything to be displayed in the current frame
         segments, rects, traced = frames[slider_value]
 
