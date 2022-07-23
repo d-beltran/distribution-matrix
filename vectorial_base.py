@@ -379,12 +379,16 @@ class Line:
     def get_angle_with (self, other : 'Line') -> number:
         return self.vector.get_angle_with(other.vector)
 
-    # Get the distance from this line to other specified point (i.e. from the locser point in the line)
-    def get_distance_to (self, other : 'Point') -> number:
+    # Get the closer point in the line to other specified point 
+    def get_closer_point (self, other : 'Point') -> 'Point':
         perpendicular_vector = self.vector.rotate(90)
         perpendicular_line = Line(other, perpendicular_vector)
-        intersection = self.get_intersection_point(perpendicular_line)
-        return intersection.get_distance_to(other)
+        return self.get_intersection_point(perpendicular_line)
+
+    # Get the distance from this line to other specified point (i.e. from the closer point in the line)
+    def get_distance_to (self, other : 'Point') -> number:
+        closer_point = self.get_closer_point(other)
+        return closer_point.get_distance_to(other)
         
 # A segment defined by 2 coordinates (Points): 'a' and 'b'
 class Segment(Line):
@@ -397,6 +401,7 @@ class Segment(Line):
         self.color = color
         vector = a + b
         super().__init__(a, vector)
+        self.line = Line(a, vector)
         self.direction = vector.normalized()
         self.length = a.get_distance_to(b)
         # Save both points as a tuple
@@ -672,6 +677,22 @@ class Segment(Line):
         new_a = self.a + direction
         new_b = self.b + direction
         return Segment(new_a, new_b)
+
+    # Get the closer point in the segment to other specified point 
+    def get_closer_point (self, other : 'Point') -> 'Point':
+        line_closer_point = self.line.get_closer_point(other)
+        if line_closer_point in self:
+            return line_closer_point
+        point_distances = [ point.get_distance_to(other) for point in self.points ]
+        if point_distances[0] >= point_distances[1]:
+            return self.a
+        return self.b
+
+    # Get the distance from this segment to other specified point (i.e. from the closer point in the segment)
+    # DANI: Ahora mismo no se usa
+    def get_distance_to (self, other : 'Point') -> number:
+        closer_point = self.get_closer_point(other)
+        return closer_point.get_distance_to(other)
 
 # A corner is a point where 2 non-paralel segments are connected
 # i.e. both segments have this point ('a' or 'b') in common

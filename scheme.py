@@ -1185,6 +1185,7 @@ class Room:
 
         # Set the corridor size (width)
         corridor_size = self.corridor_size
+        half_corridor_size = corridor_size / 2
 
         # Split corridor segments at the parent exterior perimter inside corners
         # This is to avoid segments which are partially in the parent to get the full offset* in the whole segment
@@ -1218,11 +1219,42 @@ class Room:
                         point_connected_segments[point] = [segment]
                 # Get the children doors inside the current segment
                 segment_doors = [ door for door in children_doors if door.point in segment and door.segment.same_line_as(segment) ]
-                # Get the segments inside direction
+                # Get the segment inside direction, which is the direction it will be offseted in case the segment is too close to the parent boundary
+                # get also how much it will be offseted (the distance). It may range from 0 to half the corridor size.
                 inside_direction = None
+                inside_distance = 0
+                # If the segment is overlapping one fo the segments in the parent boundary then we have to offset its expansion
+                # One of the boundary lines will remain in the same segment line and the other will be translated the whole corridor size intead of a half
                 overlap_segment = next(exterior_polygon.get_segment_overlap_segments(segment), None)
                 if overlap_segment:
                     inside_direction = exterior_polygon.get_border_inside(segment)
+                    inside_distance = half_corridor_size
+                # If there is an inside corner from the parent boundary close enought to the segment then we have to offset it as well
+                for corner in exterior_polygon.get_inside_corners():
+                    line_closer_point = segment.line.get_closer_point(corner)
+                    # If the corner is not in the "perpendicular range" then there is no conflict
+                    if line_closer_point not in segment:
+                        continue
+                    # If the corner is far enough then there is no conflict
+                    corner_distance = line_closer_point.get_distance_to(corner)
+                    if corner_distance > half_corridor_size:
+                        continue
+                    # We have a conflict here
+                    print('CONFLICT: ' + str(corner))
+                    corner_inside_direction = (corner + line_closer_point).normalized()
+                    # If there was a previous inside direction and it is not matching the current one it must be the opposite
+                    # This means we must offset corridors in both perpendicular directions at the same time, which is impossible
+                    # This may happen in very elaborate situations, and if it happens it may have a solution, but it is too much work
+                    # I rather not to support this situation
+                    if inside_direction and inside_direction != corner_inside_direction:
+                        raise ValueError('Can not push corridor in both directions at the same time (see segment ' + str(segment) + ')')
+                    inside_direction = corner_inside_direction
+                    # Calculate how much we must push the line inside to avoid the conflict corner
+                    # The highest inside distance stays
+                    corner_inside_distance = half_corridor_size - corner_distance
+                    if inside_distance < corner_inside_distance:
+                        inside_distance = corner_inside_distance
+
                 # Set the segment boundary lines
                 # Each segment will have 2 lines: one on each side
                 # We call these sides as clockwise and counter-clockwise sides
@@ -1231,20 +1263,26 @@ class Room:
                 counterclockwise_direction = segment_direction.rotate(-90)
                 # Use segment 'a' point as a reference to set each line point, but it could be the segment 'b' point as well
                 if inside_direction:
+                    # Push the line points
+                    inside_offset = half_corridor_size + inside_distance
+                    outside_offset = half_corridor_size - inside_distance
                     if inside_direction == clockwise_direction:
-                        clockwise_point = segment.a + clockwise_direction * corridor_size
-                        counterclockwise_point = segment.a
-                        for door in segment_doors:
-                            if door.direction == clockwise_direction:
-                                setattr(door, 'offset', corridor_size)
+                        clockwise_point = segment.a + clockwise_direction * inside_offset
+                        counterclockwise_point = segment.a + counterclockwise_direction * outside_offset
+                    elif inside_direction == counterclockwise_direction:
+                        clockwise_point = segment.a + clockwise_direction * outside_offset
+                        counterclockwise_point = segment.a + counterclockwise_direction * inside_offset
                     else:
-                        clockwise_point = segment.a
-                        counterclockwise_point = segment.a + counterclockwise_direction * corridor_size
-                        for door in segment_doors:
-                            if door.direction == counterclockwise_direction:
-                                setattr(door, 'offset', corridor_size)
+                        raise ValueError('Impossible inside direction when solving corridor boundary')
+                    # Push the doors
+                    for door in segment_doors:
+                        if door.direction == inside_direction:
+                            setattr(door, 'offset', inside_offset)
+                        elif door.direction == -inside_direction:
+                            setattr(door, 'offset', outside_offset)
+                        else:
+                            raise ValueError('Impossible door direction when solving corridor boundary')
                 else:
-                    half_corridor_size = corridor_size / 2
                     clockwise_point = segment.a + clockwise_direction * half_corridor_size
                     counterclockwise_point = segment.a + counterclockwise_direction * half_corridor_size
                     for door in segment_doors:
@@ -1565,7 +1603,7 @@ class Room:
         # Get the exterior polygon of the room boundary
         exterior_polygon = self.boundary.exterior_polygon
         # Get the inside corners
-        inside_corners = [ corner for corner in exterior_polygon.corners if corner.inside == True ]
+        inside_corners = exterior_polygon.get_inside_corners()
 
         # ----------------------------------------------------------------------------------------------------
         # Split the room boundary exterior polygon in segments according to what each region is connected to
