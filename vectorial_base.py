@@ -1025,6 +1025,12 @@ class Rect:
         rects = [ rect for rect in list(split) if not get_overlapped(rect) ]
         return rects
 
+    # Generate a new rectangle with expanded margins
+    def expand_margins (self, margin_size : number) -> 'Rect':
+        new_pmin = Point(self.pmin.x - margin_size, self.pmin.y - margin_size)
+        new_pmax = Point(self.pmax.x + margin_size, self.pmax.y + margin_size)
+        return Rect(new_pmin, new_pmax)
+
 # A polygon is a list of connected segments which is closed
 # IMPORTANT: Segments must follow some standards:
 # - All segments follow an order: each segment 'b' point is the next segment 'a' point
@@ -1181,7 +1187,7 @@ class Polygon:
     corners = property(get_corners, None, None, "The polygon corners")
 
     # Get a corner from its point
-    def get_corner(self, point : 'Point') -> Optional['Corner']:
+    def get_corner (self, point : 'Point') -> Optional['Corner']:
         corners = self.get_corners()
         corner = next((corner for corner in corners if corner == point), None)
         if not corner:
@@ -1838,6 +1844,7 @@ class Grid:
                 new_group += [ rect for rect in connected_rects if rect not in new_group ]
             rects_to_group = [ rect for rect in rects_to_group if rect not in new_group ]
             rect_groups.append(new_group)
+        add_frame(rect_groups[0])
         # Now find the boundary of each rectangles group
         # This is the non-canonical version of find_boundaries method
         boundaries = []
@@ -1857,6 +1864,8 @@ class Grid:
             sorted_polygons = sorted(polygons)
             exterior_polygon = sorted_polygons[-1]
             interior_polygons = sorted_polygons[0:-1]
+            if len(interior_polygons) > 0:
+                raise SystemExit('WAIT!')
             # Now create the boundary
             boundary = Boundary(exterior_polygon, interior_polygons)
             boundaries.append(boundary)
@@ -2476,7 +2485,6 @@ def get_line_non_overlap_segments (segments : 'Segment') -> List['Segment']:
             first_point = point
     # If segments do not overlap at any moment then return None
     return non_overlap_segments
-
 
 # Get the non overlap segments between a list of segments
 def get_non_overlap_segments (segments : 'Segment') -> List['Segment']:

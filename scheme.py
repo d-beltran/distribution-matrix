@@ -280,6 +280,9 @@ class Room:
         min_size : Optional[number] = None,
         # Maximum size in at least one dimension
         max_size : Optional[number] = None,
+        # Set if the room boundary may me modified
+        # DANI: No está implementado todavía
+        rigid : bool = False,
         # Corridor size (the minimum size by default)
         corridor_size : Optional[number] = None,
         # The doors to enter the room and start corridors
@@ -329,6 +332,8 @@ class Room:
         # If the forced area does not cover the minimum size it makes no sense
         if min_size and self.forced_area and self.forced_area < min_size**2:
             raise InputError('Forced area is not sufficient for the minimum size in room ' + name)
+        # Set if the boundary is rigid
+        self.rigid = rigid
         # Set size limits
         if min_size or min_size == 0:
             self.min_size = min_size
@@ -756,6 +761,17 @@ class Room:
         exterior_polygon_segments = get_non_overlap_segments(child_boundary_segments)
         exterior_polygon = Polygon.non_canonical(exterior_polygon_segments)
         return exterior_polygon
+
+    # Build a provisional exterior grid
+    # This function is meant to be used only when the parent room has not boundary
+    # Create a fake square which contains all the children and then add a margin as long as the distance argument
+    # This is used by children to expand outwards
+    def generate_exterior_free_grid (self, margin_size : number) -> 'Grid':
+        exterior_polygon = self.get_provisional_exterior_polygon()
+        exterior_box = exterior_polygon.get_box()
+        expanded_box = exterior_box.expand_margins(margin_size)
+        exterior_free_boundary = Boundary(Polygon.from_rect(expanded_box), [exterior_polygon])
+        return exterior_free_boundary.grid
 
     # Set the initial room boundary as the maximum possible rectangle
     # It is useful to set a whole room at the begining, when there is plenty of free space
@@ -1486,14 +1502,24 @@ class Room:
 
 
         # Substract this region from the rest of rooms and claim it back for the parent
-        # Note that, in case the parent has a boundary, other rooms will not expand to compensate the lost at this time
-        claiming_function = child.truncate if self.boundary else child.invade
+        # Note that, at this point, other rooms will not expand to compensate the lost at this time
         for child in self.children:
-            if not claiming_function([corridor_boundary], force=True, skip_update_display=True):
+            if not child.truncate([corridor_boundary], force=True, skip_update_display=True):
                 raise ValueError('The space required by the corridor cannot be claimed from ' + child.name)
+        # Set the corridor as a new independen room which will occupy the new freed space
+        # This is useful to prevent this space to be claimed back if we further expand the rooms
+        corridor_room = Room(boundary=corridor_boundary, name=self.name + ' corridor', fill_color=self.fill_color)
+        corridor_room.parent = self
+        self.children.append(corridor_room)
 
         # Show the corridor area
-        #self.update_display()
+        self.update_display()
+
+        # Now, if the parent has no boundary, we expand child rooms to compensate for their area loss
+        if not self.boundary:
+            for child in self.children:
+                if not child.fit_to_required_area():
+                    raise ValueError(child.name + ' failed to fit to required area after corridor area truncation')
         
         # Finally relocate doors to the new corridor boundary
         for door in doors:
@@ -1515,7 +1541,7 @@ class Room:
             available_points = suitable_points + suitable_segment_points
             door.point = random.choice(available_points)
 
-        # Show the corrdior are and the relocated doors
+        # Show the corrdior area and the relocated doors
         self.update_display()
 
     # Get the minimum of all minimum sizes
@@ -1526,6 +1552,8 @@ class Room:
         root = self.get_root_room()
         all_rooms = root.get_rooms_recuersive()
         all_min_sizes = [ room.min_size for room in all_rooms if room.min_size > 0 ]
+        if len(all_min_sizes) == 0:
+            return 0
         return min(all_min_sizes)
 
     # Calculate how much area we need to expand
@@ -1797,14 +1825,24 @@ class Room:
         inside_corners = [ corner for corner in exterior_polygon.corners if corner.inside == True ]
         # Set some parameters according to the rooms this frontier belongs to
         rooms = frontier.rooms
+
         # Get the grid of the rooms we are about to invade as a reference to calculate how much we can expand
         # When the invaded room is self room it means we are expanding over free space
-        first_room = rooms[0]
-        grid = first_room.free_grid if first_room == parent_room else first_room.grid
         # In case this frontier has more than 1 rooms it means it is a combined frontier
         # Create a 'ficticious' room with all implicated rooms as a reference
-        for next_room in rooms[1:]:
+        grid = None
+        for next_room in rooms:
             next_grid = next_room.free_grid if next_room == parent_room else next_room.grid
+            # If we have not grid at this point it must mean we are expanding over a parent without grid
+            # In this case we must generate a fake grid which allows the room as far as it may need but without conflicting with its brothers
+            if not next_grid:
+                if next_room != parent_room:
+                    raise ValueError('The parent room is the only room which may lack a grid at this point')
+                next_grid = parent_room.generate_exterior_free_grid(margin_size=self.max_size*2)
+            # Add the current grid to the previous accumulated grid. if any
+            if not grid:
+                grid = next_grid
+                continue
             grid = grid.get_merge_grid(next_grid)
         # Find the maximum rectangles which are in contact with our frontier
         max_rects = grid.max_rects
