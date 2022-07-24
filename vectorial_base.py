@@ -2485,7 +2485,7 @@ def get_non_overlap_segments (segments : 'Segment') -> List['Segment']:
     while len(pool) > 0:
         # Start from the first segment in the pool and find segments in the same line
         start_segment = pool[0]
-        inline_segments = [ start_segment ] + [ other_segment for other_segment in pool[1:-1] if other_segment.same_line_as(start_segment) ]
+        inline_segments = [ start_segment ] + [ other_segment for other_segment in pool[1:] if other_segment.same_line_as(start_segment) ]
         current_non_overlap_segments = get_line_non_overlap_segments(inline_segments)
         non_overlap_segments += current_non_overlap_segments
         # Remove current segments from the pool
