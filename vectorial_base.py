@@ -187,6 +187,8 @@ class Vector:
     # Return a new vector with identical direction and sense but magnitude = 1
     def normalized(self) -> 'Vector':
         magnitude = self.get_magnitude()
+        if magnitude == 0:
+            raise ValueError('Can not normalize Vector(0,0)')
         return self / magnitude
 
     # Find out if the vector is totally vertical
@@ -1459,18 +1461,23 @@ class Polygon:
                 overall_overlap_segments += overlap_segments
         return list(set(overall_overlap_segments))
 
-    # Get overlapping regions between polygon segments
-    # Note that segments inside the area of the polygon will not be considered, just the perimeter
-    def get_polygon_overlap_segments (self, other : 'Polygon') -> List[Segment]:
-        return self.get_segments_overlap_segments(other.segments)
-
-    # Get polygon segments after substracting the overlap region with another polygon
+    # Get polygon segments after substracting the overlap region with a list of segments
     def get_non_overlap_segments (self, segments : List[Segment]) -> List[Segment]:
         overall_non_overlap_segments = []
         for segment in self.segments:
             non_overlap_segments = segment.substract_segments(segments)
             overall_non_overlap_segments += non_overlap_segments
         return overall_non_overlap_segments
+
+    # Get overlapping regions between polygon segments
+    # Note that segments inside the area of the polygon will not be considered, just the perimeter
+    def get_polygon_overlap_segments (self, other : 'Polygon') -> List[Segment]:
+        return self.get_segments_overlap_segments(other.segments)
+
+    # Get non overlapping regions between polygon segments
+    # Note that segments inside the area of the polygon will not be considered, just the perimeter
+    def get_polygon_non_overlap_segments (self, other : 'Polygon') -> List[Segment]:
+        return self.get_non_overlap_segments(other.segments)
 
     # Check if self polygon is colliding with other polygon
     # i.e. one of their segments is totally or partially overlapping
@@ -2446,7 +2453,7 @@ class Grid:
             inside = not inside
         return overlap_segments
 
-    # Given a polygon, for each segment in the polygon, get all segment regions which overlap the grid
+    # Given a list of segments, get all segment regions which overlap the grid
     def get_segments_overlap_segments (self, segments : List[Segment]) -> List[Segment]:
         overall_overlap_segments = []
         for segment in segments:

@@ -9,10 +9,7 @@ from math import sqrt, inf
 
 # Set the seed and print it
 seed = None
-#seed = 728886 # (perimetro 1) puerta no se puede recolocar a la primera
-#seed = 580352 # Corridor lines overlap
-#seed = 353360 # Queda un recobeco
-#seed = 181783 # Otro recobeco
+#seed = 975359
 if not seed:
     seed = round(random.random() * 999999)
 print('Seed ' + str(seed))
@@ -341,6 +338,9 @@ class Room:
             self.min_size = 0
         # Save the input max size
         self.input_max_size = max_size
+        # Set the maximium size as infinite by now
+        # This may be changed further
+        self.max_size = inf
         # Check if the parent has a stablished boundary
         # All the logic changes drastically whether the parent has or not a boundary
         self._parent_has_boundary = False
@@ -373,20 +373,22 @@ class Room:
             self.preventive_min_size = self.min_size + self.corridor_size * 2
         else:
             raise SystemExit('Preventive min size protocol ' + str(preventive_min_size_protocol) + ' not defined')
-        # Now set some parameters in children
-        for child in self.children:
-            child._post_init(self)
-        # Check areas of all children rooms to do not sum up more than the parent area
-        # In addition check if any of the children room has boundary and, if so, check the boundary is inside the parent
-        children_area = sum([ child.forced_area for child in self.children ])
-        if self.area and children_area > self.area + minimum_resolution:
-            raise InputError('Children together require more area than the parent has')
-        # In case children do not cover the whole parent area set a new dummy room to cover this free area first
-        if children_area < self.area - minimum_resolution:
-            remaining_area = self.area - children_area
-            dummy_room_name = self.name + ' (free)'
-            dummy_room = Room(forced_area=remaining_area, min_size=self.min_size, name=dummy_room_name, fill_color=self.fill_color)
-            self.children = [ dummy_room ] + self.children
+        # Children handling:
+        if self.children:
+            # Now set some parameters in children
+            for child in self.children:
+                child._post_init(self)
+            # Check areas of all children rooms to do not sum up more than the parent area
+            # In addition check if any of the children room has boundary and, if so, check the boundary is inside the parent
+            children_area = sum([ child.forced_area for child in self.children ])
+            if self.area and children_area > self.area + minimum_resolution:
+                raise InputError('Children together require more area than the parent has')
+            # In case children do not cover the whole parent area set a new dummy room to cover this free area first
+            if children_area < self.forced_area - minimum_resolution:
+                remaining_area = self.forced_area - children_area
+                dummy_room_name = self.name + ' (free)'
+                dummy_room = Room(forced_area=remaining_area, min_size=self.min_size, name=dummy_room_name, fill_color=self.fill_color)
+                self.children = [ dummy_room ] + self.children
 
     # Set a function which sets other initial values once the parent has been set
     # This function is called by the parent once it has been initiated
@@ -398,8 +400,6 @@ class Room:
             if not parent.forced_area:
                 raise InputError('Room "' + self.name + '" has a portion area but the parent has not area')
             self.forced_area = parent.forced_area * self._forced_area_portion
-        # Set the maximium size
-        self.max_size = inf
         # Calculate the coherent max size, which is the forced area divided by the minimum size
         # i.e. the maximum possible size in case the boundary was the thinest rectangle
         if self.forced_area:
@@ -1256,8 +1256,14 @@ class Room:
                     if corner_distance > half_corridor_size:
                         continue
                     # We have a conflict here
-                    print('CONFLICT: ' + str(corner))
-                    corner_inside_direction = (corner + line_closer_point).normalized()
+                    # Find the direction we must push the corridor to solve the conflict
+                    if corner_distance == 0:
+                        affecting_segment = next(( seg for seg in corner.segments if segment.is_paralel_to(seg) ), None)
+                        if not affecting_segment:
+                            raise ValueError('This should not happen. Does the exteropr polygon has diagonal segments?')
+                        corner_inside_direction = exterior_polygon.get_border_inside(affecting_segment)
+                    else:
+                        corner_inside_direction = (corner + line_closer_point).normalized()
                     # If there was a previous inside direction and it is not matching the current one it must be the opposite
                     # This means we must offset corridors in both perpendicular directions at the same time, which is impossible
                     # This may happen in very elaborate situations, and if it happens it may have a solution, but it is too much work
@@ -1477,8 +1483,8 @@ class Room:
                 # Get those corridor segments which are not in the parent exterior perimeter
                 # WARNING: This is important since these segments in the corridor may overlap the current door room polygon
                 # WARNING: However, they will not exist once the corridor has been set (it is hard to imagine if you don't see it)
-                corridor_segments = [ segment for segment in corridor_polygon.segments if segment not in exterior_polygon ]
-                common_segments = door.room.grid.get_segments_overlap_segments(corridor_segments)
+                avaliable_corridor_segments = corridor_polygon.get_polygon_non_overlap_segments(exterior_polygon)
+                common_segments = door.room.grid.get_segments_overlap_segments(avaliable_corridor_segments)
                 suitable_segments, suitable_points = door.find_suitable_regions(common_segments)
                 if len(suitable_segments) > 0 or len(suitable_points) > 0:
                     break
@@ -1578,7 +1584,7 @@ class Room:
         # DANI: Es mejor con la multiplicación que sin ella. Le da más flexibilidad a la resolución del puzle acelerando así el proceso
         # DANI: Es muy peligrosos que queden espacios libres sin reclamar (cuando no tenga que haberlos)
         # DANI: Pero una resolución pequeña no hará que no queden espacios libres, simplemente hará que esos espacios sean muy pequeños
-        while abs(required_area / self.preventive_min_size) >= minimum_resolution * self.preventive_min_size:
+        while abs(required_area / self.max_size) >= minimum_resolution * self.max_size:
             # If the required are is positive it means we must expand our room
             if required_area > 0:
                 # Set a function to supervise if each expansion step is succesful or not
