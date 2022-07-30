@@ -1859,11 +1859,11 @@ class Room:
         # This is because rectangles size is given in a (x,y) tuple format
         # So size[0] = x and size[1] = 1
         if frontier.is_vertical():
-            rects = grid.find_column_rectangles()
+            rects = [ column[0] for column in grid.columns ]
             forward = 0
             sides = 1
         elif frontier.is_horizontal():
-            rects = grid.find_row_rectangles()
+            rects = [ row[0] for row in grid.rows ]
             forward = 1
             sides = 0
         else:
@@ -2106,11 +2106,11 @@ class Room:
         # This is because rectangles size is given in a (x,y) tuple format
         # So size[0] = x and size[1] = 1
         if frontier.is_vertical():
-            rects = grid.find_column_rectangles()
+            rects = [ column[0] for column in grid.columns ]
             forward = 0
             sides = 1
         elif frontier.is_horizontal():
-            rects = grid.find_row_rectangles()
+            rects = [ row[0] for row in grid.rows ]
             forward = 1
             sides = 0
         else:

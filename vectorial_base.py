@@ -725,6 +725,8 @@ class Rect:
         self.y_min = y_min
         self.x_max = x_max
         self.y_max = y_max
+        self.x = (x_min, x_max)
+        self.y = (y_min, y_max)
         self.x_size, self.y_size = self.get_size()
         if resolute(self.x_size) < minimum_resolution or resolute(self.y_size) < minimum_resolution:
             raise ValueError('The rectangle has not 2 dimensions: ' + str(self))
@@ -939,9 +941,17 @@ class Rect:
         x_steps = [ step for step in x_steps if step[0] != step[1] ]
         y_steps = [ step for step in y_steps if step[0] != step[1] ]
         # Create as many rectangles as required
-        for xmin, xmax in x_steps:
-            for ymin, ymax in y_steps:
-                yield Rect(xmin, ymin, xmax, ymax)
+        for x_min, x_max in x_steps:
+            for y_min, y_max in y_steps:
+                yield Rect(x_min, y_min, x_max, y_max)
+
+    # Wrap two rectangles by creating a rectangle which contains both
+    def wrap (self, rect) -> 'Rect':
+        x_min = min(self.x_min, rect.x_min)
+        y_min = min(self.y_min, rect.y_min)
+        x_max = max(self.x_max, rect.x_max)
+        y_max = max(self.y_max, rect.y_max)
+        return Rect(x_min, y_min, x_max, y_max)
 
     # Given 2 rectangles, it returns the overlapping region, if exists, as a new rectangle
     # DANI: No lo he provado desde que lo moví de abajo
@@ -1774,8 +1784,8 @@ class Grid:
         # Check rectangles to match the grid format requirements
         self.check()
         self._max_rects = None
-        self._row_rects = None
-        self._col_rects = None
+        self._rows = None
+        self._columns = None
         self._area = None
         self._boundaries = None
 
@@ -1819,7 +1829,82 @@ class Grid:
                 if rect.get_overlap_rect(other_rect):
                     print('WARNING: Overlapping rects ' + str(rect) + ' and ' + str(other_rect))
                     raise RuntimeError('Grid rects are wrong')
-        
+
+    # Find redundant columns/rows of rectangles and merge them to make the grid more efficient
+    # This should be necessary only when the grid is built in a non canonical way
+    # Note that this function modifies the current grid rects
+    def compact (self):
+        # Start by checking the rows
+        new_rows = []
+        last_merged_row = None
+        for row_1, row_2 in pairwise(self.rows):
+            # In case the previous row was merged, consider the merged row as the current row 1
+            if last_merged_row:
+                row_1 = last_merged_row
+                last_merged_row = None
+            # Get each row rectangles
+            overall_rectangle_1, contained_rectangles_1 = row_1
+            overall_rectangle_2, contained_rectangles_2 = row_2
+            # If the number of rectangles does not match there is now way the rows can be merged
+            # This should happen most of the time
+            if len(contained_rectangles_1) != len(contained_rectangles_2):
+                new_rows.append(row_1)
+                continue
+            # In case the number of rects match we must check the minimum and maximum y values of the rows to be different
+            if overall_rectangle_1.x != overall_rectangle_2.x:
+                new_rows.append(row_1)
+                continue
+            # If the y range matches then we have 2 rows where there could be just one
+            # We must merge them
+            new_row_rect = overall_rectangle_1.wrap(overall_rectangle_2)
+            new_rects = [ rect_1.wrap(contained_rectangles_2[i]) for i, rect_1 in enumerate(contained_rectangles_1) ]
+            last_merged_row = new_row_rect, new_rects
+        # Join the last row
+        if last_merged_row:
+            new_rows.append(last_merged_row)
+        else:
+            new_rows.append(self.rows[-1])
+        # Update the grid rects with the new merged rects
+        self._rects = sum([ new_row[1] for new_row in new_rows ], [])
+        # Reset the columns just in case they were previously calculated, since they will be not valid anymore
+        self._columns = None
+        # Now repeat the whole process with columns
+        new_columns = []
+        last_merged_column = None
+        for column_1, column_2 in pairwise(self.columns):
+            # In case the previous column was merged, consider the merged column as the current column 1
+            if last_merged_column:
+                column_1 = last_merged_column
+                last_merged_column = None
+            # Get each column rectangles
+            overall_rectangle_1, contained_rectangles_1 = column_1
+            overall_rectangle_2, contained_rectangles_2 = column_2
+            # If the number of rectangles does not match there is now way the columns can be merged
+            # This should happen most of the time
+            if len(contained_rectangles_1) != len(contained_rectangles_2):
+                new_columns.append(column_1)
+                continue
+            # In case the number of rects match we must check the minimum and maximum y values of the columns to be different
+            if overall_rectangle_1.y != overall_rectangle_2.y:
+                new_columns.append(column_1)
+                continue
+            # If the y range matches then we have 2 columns where there could be just one
+            # We must merge them
+            new_column_rect = overall_rectangle_1.wrap(overall_rectangle_2)
+            new_rects = [ rect_1.wrap(contained_rectangles_2[i]) for i, rect_1 in enumerate(contained_rectangles_1) ]
+            last_merged_column = new_column_rect, new_rects
+        # Join the last column
+        if last_merged_column:
+            new_columns.append(last_merged_column)
+        else:
+            new_columns.append(self.columns[-1])
+        # Update the grid rects with the new merged rects
+        self._rects = sum([ new_column[1] for new_column in new_columns ], [])
+        # Now we can keep the previously calculated columns as the current grid columns
+        # However we can not keep the previous calculated rows, since their rows may have been merged
+        # So we just clean the curren grid rows, so they will be recalcualted if needed
+        self._rows = None
+        self._columns = new_columns
 
     # Set the grid from rectangles which do not follow the standards
     # i.e. they are not connected each other by the whole segment
@@ -1839,47 +1924,31 @@ class Grid:
                 new_group += [ rect for rect in connected_rects if rect not in new_group ]
             rects_to_group = [ rect for rect in rects_to_group if rect not in new_group ]
             rect_groups.append(new_group)
-        add_frame(rect_groups[0])
-        # Now find the boundary of each rectangles group
-        # This is the non-canonical version of find_boundaries method
-        boundaries = []
-        for group in rect_groups:
-            # Get all rectangle segments and discard overlapped segments
-            # Then connect the remaining segments to build polygons
-            # Note that overlap rects are not in the grid standard format
-            # For this reason, overlapped segments are not necessarily identical
-            segments = [ segment for rect in group for segment in rect.segments ]
-            unique_segments = []
-            for segment, others in otherwise(segments):
-                substract_segments = segment.substract_segments(others)
-                unique_segments += substract_segments
-            # Connect segments to build closed polygons
-            polygons = list(connect_segments(unique_segments))
-            # The external polygon is the polygon with the biggest box
-            sorted_polygons = sorted(polygons)
-            exterior_polygon = sorted_polygons[-1]
-            interior_polygons = sorted_polygons[0:-1]
-            if len(interior_polygons) > 0:
-                raise ValueError('WAIT!')
-            # Now create the boundary
-            boundary = Boundary(exterior_polygon, interior_polygons)
-            boundaries.append(boundary)
-        # Split all boundaries in rects and join them as a single grid
+        # Now split all rectangles in every x and y limits of all rectangles
         canonical_rects = []
-        for boundary in boundaries:
-            canonical_rects += boundary.split_in_rectangles()
+        for rect_group in rect_groups:
+            x_splits = sum([ [ rect.x_min, rect.x_max ] for rect in rect_group ], [])
+            x_splits = list(set(x_splits))
+            y_splits = sum([ [ rect.y_min, rect.y_max ] for rect in rect_group ], [])
+            y_splits = list(set(y_splits))
+            for rect in rect_group:
+                splitted_rects = rect.split(x_splits, y_splits)
+                canonical_rects += splitted_rects
+        # Now that we have canonical rects, set the grid
         grid = cls(canonical_rects)
-        grid._boundaries = boundaries
+        # Now rectangles should be canonical, but we may have redundant "cuts" where several rows/columns may be merged to optimize the grid
+        # DANI: Igual hay replantearse esto porque lo mismo es más ineficiente el chekeo + arreglo de la ineficiencia que la propia ineficiencia
+        grid.compact()
         return grid
 
     # Grid rectangles are read only
-    def get_rects(self):
+    def get_rects(self) -> List[Rect]:
         return self._rects
     rects = property(get_rects, None, None, "Grid rectangles")
 
     # Get maximum possible rectangles in the grid
     # This variable is treated appart since its calculation may be an expensive calculation
-    def get_max_rects(self):
+    def get_max_rects(self) -> List[Rect]:
         # If maximum rectangles are previously calculated then return them
         if self._max_rects:
             return self._max_rects
@@ -1891,27 +1960,27 @@ class Grid:
 
     # Get row rectangles in the grid
     # This variable is treated appart since its calculation may be an expensive calculation
-    def get_row_rects(self):
+    def get_rows(self) -> List[ Tuple [ Rect, List[Rect] ] ]:
         # If row rectangles are previously calculated then return them
-        if self._row_rects:
-            return self._row_rects
+        if self._rows:
+            return self._rows
         # Calculate all row rectangles
-        self._row_rects = self.find_row_rectangles()
-        return self._row_rects
+        self._rows = self.find_rows()
+        return self._rows
     # Grid row rectangles (read only)
-    row_rects = property(get_row_rects, None, None, "Row rectangles in the grid")
+    rows = property(get_rows, None, None, "Row rectangles in the grid")
 
     # Get column rectangles in the grid
     # This variable is treated appart since its calculation may be an expensive calculation
-    def get_col_rects(self):
+    def get_columns(self) -> List[ Tuple [ Rect, List[Rect] ] ]:
         # If column rectangles are previously calculated then return them
-        if self._col_rects:
-            return self._col_rects
+        if self._columns:
+            return self._columns
         # Calculate all column rectangles
-        self._col_rects = self.find_column_rectangles()
-        return self._col_rects
+        self._columns = self.find_columns()
+        return self._columns
     # Grid column rectangles (read only)
-    col_rects = property(get_col_rects, None, None, "Column rectangles in the grid")
+    columns = property(get_columns, None, None, "Column rectangles in the grid")
 
     # Get the area of the whole grid
     # This variable is treated appart since its calculation may be an expensive calculation
@@ -2234,7 +2303,8 @@ class Grid:
     # Get as many rectanges as possible which are connected horizontally to the current rectangle
     # Consider all previous rectangles as a single rectange
     # Remove all previous rectangles from the *available rectangles list
-    def find_row_rectangles(self) -> List[Rect]:
+    # Returned rows contain both the overall row rectangle and the contained rectangles in the row
+    def find_rows(self) -> List[ Tuple [ Rect, List[Rect] ] ]:
 
         # Set a function to merge multiple rects in a row into a single big rect
         # Do it by finding the most maximum x and y values
@@ -2279,7 +2349,8 @@ class Grid:
                 rect.check = True
             # Merge all rectangles in row
             row_rectangle = merge_rectangles(row)
-            rows.append(row_rectangle)
+            # Save both the final row rectangle and the rectangles contained in the row
+            rows.append((row_rectangle, row))
 
         return rows
 
@@ -2287,7 +2358,8 @@ class Grid:
     # Get as many rectanges as possible which are connected vertically to the current rectangle
     # Consider all previous rectangles as a single rectange
     # Remove all previous rectangles from the *available rectangles list
-    def find_column_rectangles(self) -> List[Rect]:
+    # Returned columns contain both the overall column rectangle and the contained rectangles in the column
+    def find_columns(self) -> List[ Tuple [ Rect, List[Rect] ] ]:
 
         # Set a function to merge multiple rects in a column into a single big rect
         # Do it by finding the most maximum x and y values
@@ -2332,7 +2404,7 @@ class Grid:
                 rect.check = True
             # Merge all rectangles in column
             column_rectangle = merge_rectangles(column)
-            columns.append(column_rectangle)
+            columns.append((column_rectangle, column))
 
         return columns
 
