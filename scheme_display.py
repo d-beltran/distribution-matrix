@@ -113,10 +113,8 @@ def represent (queue):
 
         # Draw all rect areas
         for rect in rects:
-            pulc = rect.get_upper_left_point()
-            pbrc = rect.get_bottom_right_point()
-            xs = [rect.pmin.x, pulc.x, rect.pmax.x, pbrc.x]
-            ys = [rect.pmin.y, pulc.y, rect.pmax.y, pbrc.y]
+            xs = [rect.x_min, rect.x_max, rect.x_max, rect.x_min]
+            ys = [rect.y_min, rect.y_min, rect.y_max, rect.y_max]
             # WARNING: Use 'facecolor' instead of 'color' to hide separation segments between fills
             ploted_rects = ax.fill(xs, ys, facecolor=rect.fill_color or 'C0', alpha=0.2)
 
@@ -189,8 +187,8 @@ def get_segments_from_anything (things : list):
 def get_rects_from_anything (things : list):
     rects = []
     for thing in things:
-        # If it is a rectangle or something with pmin and pmax (i.e. something "rectanglizable")
-        if hasattr(thing, 'pmin') and hasattr(thing, 'pmax'):
+        # If it is a rectangle or something with x_min and y_min
+        if hasattr(thing, 'x_min') and hasattr(thing, 'y_min'):
             rects.append(thing)
         # If it is a grid
         if hasattr(thing, 'rects'):

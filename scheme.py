@@ -684,9 +684,9 @@ class Room:
             # If this is the first room then there is no reference at all, so we set the first corner as the (0,0) point
             # Then the "available space" will be a fake rect which is huge enough for this room to set its whole boundary
             if len(brother_boundaries) == 0:
-                initial_point = Point(0,0)
-                space = Rect(initial_point, Point(huge_size, huge_size))
+                space = Rect(0, 0, huge_size, huge_size)
                 # This is the "real" corner, which include its segments
+                initial_point = Point(0,0)
                 corner = space.get_corner(initial_point)
                 room.boundary = room.set_maximum_initial_boundary(corner, space)
                 return True
@@ -694,7 +694,7 @@ class Room:
             # It has to be next to its brother rooms, in a point which minimizes the corridor length further
             # If there is one brother only then it makes not sense to find a corridor
             if len(brother_boundaries) == 1:
-                space = Rect(Point(-huge_size, 0), Point(0, huge_size))
+                space = Rect(-huge_size, 0, 0, huge_size)
                 reference_point = Point(0,0)
                 corner = space.get_corner(reference_point)
                 room.boundary = room.set_maximum_initial_boundary(corner, space)

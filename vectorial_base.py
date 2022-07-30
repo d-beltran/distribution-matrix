@@ -720,9 +720,11 @@ class Corner(Point):
 # A rectangular area defined by 2 coordinates (Points): 'max' and 'min'
 class Rect:
 
-    def __init__(self, pmin : Point, pmax : Point, segments_color : str = 'black', fill_color : str = 'white'):
-        self.pmin = pmin
-        self.pmax = pmax
+    def __init__(self, x_min : number, y_min : number, x_max : number, y_max : number, segments_color : str = 'black', fill_color : str = 'white'):
+        self.x_min = x_min
+        self.y_min = y_min
+        self.x_max = x_max
+        self.y_max = y_max
         self.x_size, self.y_size = self.get_size()
         if resolute(self.x_size) < minimum_resolution or resolute(self.y_size) < minimum_resolution:
             raise ValueError('The rectangle has not 2 dimensions: ' + str(self))
@@ -750,10 +752,7 @@ class Rect:
         if x_min == x_max or y_min == y_max:
             print(segments)
             raise RuntimeError('The rectangle has no area')
-        # Set pmin and pmax and build the rectange
-        pmin = Point(x_min, y_min)
-        pmax = Point(x_max, y_max)
-        return cls(pmin, pmax, segments_color, fill_color)
+        return cls(x_min, y_min, x_max, y_max, segments_color, fill_color)
 
     # Set the rect from a corner (i.e. a point with 2 segments)
     # Optionally you can ask for specific x and y sizes
@@ -779,32 +778,32 @@ class Rect:
         return cls.from_segments([hsegment, vsegment], segments_color, fill_color)
 
     def __str__(self):
-        return 'Min: ' + str(self.pmin) + ', Max: ' + str(self.pmax)
+        return 'X: ' + str(self.x_min) + ' - ' + str(self.x_max) + ', Y: ' + str(self.y_min) + ' - ' + str(self.y_max)
 
     def __repr__(self):
-        return 'Min: ' + str(self.pmin) + ', Max: ' + str(self.pmax)
+        return 'X: ' + str(self.x_min) + ' - ' + str(self.x_max) + ', Y: ' + str(self.y_min) + ' - ' + str(self.y_max)
 
     def __eq__(self, other):
         if isinstance(other, self.__class__):
-            return self.pmin == other.pmin and self.pmax == other.pmax
+            return self.x_min == other.x_min and self.y_min == other.y_min and self.x_max == other.x_max and self.y_max == other.y_max
         return False
 
     def __hash__(self):
-        return hash((self.pmin, self.pmax))
+        return hash((self.x_min, self.y_min, self.x_max, self.y_max))
 
     def __contains__(self, other):
         if isinstance(other, Point):
-            in_x = other.x >= self.pmin.x and other.x <= self.pmax.x
-            in_y = other.y >= self.pmin.y and other.y <= self.pmax.y
+            in_x = other.x >= self.x_min and other.x <= self.x_max
+            in_y = other.y >= self.y_min and other.y <= self.y_max
             return in_x and in_y
         if isinstance(other, Segment):
             in_a = other.a in self
             in_b = other.b in self
             return in_a and in_b
         if isinstance(other, Rect):
-            in_pmin = other.pmin in self
-            in_pmax = other.pmax in self
-            return in_pmin and in_pmax
+            in_x = other.x_min >= self.x_min and other.x_max <= self.x_max
+            in_y = other.y_min >= self.y_min and other.y_max <= self.y_max
+            return in_x and in_y
         return False
 
     # Check if self rect is colliding with other rect
@@ -818,17 +817,21 @@ class Rect:
                     return True
         return False
 
-    # Get rectangle points appart from pmin and pmax
+    # Get rectangle points
+    def get_bottom_left_point (self) -> Point:
+        return Point(self.x_min, self.y_min)
     def get_upper_left_point (self) -> Point:
-        return Point(self.pmin.x, self.pmax.y)
+        return Point(self.x_min, self.y_max)
+    def get_upper_right_point (self) -> Point:
+        return Point(self.x_max, self.y_max)
     def get_bottom_right_point (self) -> Point:
-        return Point(self.pmax.x, self.pmin.y)
+        return Point(self.x_max, self.y_min)
 
     # Return all rectangle points in a 'polygon-friendly' order
     def get_points(self) -> list:
-        point1 = self.pmin
+        point1 = self.get_bottom_left_point()
         point2 = self.get_upper_left_point()
-        point3 = self.pmax
+        point3 = self.get_upper_right_point()
         point4 = self.get_bottom_right_point()
         return [ point1, point2, point3, point4 ]
 
@@ -863,11 +866,11 @@ class Rect:
 
     # Get horizontal size
     def get_x_size(self) -> number:
-        return self.pmax.x - self.pmin.x
+        return self.x_max - self.x_min
 
     # Get vertical size
     def get_y_size(self) -> number:
-        return self.pmax.y - self.pmin.y
+        return self.y_max - self.y_min
 
     # Get both dimension sizes
     def get_size(self) -> tuple:
@@ -903,9 +906,9 @@ class Rect:
             return Vector(0,1)
         raise ValueError('Segment "' + str(segment) + '" is not part of rectangle "' + str(self) + '"')
 
-    # Return a segment which crosses the rectangle in diagonal from min to max point
+    # Return a segment which crosses the rectangle in diagonal from bottom left to upper right points
     def get_crossing_segment(self) -> Segment:
-        return Segment(self.pmin, self.pmax, self.segments_color)
+        return Segment(self.get_bottom_left_point(), self.get_upper_right_point(), self.segments_color)
 
     # Get the point in the middle of the rect
     # WARNING: Avoid using this function since it uses the unstable 'Segment.get_middle_point'
@@ -916,61 +919,53 @@ class Rect:
 
     # Create a new rectangle identical to this rectangle but with a specified color
     def get_colored_rect(self, segments_color : str = 'black', fill_color : str = 'white') -> 'Rect':
-        return Rect(self.pmin, self.pmax, segments_color, fill_color)
+        return Rect(self.x_min, self.y_min, self.x_max, self.y_max, segments_color, fill_color)
 
     # Split the rect in as many rects as specified by the 'x' and 'y' cuts
     # DANI: No lo he provado desde que lo moví de abajo
     def split (self, x_splits : list = [], y_splits : list = []):
-        # Get the rectangle minimum and maximum values
-        pmin = self.pmin
-        pmax = self.pmax
         # Sort the split values and discard those values out of range
         def x_in_range(x):
-            return x > pmin.x and x < pmax.x
+            return x > self.x_min and x < self.x_max
         formatted_x_splits = list(filter(x_in_range, sorted(x_splits)))
         def y_in_range(y):
-            return y > pmin.y and y < pmax.y
+            return y > self.y_min and y < self.y_max
         formatted_y_splits = list(filter(y_in_range, sorted(y_splits)))
         # Set the steps to form rectangles
         # WARNING: The doble 'for' loop with generators seems to work wrong
-        x_steps = list(pairwise([ pmin.x, *formatted_x_splits, pmax.x ]))
-        y_steps = list(pairwise([ pmin.y, *formatted_y_splits, pmax.y ]))
+        x_steps = list(pairwise([ self.x_min, *formatted_x_splits, self.x_max ]))
+        y_steps = list(pairwise([ self.y_min, *formatted_y_splits, self.y_max ]))
         # Remove steps where both values are identical
         x_steps = [ step for step in x_steps if step[0] != step[1] ]
         y_steps = [ step for step in y_steps if step[0] != step[1] ]
         # Create as many rectangles as required
         for xmin, xmax in x_steps:
             for ymin, ymax in y_steps:
-                pmin = Point(xmin, ymin)
-                pmax = Point(xmax, ymax)
-                yield Rect(pmin, pmax)
+                yield Rect(xmin, ymin, xmax, ymax)
 
     # Given 2 rectangles, it returns the overlapping region, if exists, as a new rectangle
     # DANI: No lo he provado desde que lo moví de abajo
     def get_overlap_rect (self, rect) -> Optional['Rect']:
         # Find the overlap in the 'x' dimension
         # Get the maximum of the minimums
-        x_minimum = max(self.pmin.x, rect.pmin.x)
+        x_minimum = max(self.x_min, rect.x_min)
         # Get the minimum of the maximums
-        x_maximum = min(self.pmax.x, rect.pmax.x)
+        x_maximum = min(self.x_max, rect.x_max)
         # Check that the overlap range exists
         x_overlap = ( x_minimum, x_maximum )
         if x_minimum >= x_maximum:
             return None
         # Find the overlap in the 'y' dimension
         # Get the maximum of the minimums
-        y_minimum = max(self.pmin.y, rect.pmin.y)
+        y_minimum = max(self.y_min, rect.y_min)
         # Get the minimum of the maximums
-        y_maximum = min(self.pmax.y, rect.pmax.y)
+        y_maximum = min(self.y_max, rect.y_max)
         # Check that the overlap range exists
         y_overlap = ( y_minimum, y_maximum )
         if y_minimum >= y_maximum:
             return None
         # Build a rectangle with both dimensional overlaps
-        pmin_overlap = Point(x_overlap[0], y_overlap[0])
-        pmax_overlap = Point(x_overlap[1], y_overlap[1])
-        overlap = Rect(pmin_overlap, pmax_overlap)
-        return overlap
+        return Rect(x_overlap[0], y_overlap[0], x_overlap[1], y_overlap[1])
 
     # Join 2 rectangles by returning a list of all rectangles which define the resulting grid
     # The overlapped region, if exists is transformed to a single rectangle
@@ -981,8 +976,8 @@ class Rect:
         if not overlap:
             return [self, rect]
         # Split both input rectangles using the overlap maximum and minimum points as split points
-        x_splits = [ overlap.pmin.x, overlap.pmax.x ]
-        y_splits = [ overlap.pmin.y, overlap.pmax.y ]
+        x_splits = [ overlap.x_min, overlap.x_max ]
+        y_splits = [ overlap.y_min, overlap.y_max ]
         split1 = self.split(x_splits, y_splits)
         split2 = rect.split(x_splits, y_splits)
         rects = list(split1) + list(split2)
@@ -997,8 +992,8 @@ class Rect:
         if not overlap:
             return [self]
         # Split the first input rectangle using the overlap maximum and minimum points as split points
-        x_splits = [ overlap.pmin.x, overlap.pmax.x ]
-        y_splits = [ overlap.pmin.y, overlap.pmax.y ]
+        x_splits = [ overlap.x_min, overlap.x_max ]
+        y_splits = [ overlap.y_min, overlap.y_max ]
         split = self.split(x_splits, y_splits)
         # Return all splits but the overlapped rectangle
         rects = [ rect for rect in list(split) if rect != overlap ]
@@ -1016,8 +1011,8 @@ class Rect:
         if len(overlaps) == 0:
             return [self]
         # Split the first input rectangle using the overlap maximum and minimum points as split points
-        x_splits = [ x_coord for overlap in overlaps for x_coord in [ overlap.pmin.x, overlap.pmax.x ] ]
-        y_splits = [ y_coord for overlap in overlaps for y_coord in [ overlap.pmin.y, overlap.pmax.y ] ]
+        x_splits = [ x_coord for overlap in overlaps for x_coord in [ overlap.x_min, overlap.x_max ] ]
+        y_splits = [ y_coord for overlap in overlaps for y_coord in [ overlap.y_min, overlap.y_max ] ]
         split = self.split(x_splits, y_splits)
         # Return all splits but the overlapped rectangle
         def get_overlapped (rect):
@@ -1027,9 +1022,11 @@ class Rect:
 
     # Generate a new rectangle with expanded margins
     def expand_margins (self, margin_size : number) -> 'Rect':
-        new_pmin = Point(self.pmin.x - margin_size, self.pmin.y - margin_size)
-        new_pmax = Point(self.pmax.x + margin_size, self.pmax.y + margin_size)
-        return Rect(new_pmin, new_pmax)
+        new_x_min = self.x_min - margin_size
+        new_y_min = self.y_min - margin_size
+        new_x_max = self.x_max + margin_size
+        new_y_max = self.y_max + margin_size
+        return Rect(new_x_min, new_y_min, new_x_max, new_y_max)
 
 # A polygon is a list of connected segments which is closed
 # IMPORTANT: Segments must follow some standards:
@@ -1342,9 +1339,7 @@ class Polygon:
         x_max = max(x_coords)
         y_min = min(y_coords)
         y_max = max(y_coords)
-        pmin = Point(x_min, y_min)
-        pmax = Point(x_max, y_max)
-        return Rect(pmin, pmax)
+        return Rect(x_min, y_min, x_max, y_max)
 
     # Get the perimeter of the polygon, which is the sum of all its segment lengths
     def get_perimeter (self) -> number:
@@ -1865,7 +1860,7 @@ class Grid:
             exterior_polygon = sorted_polygons[-1]
             interior_polygons = sorted_polygons[0:-1]
             if len(interior_polygons) > 0:
-                raise SystemExit('WAIT!')
+                raise ValueError('WAIT!')
             # Now create the boundary
             boundary = Boundary(exterior_polygon, interior_polygons)
             boundaries.append(boundary)
@@ -2038,28 +2033,33 @@ class Grid:
                 yield rect
 
     # Some functions are defined to find colliding rects
+    # Note that these functions rely on the fact that grids must never have overlapping rects
     def get_left_rect (self, rect : Rect) -> Optional[Rect]:
-        pmax = rect.get_upper_left_point()
+        x_max = rect.x_min
+        y_max = rect.y_max
         for r in self.rects:
-            if r.pmax == pmax:
+            if r.x_max == x_max and r.y_max == y_max:
                 return r
         return None
     def get_right_rect (self, rect : Rect) -> Optional[Rect]:
-        pmin = rect.get_bottom_right_point()
+        x_min = rect.x_max
+        y_min = rect.y_min
         for r in self.rects:
-            if r.pmin == pmin:
+            if r.x_min == x_min and r.y_min == y_min:
                 return r
         return None
     def get_upper_rect (self, rect : Rect) -> Optional[Rect]:
-        pmin = rect.get_upper_left_point()
+        x_min = rect.x_min
+        y_min = rect.y_max
         for r in self.rects:
-            if r.pmin == pmin:
+            if r.x_min == x_min and r.y_min == y_min:
                 return r
         return None
     def get_bottom_rect (self, rect : Rect) -> Optional[Rect]:
-        pmax = rect.get_bottom_right_point()
+        x_max = rect.x_max
+        y_max = rect.y_min
         for r in self.rects:
-            if r.pmax == pmax:
+            if r.x_max == x_max and r.y_max == y_max:
                 return r
         return None
     def get_connected_rects (self, rect : Rect) -> List[Rect]:
@@ -2114,19 +2114,13 @@ class Grid:
     def find_maximum_rectangles(self) -> List[Rect]:
 
         # Set a function to merge multiple rects into a single big rect
-        # Do it by finding the most maximum pmax and the most minimum pmin
-        def sort_by_x(point):
-            return point.x
-        def sort_by_y(point):
-            return point.y
+        # Do it by finding the most maximum x and y values
         def merge_rectangles(rects):
-            pmax_points = [ rect.pmax for rect in rects ]
-            sorted_pmax_points = sorted( sorted( pmax_points, key=sort_by_x, reverse=True ), key=sort_by_y, reverse=True )
-            maximum_pmax = sorted_pmax_points[0]
-            pmin_points = [ rect.pmin for rect in rects ]
-            sorted_pmin_points = sorted( sorted( pmin_points, key=sort_by_x), key=sort_by_y )
-            minimum_pmin = sorted_pmin_points[0]
-            return Rect(minimum_pmin, maximum_pmax)
+            min_x_min = min([ rect.x_min for rect in rects ])
+            min_y_min = min([ rect.y_min for rect in rects ])
+            max_x_max = max([ rect.x_max for rect in rects ])
+            max_y_max = max([ rect.y_max for rect in rects ])
+            return Rect(min_x_min, min_y_min, max_x_max, max_y_max)
 
         # Trace which rectangles have been already checked both horizontally and vertically to avoid repeating
         for rect in self.rects:
@@ -2242,18 +2236,15 @@ class Grid:
     # Remove all previous rectangles from the *available rectangles list
     def find_row_rectangles(self) -> List[Rect]:
 
-        # Set a function to merge multiple rects into a single big rect
-        # Do it by finding the most maximum pmax and the most minimum pmin
-        def sort_by_x(point):
-            return point.x
+        # Set a function to merge multiple rects in a row into a single big rect
+        # Do it by finding the most maximum x and y values
+        # Note that all rects will match in both min and max y values
         def merge_rectangles(rects):
-            pmax_points = [ rect.pmax for rect in rects ]
-            sorted_pmax_points = sorted( pmax_points, key=sort_by_x, reverse=True )
-            maximum_pmax = sorted_pmax_points[0]
-            pmin_points = [ rect.pmin for rect in rects ]
-            sorted_pmin_points = sorted( pmin_points, key=sort_by_x )
-            minimum_pmin = sorted_pmin_points[0]
-            return Rect(minimum_pmin, maximum_pmax)
+            min_x_min = min([ rect.x_min for rect in rects ])
+            min_y_min = rects[0].y_min
+            max_x_max = max([ rect.x_max for rect in rects ])
+            max_y_max = rects[0].y_max
+            return Rect(min_x_min, min_y_min, max_x_max, max_y_max)
 
         # Trace which rectangles have been already checked both horizontally and vertically to avoid repeating
         for rect in self.rects:
@@ -2298,18 +2289,15 @@ class Grid:
     # Remove all previous rectangles from the *available rectangles list
     def find_column_rectangles(self) -> List[Rect]:
 
-        # Set a function to merge multiple rects into a single big rect
-        # Do it by finding the most maximum pmax and the most minimum pmin
-        def sort_by_y(point):
-            return point.y
+        # Set a function to merge multiple rects in a column into a single big rect
+        # Do it by finding the most maximum x and y values
+        # Note that all rects will match in both min and max x values
         def merge_rectangles(rects):
-            pmax_points = [ rect.pmax for rect in rects ]
-            sorted_pmax_points = sorted( pmax_points, key=sort_by_y, reverse=True )
-            maximum_pmax = sorted_pmax_points[0]
-            pmin_points = [ rect.pmin for rect in rects ]
-            sorted_pmin_points = sorted( pmin_points, key=sort_by_y )
-            minimum_pmin = sorted_pmin_points[0]
-            return Rect(minimum_pmin, maximum_pmax)
+            min_x_min = rects[0].x_min
+            min_y_min = min([ rect.y_min for rect in rects ])
+            max_x_max = rects[0].x_max
+            max_y_max = max([ rect.y_max for rect in rects ])
+            return Rect(min_x_min, min_y_min, max_x_max, max_y_max)
 
         # Trace which rectangles have been already checked both horizontally and vertically to avoid repeating
         for rect in self.rects:
