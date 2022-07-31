@@ -9,7 +9,7 @@ from math import sqrt, inf
 
 # Set the seed and print it
 seed = None
-#seed = 975359
+#seed = 443835
 if not seed:
     seed = round(random.random() * 999999)
 print('Seed ' + str(seed))

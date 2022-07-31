@@ -738,12 +738,9 @@ class Rect:
         self._area = None
 
     # Set the rect from segments
-    # The new rect will contain all rects
+    # The new rect will contain all segments
     @classmethod
     def from_segments(cls, segments : List[Segment], segments_color : str = 'black', fill_color : str = 'white'):
-        # Check that there are at least 2 segments
-        if len(segments) < 2:
-            raise RuntimeError('It is required at least 2 segments')
         # Get all segment points and find the minimum and maximum x and y values of all those points
         points = [ point for segment in segments for point in (segment.a, segment.b) ]
         x_coords = [ point.x for point in points ]
@@ -955,9 +952,67 @@ class Rect:
         y_max = max(self.y_max, rect.y_max)
         return Rect(x_min, y_min, x_max, y_max)
 
-    # Given 2 rectangles, it returns the overlapping region, if exists, as a new rectangle
+    # Given another segment, it returns the overlapping segment with this rectangle if exists, as a new segment
+    def get_overlap_segment (self, segment : 'Segment') -> Optional['Segment']:
+        if segment.is_horizontal():
+            y = segment.a.y
+            if y < self.y_min or y > self.y_max:
+                return None
+            # Find the new a and b x coords
+            new_a_x = segment.a.x
+            if new_a_x < self.x_min:
+                new_a_x = self.x_min
+            elif new_a_x > self.x_max:
+                new_a_x = self.x_max
+            new_b_x = segment.b.x
+            if new_b_x < self.x_min:
+                new_b_x = self.x_min
+            elif new_b_x > self.x_max:
+                new_b_x = self.x_max
+            # If the coords are the same then it means the segment was out of the rectangle
+            if new_a_x == new_b_x:
+                return None
+            new_a = Point(new_a_x, y)
+            new_b = Point(new_b_x, y)
+            return Segment(new_a, new_b)
+        elif segment.is_vertical():
+            x = segment.a.x
+            if x < self.x_min or x > self.x_max:
+                return None
+            # Find the new a and b y coords
+            new_a_y = segment.a.y
+            if new_a_y < self.y_min:
+                new_a_y = self.y_min
+            elif new_a_y > self.y_max:
+                new_a_y = self.y_max
+            new_b_y = segment.b.y
+            if new_b_y < self.y_min:
+                new_b_y = self.y_min
+            elif new_b_y > self.y_max:
+                new_b_y = self.y_max
+            # If the coords are the same then it means the segment was out of the rectangle
+            if new_a_y == new_b_y:
+                return None
+            new_a = Point(x, new_a_y)
+            new_b = Point(x, new_b_y)
+            return Segment(new_a, new_b)
+        else:
+            segment_rect = Rect.from_segments([segment])
+            overlap_rect = self.get_overlap_rect(segment_rect)
+            if not overlap_rect:
+                return None
+            if overlap_rect.get_bottom_left_point() in segment:
+                new_a = overlap_rect.get_bottom_left_point()
+                new_b = overlap_rect.get_upper_right_point()
+                return Segment(new_a, new_b)
+            else:
+                new_a = overlap_rect.get_bottom_right_point()
+                new_b = overlap_rect.get_upper_left_point()
+                return Segment(new_a, new_b)
+
+    # Given another rectangle, it returns the overlapping region with this rectangle, if exists, as a new rectangle
     # DANI: No lo he provado desde que lo moví de abajo
-    def get_overlap_rect (self, rect) -> Optional['Rect']:
+    def get_overlap_rect (self, rect : 'Rect') -> Optional['Rect']:
         # Find the overlap in the 'x' dimension
         # Get the maximum of the minimums
         x_minimum = max(self.x_min, rect.x_min)
@@ -981,7 +1036,7 @@ class Rect:
 
     # Join 2 rectangles by returning a list of all rectangles which define the resulting grid
     # The overlapped region, if exists is transformed to a single rectangle
-    def join_rect (self, rect) -> List['Rect']:
+    def join_rect (self, rect : 'Rect') -> List['Rect']:
         # Find the overlap between these two rectangles
         overlap = self.get_overlap_rect(rect)
         # If there is no overlap then just return both input rectangles
@@ -997,7 +1052,7 @@ class Rect:
         return set(rects)
 
     # Substract the second rectangle form the first rectangle and return the rectangles which define the resulting grid
-    def subtract_rect (self, rect) -> List['Rect']:
+    def subtract_rect (self, rect : 'Rect') -> List['Rect']:
         # Find the overlap between these two rectangles
         overlap = self.get_overlap_rect(rect)
         # If there is no overlap then just return the first rectangle intact
@@ -1012,7 +1067,7 @@ class Rect:
         return rects
 
     # Substract several rectangles from self rectangle rectangle and return the rectangles which define the resulting grid
-    def subtract_rects (self, rects) -> List['Rect']:
+    def subtract_rects (self, rects : List['Rect']) -> List['Rect']:
         # Find the overlap rects
         overlaps = []
         for rect in rects:
@@ -2431,28 +2486,16 @@ class Grid:
 
     # Given a segment, get all segment regions which overlap the grid
     def get_segment_overlap_segments (self, segment : Segment) -> List[Segment]:
-        # Get all points where the segment cuts self boundary
-        cut_points = []
-        for boundary_segment in self.get_boundary_segments():
-            intersection = boundary_segment.get_intersection_point(segment, in_extremis=0)
-            if intersection:
-                cut_points.append(intersection)
-        # Sort the cut points in the segment from a to b
-        def by_distance (point):
-            return segment.a.get_distance_to(point)
-        sorted_points = sorted(cut_points, key=by_distance)
-        # Now each cut in the boundary defines when the sub-segment changes from beeing in the grid to beeing outside and vice versa
-        points = [ segment.a, *sorted_points, segment.b ]
-        # Check if the first point (i.e. the segment a point) starts inside of the grid
-        inside = points[0] in self
+        # Get the overlap of the segment with every rect in the grid
         overlap_segments = []
-        for point_a, point_b in pairwise(points):
-            if inside:
-                overlap_segment = Segment(point_a, point_b)
+        for rect in self.rects:
+            overlap_segment = rect.get_overlap_segment(segment)
+            if overlap_segment:
                 overlap_segments.append(overlap_segment)
-            inside = not inside
+        # Now merge all the overlap segmetns as much as possible
+        overlap_segments = merge_inline_segments(overlap_segments)
         return overlap_segments
-
+        
     # Given a list of segments, get all segment regions which overlap the grid
     def get_segments_overlap_segments (self, segments : List[Segment]) -> List[Segment]:
         overall_overlap_segments = []
@@ -2492,6 +2535,26 @@ def otherwise (values : list) -> Generator[tuple, None, None]:
     for v, value in enumerate(values):
         others = values[0:v] + values[v+1:]
         yield value, others
+
+# Given a group of segments which must be in the same line, merged them into bigger segments when connected
+def merge_inline_segments (segments : List[Segment]) -> List[Segment]:
+    remaining_segments = [ *segments ]
+    merged_segments = []
+    while len(remaining_segments) > 0:
+        first_segment = remaining_segments[0]
+        remaining_segments.remove(first_segment)
+        merged_segment = first_segment
+        while True:
+            # Find a new segment which is connected to the merged segment
+            connected_segment = next((segment for segment in remaining_segments if segment.is_connected_with(merged_segment)), None)
+            # If there is no next segment then we are done with the curret merged segment
+            if not connected_segment:
+                merged_segments.append(merged_segment)
+                break
+            # Remove this segment from the segments list and add it to the polygon segments list
+            remaining_segments.remove(connected_segment)
+            merged_segment = merged_segment.combine_segment(connected_segment)
+    return merged_segments
 
 # Find groups of connected segments in a list of segments
 # Yield any closed polygon when it is found
