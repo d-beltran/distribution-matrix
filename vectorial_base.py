@@ -358,7 +358,7 @@ class Line:
 
     # Get the intersection point between two lines
     # DANI: Esto está hecho en la libreta
-    def get_intersection_point (self, line : 'Line') -> Optional[Point]:
+    def get_line_intersection_point (self, line : 'Line') -> Optional[Point]:
         if self.is_paralel_to(line):
             return None
         # Asuming 2 vector equation of the line, which can be equaled since they are intersecting, we have isolated one of their "alphas"
@@ -377,6 +377,13 @@ class Line:
         y = b2 + y2 * alpha
         return Point(x, y)
 
+    # Get the intersection point between this line and a segment
+    def get_segment_intersection_point (self, segment : 'Segment') -> Optional[Point]:
+        line_intersection_point = self.get_line_intersection_point(segment.line)
+        if line_intersection_point in segment:
+            return line_intersection_point
+        return None
+
     # Get the angle between this line and other line
     def get_angle_with (self, other : 'Line') -> number:
         return self.vector.get_angle_with(other.vector)
@@ -385,7 +392,7 @@ class Line:
     def get_closer_point (self, other : 'Point') -> 'Point':
         perpendicular_vector = self.vector.rotate(90)
         perpendicular_line = Line(other, perpendicular_vector)
-        return self.get_intersection_point(perpendicular_line)
+        return self.get_line_intersection_point(perpendicular_line)
 
     # Get the distance from this line to other specified point (i.e. from the closer point in the line)
     def get_distance_to (self, other : 'Point') -> number:
@@ -513,7 +520,7 @@ class Segment(Line):
     # The 'in_extremis' sets if the 'a' and 'b' points which define segments are considered
     # in_extremis = 0 -> Intersections which are the 'extrem' point of any segment are ignored
     # in_extremis = 1 -> Intersections which are the 'extrem' point of only one of the segments are also considered
-    # in_extremis = 2 -> All interactions are considered
+    # in_extremis = 2 -> All intersections are considered
     def get_intersection_point (self, segment, in_extremis : int = 2) -> Optional[Point]:
         xdiff = Vector(self.a.x - self.b.x, segment.a.x - segment.b.x)
         ydiff = Vector(self.a.y - self.b.y, segment.a.y - segment.b.y)
@@ -695,6 +702,34 @@ class Segment(Line):
     def get_distance_to (self, other : 'Point') -> number:
         closer_point = self.get_closer_point(other)
         return closer_point.get_distance_to(other)
+
+    # Given another segment, get the part of it which overlaps the "perpendicular range" of this segment
+    # Note that they may overlap through a segment, just a point or do not overlap at all
+    def get_segment_perpendicular_range_overlap (self, other : 'Segment') -> Optional[Union['Point', 'Segment']]:
+        # Throw a perpendicular line from each segment point and check if they intersect with the other segment
+        intersections = []
+        perpendicular_vector = self.direction.rotate(90)
+        for point in self.points:
+            line = Line(point, perpendicular_vector)
+            intersection = line.get_segment_intersection_point(other)
+            if intersection:
+                intersections.append(intersection)
+        # If there are two intersections then it means the other segment is crossing the whole perpendicular range
+        if len(intersections) == 2:
+            return Segment(intersections[0], intersections[1])
+        # Get the self line perpendicular point of one of the other segment points and check if it is in the perpendicular range
+        other_perpendicular_point = self.line.get_closer_point(other.points[0])
+        is_point_in_range = other_perpendicular_point in self
+        # If there is only one intersection then it means part of the other segment is inside the range and part is outside
+        if len(intersections) == 1:
+            point_in_range = other.points[0] if is_point_in_range else other.points[1]
+            if intersections[0] == point_in_range:
+                return point_in_range
+            return Segment(intersections[0], point_in_range)
+        # If there are no intersections then it means the other segment is fully inside or outside the perpendicular range
+        if is_point_in_range:
+            return other
+        return None
 
 # A corner is a point where 2 non-paralel segments are connected
 # i.e. both segments have this point ('a' or 'b') in common
@@ -1377,6 +1412,7 @@ class Polygon:
         if abs(angle_count) != 360:
             # If you see this error there may be splitted segments in your polygon
             # Use the non-canonical class method to set your polygon
+            add_frame(self.segments)
             raise RuntimeError('There is something wrong with the polygon')
 
         # Check if are more corners in the counted direction (true) or the other (false)
@@ -1433,7 +1469,7 @@ class Polygon:
         return None
 
     # Get a specific polygon segment by specifying a segment that overlaps partial or totally this segment
-    def get_border_segment (self, segment : Segment) -> Optional[Segment]:
+    def get_segment_from_segment (self, segment : Segment) -> Optional[Segment]:
         for polygon_segment in self.segments:
             overlap = polygon_segment.get_overlap_segment(segment)
             if overlap:
@@ -1442,7 +1478,7 @@ class Polygon:
 
     # Given a segment which overlaps the polygon, get a vector which is perpendicular to this segment and points into de inside of the polygon
     def get_border_inside (self, segment : Segment) -> Vector:
-        polygon_segment = self.get_border_segment(segment)
+        polygon_segment = self.get_segment_from_segment(segment)
         if not polygon_segment:
             raise ValueError('The segment is not in the polyigon')
         angle = 90 if self.clockwise else -90

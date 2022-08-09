@@ -9,7 +9,8 @@ from math import sqrt, inf
 
 # Set the seed and print it
 seed = None
-#seed = 443835
+#seed = 43177
+seed = 798738
 if not seed:
     seed = round(random.random() * 999999)
 print('Seed ' + str(seed))
@@ -1239,44 +1240,61 @@ class Room:
                 # get also how much it will be offseted (the distance). It may range from 0 to half the corridor size.
                 inside_direction = None
                 inside_distance = 0
-                # If the segment is overlapping one fo the segments in the parent boundary then we have to offset its expansion
-                # One of the boundary lines will remain in the same segment line and the other will be translated the whole corridor size intead of a half
-                overlap_segment = next(exterior_polygon.get_segment_overlap_segments(segment), None)
-                if overlap_segment:
-                    inside_direction = exterior_polygon.get_border_inside(segment)
-                    inside_distance = half_corridor_size
-                # If there is an inside corner from the parent boundary close enought to the segment then we have to offset it as well
-                for corner in exterior_polygon.get_inside_corners():
-                    line_closer_point = segment.line.get_closer_point(corner)
-                    # If the corner is not in the "perpendicular range" then there is no conflict
-                    if line_closer_point not in segment:
+                # Check if the segment is close enougth in its "perpendicular range" to any segment in the exterior polygon
+                # If so, we may need to offset its expansion in the corridor boundary setting or it would be out of the parent boundary
+                for exterior_segment in exterior_polygon.segments:
+                    # Get the region of the exterior segment which is in the perpendicular range of this segment
+                    perpendicular_range_overlap = segment.get_segment_perpendicular_range_overlap(exterior_segment)
+                    # If there is no perpendicular range overlap then thre is no problem
+                    if not perpendicular_range_overlap:
                         continue
-                    # If the corner is far enough then there is no conflict
-                    corner_distance = line_closer_point.get_distance_to(corner)
-                    if corner_distance > half_corridor_size:
+                    # Note that the perpendicular range overlap may be a segment or a point
+                    # If this is a segment get the closer point
+                    if isinstance(perpendicular_range_overlap, Segment):
+                        a, b = perpendicular_range_overlap.points
+                        exterior_closer_point = a if segment.get_distance_to(a) < segment.get_distance_to(b) else b
+                    # If this is a point
+                    elif isinstance(perpendicular_range_overlap, Point):
+                        exterior_closer_point = perpendicular_range_overlap
+                    else:
+                        raise ValueError('This should be a point or a segment')
+                    # Get the distance bewteen the closer point and the curretn segment
+                    segment_closer_point = segment.get_closer_point(exterior_closer_point)
+                    distance = segment_closer_point.get_distance_to(exterior_closer_point)
+                    # If the perpendicular range overlap is far enough then there is not problem either
+                    if distance >= half_corridor_size:
                         continue
                     # We have a conflict here
                     # Find the direction we must push the corridor to solve the conflict
-                    if corner_distance == 0:
-                        affecting_segment = next(( seg for seg in corner.segments if segment.is_paralel_to(seg) ), None)
-                        if not affecting_segment:
-                            raise ValueError('This should not happen. Does the exteropr polygon has diagonal segments?')
-                        corner_inside_direction = exterior_polygon.get_border_inside(affecting_segment)
+                    # If the conflict region/point is overlapping with the segment...
+                    if distance == 0:
+                        # If the conflict region is a segment we can use it to find the inside direction
+                        if isinstance(perpendicular_range_overlap, Segment):
+                            # If both points in the conflict region are overlapping the segment then we can find the segment inside
+                            # If one of the points in the conflict region is not overlapping the segment then we can use it to find the direction
+                            exterior_farer_point = perpendicular_range_overlap.get_other_point(exterior_closer_point)
+                            if exterior_farer_point in segment:
+                                inside_direction = exterior_polygon.get_border_inside(perpendicular_range_overlap)
+                            else:
+                                farer_perpendicular_point = segment.get_closer_point(farer_perpendicular_point)
+                                inside_direction = (exterior_farer_point + farer_perpendicular_point).normalized()
+                        # If the conflict region is a point then the thing is more complicated
+                        # It may happen that we don't need to push the boundary lines indeed
+                        # The only situtation where we would have to push is
+                        elif isinstance(perpendicular_range_overlap, Point):
+                            # DANI: No tiene sentido seguir porque hay una situación que rompe todo esto
+                            # DANI: Podemos tener una inside corner cerca de esta corner
+                            # DANI: Esta inside corner estaría fuera de los alcances perpendiculares de todos los segmentos
+                            # DANI: Guardo el código por si luego hay que recuperarlo, pero voy a rectificar
+                            pass
+                    # If there is no overlap then it is easy to know the direction to push
                     else:
-                        corner_inside_direction = (corner + line_closer_point).normalized()
-                    # If there was a previous inside direction and it is not matching the current one it must be the opposite
-                    # This means we must offset corridors in both perpendicular directions at the same time, which is impossible
-                    # This may happen in very elaborate situations, and if it happens it may have a solution, but it is too much work
-                    # I rather not to support this situation
-                    if inside_direction and inside_direction != corner_inside_direction:
-                        raise ValueError('Can not push corridor in both directions at the same time (see segment ' + str(segment) + ')')
-                    inside_direction = corner_inside_direction
+                        inside_direction = (exterior_closer_point + segment_closer_point).normalized()
                     # Calculate how much we must push the line inside to avoid the conflict corner
                     # The highest inside distance stays
-                    corner_inside_distance = half_corridor_size - corner_distance
-                    if inside_distance < corner_inside_distance:
-                        inside_distance = corner_inside_distance
-
+                    current_inside_distance = half_corridor_size - distance
+                    if inside_distance < current_inside_distance:
+                        inside_distance = current_inside_distance
                 # Set the segment boundary lines
                 # Each segment will have 2 lines: one on each side
                 # We call these sides as clockwise and counter-clockwise sides
@@ -1295,6 +1313,8 @@ class Room:
                         clockwise_point = segment.a + clockwise_direction * outside_offset
                         counterclockwise_point = segment.a + counterclockwise_direction * inside_offset
                     else:
+                        print('Clockwise direction: ' + str(clockwise_direction))
+                        print('Inside direction: ' + str(inside_direction))
                         raise ValueError('Impossible inside direction when solving corridor boundary')
                     # Push the doors
                     for door in segment_doors:
@@ -1343,8 +1363,8 @@ class Room:
                     counterclockwise_line = lines['counterclockwise'] if is_segment_pointing_outside else lines['clockwise']
                     perpendicular_vector = clockwise_line.vector.rotate(90)
                     perpendicular_line = Line(point, perpendicular_vector)
-                    clockwise_line_intersection = clockwise_line.get_intersection_point(perpendicular_line)
-                    counterclockwise_line_intersection = counterclockwise_line.get_intersection_point(perpendicular_line)
+                    clockwise_line_intersection = clockwise_line.get_line_intersection_point(perpendicular_line)
+                    counterclockwise_line_intersection = counterclockwise_line.get_line_intersection_point(perpendicular_line)
                     line_intersections[clockwise_line].append((clockwise_line_intersection, segment))
                     line_intersections[counterclockwise_line].append((counterclockwise_line_intersection, segment))
                     new_segment = Segment(clockwise_line_intersection, counterclockwise_line_intersection)
@@ -1376,7 +1396,7 @@ class Room:
                     nextone_side = 'counterclockwise' if is_nextone_pointing_outside else 'clockwise'
                     nextone_lines = segment_lines[nextone]
                     nextone_counterclockwise_line = nextone_lines[nextone_side]
-                    intersection = current_clockwise_line.get_intersection_point(nextone_counterclockwise_line)
+                    intersection = current_clockwise_line.get_line_intersection_point(nextone_counterclockwise_line)
                     # If there is an intersection then save this point as an intersection for both lines
                     if intersection:
                         line_intersections[current_clockwise_line].append((intersection, current))
@@ -1412,8 +1432,8 @@ class Room:
                             offset_point = point + offset
                             new_line = Line(offset_point, perpendicular_vector)
                         # Find the intersection points with each line and create a new segment from both interactions
-                        current_line_intersection = current_clockwise_line.get_intersection_point(new_line)
-                        nextone_line_intersection = nextone_counterclockwise_line.get_intersection_point(new_line)
+                        current_line_intersection = current_clockwise_line.get_line_intersection_point(new_line)
+                        nextone_line_intersection = nextone_counterclockwise_line.get_line_intersection_point(new_line)
                         line_intersections[current_clockwise_line].append((current_line_intersection, current))
                         line_intersections[nextone_counterclockwise_line].append((nextone_line_intersection, nextone))
                         new_segment = Segment(current_line_intersection, nextone_line_intersection)
@@ -1424,7 +1444,7 @@ class Room:
                 # In the majority of the ocasions we will have 2 intersections per line
                 if len(intersections) == 2:
                     intersection_points = [ intersection[0] for intersection in intersections ]
-                    # It may happen in a fe ocassions that a line has the same intersection twice
+                    # It may happen in a few ocassions that a line has the same intersection twice
                     # This happens when a full offset corridor eats a perpendicular small corridor with the exact length of the corridor size
                     if intersection_points[0] == intersection_points[1]:
                         continue
@@ -1459,7 +1479,7 @@ class Room:
             # Display the corridor boundary
             elements_to_display = boundary_segments
             for segment in elements_to_display:
-                segment.color = 'red'
+                segment.color = 'blue'
             self.update_display(extra=elements_to_display)
 
             # Generate a boundary from the previous segments
