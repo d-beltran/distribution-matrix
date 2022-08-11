@@ -10,7 +10,7 @@ from math import sqrt, inf
 # Set the seed and print it
 seed = None
 #seed = 43177
-seed = 798738
+#seed = 798738
 if not seed:
     seed = round(random.random() * 999999)
 print('Seed ' + str(seed))
@@ -464,6 +464,8 @@ class Room:
     # Get the grid
     # Just return the internal boundary grid value
     def get_grid (self):
+        if not self._boundary:
+            return None
         return self._boundary.grid
 
     # The room boundary
@@ -1235,7 +1237,9 @@ class Room:
             self.update_display(extra=elements_to_display)
 
             # Check if there are regions of the corridor which are out of the parent exterior polygon
-            out_regions = corridor_boundary.grid - self.grid
+            # Get the current grid, using the provisional exterior polygon grid in case the parent has no grid
+            current_grid = self.grid if self.grid else exterior_polygon.grid
+            out_regions = corridor_boundary.grid - current_grid
             # If there are not (not the usual case) then we are done
             if not out_regions:
                 return corridor_boundary
@@ -1315,9 +1319,6 @@ class Room:
         # Setting the room will also update he display thus showing the corridor area
         corridor_room = Room(boundary=corridor_boundary, name=self.name + ' corridor', fill_color=self.fill_color, parent=self)
         self.children.append(corridor_room)
-
-        add_frame([ rect.get_crossing_segment() for rect in corridor_boundary.grid.rects ] + sum([ rect.get_segments(color='black') for rect in corridor_boundary.grid.rects ],[]))
-        self.get_free_grid()
 
         # Now, if the parent has no boundary, we expand child rooms to compensate for their area loss
         if not self.boundary:
