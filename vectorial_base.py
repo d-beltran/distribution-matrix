@@ -451,12 +451,8 @@ class Segment(Line):
 
     # Get a value which is always the same for equal segments no matter the order of a and b
     def get_hash(self) -> tuple:
-        def sort_by_x(point):
-            return point.x
-        def sort_by_y(point):
-            return point.y
         points = [self.a, self.b]
-        sorted_points = sorted( sorted(points, key=sort_by_x), key=sort_by_y )
+        sorted_points = sort_points(points)
         return tuple(sorted_points)
 
     # Get the inverted segment (i.e. invert a and b points)
@@ -575,11 +571,7 @@ class Segment(Line):
         self_points = [self.a, self.b]
         other_points = [other.a, other.b]
         points = unique(self_points + other_points)
-        def sort_by_x(point):
-            return point.x
-        def sort_by_y(point):
-            return point.y
-        sorted_points = sorted( sorted( points, key=sort_by_x), key=sort_by_y)
+        sorted_points = sort_points(points)
         # Track from which point both lines are in, if any
         # If both lines are in from 1 point then the overlap segment goes from this point to the next
         in_self = False
@@ -610,11 +602,7 @@ class Segment(Line):
         for segment in inline_segments:
             other_points += [segment.a, segment.b]
         points = unique(self_points + other_points)
-        def sort_by_x(point):
-            return point.x
-        def sort_by_y(point):
-            return point.y
-        sorted_points = sorted( sorted( points, key=sort_by_x), key=sort_by_y)
+        sorted_points = sort_points(points)
         # Create new segments between each pair of sorted points
         splitted_segments = [ Segment(a,b) for a, b in pairwise(sorted_points) ]
         # Get only segments which are in self and are not in others
@@ -814,10 +802,10 @@ class Rect:
         return cls.from_segments([hsegment, vsegment], segments_color, fill_color)
 
     def __str__(self):
-        return 'X: ' + str(self.x_min) + ' - ' + str(self.x_max) + ', Y: ' + str(self.y_min) + ' - ' + str(self.y_max)
+        return 'X: ' + str(self.x_min) + '/' + str(self.x_max) + ', Y: ' + str(self.y_min) + '/' + str(self.y_max)
 
     def __repr__(self):
-        return 'X: ' + str(self.x_min) + ' - ' + str(self.x_max) + ', Y: ' + str(self.y_min) + ' - ' + str(self.y_max)
+        return 'X: ' + str(self.x_min) + '/' + str(self.x_max) + ', Y: ' + str(self.y_min) + '/' + str(self.y_max)
 
     def __eq__(self, other):
         if isinstance(other, self.__class__):
@@ -853,6 +841,29 @@ class Rect:
                     return True
         return False
 
+    # Check if self rect is connected with other rect
+    # i.e. one of their segments is totally overlapping
+    # Note that rectangles cannot overlap
+    def is_connected_with (self, other : 'Rect') -> bool:
+        # They are aligned horizontally
+        if self.x_min == other.x_min and self.x_max == other.x_max:
+            # The other rect is below self rect
+            if self.y_min == other.y_max:
+                return True
+            # The other rect is above self rect
+            if self.y_max == other.y_min:
+                return True
+        # They are aligned vertically
+        if self.y_min == other.y_min and self.y_max == other.y_max:
+            # The other rect is at the left of self rect
+            if self.x_min == other.x_max:
+                return True
+            # The other rect is at the right self rect
+            if self.x_max == other.x_min:
+                return True
+        # They are not connected
+        return False
+
     # Get rectangle points
     def get_bottom_left_point (self) -> Point:
         return Point(self.x_min, self.y_min)
@@ -864,7 +875,7 @@ class Rect:
         return Point(self.x_max, self.y_min)
 
     # Return all rectangle points in a 'polygon-friendly' order
-    def get_points(self) -> list:
+    def get_points (self) -> List[Point]:
         point1 = self.get_bottom_left_point()
         point2 = self.get_upper_left_point()
         point3 = self.get_upper_right_point()
@@ -872,9 +883,10 @@ class Rect:
         return [ point1, point2, point3, point4 ]
 
     # Return all rectangle segments in a 'polygon-friendly' order
-    def get_segments(self) -> list:
+    def get_segments (self, color : Optional[str] = None) -> List[Segment]:
         points = self.get_points()
-        segments = [ Segment(a, b, self.segments_color) for a, b in pairwise(points, retro=True) ]
+        segment_color = color if color else self.segments_color
+        segments = [ Segment(a, b, segment_color) for a, b in pairwise(points, retro=True) ]
         return segments
 
     # Return all rectangle points in a 'polygon-friendly' order
@@ -1120,6 +1132,7 @@ class Rect:
         def get_overlapped (rect):
             return next((overlap for overlap in overlaps if rect in overlap), None)
         rects = [ rect for rect in list(split) if not get_overlapped(rect) ]
+        # Test the grid
         return rects
 
     # Generate a new rectangle with expanded margins
@@ -1770,13 +1783,16 @@ class Boundary:
         return True
 
     # Get the boundary grid
-    def get_grid(self):
+    def get_grid (self) -> Optional['Grid']:
         # If grid already exists then return it
         if self._grid:
             return self._grid
         # Otherwise, set the grid
         # Split the boundary in rectangles in a grid-friendly format
         rects = self.split_in_rectangles()
+        # Return None when the interior polygons fully consume the exterior polygon
+        if len(rects) == 0:
+            return None
         # Apply the boundary color to each rectangle
         for rect in rects:
             rect.color = self.fill_color
@@ -1820,15 +1836,15 @@ class Boundary:
     # Split the space inside the boundary in a list of rectangles in a grid friendly format
     # It works even if the interior polygons are overlapped
     def split_in_rectangles (self) -> List[Rect]:
-
         # Calculate the grid from the exterior polygon
         final_grid = self.exterior_polygon.grid
-
         # Calculate the grid for each interior polygon
         interior_grids = [ polygon.grid for polygon in self.interior_polygons ]
         for interior_grid in interior_grids:
             final_grid = final_grid.get_substract_grid(interior_grid)
-
+        # Return an empty list when the interior polygons fully consume the exterior polygon
+        if not final_grid:
+            return []
         return final_grid.rects
     
     # Get the overlap boundaries between 2 boundaries
@@ -1855,7 +1871,7 @@ class Boundary:
         if len(overlaps) == 0:
             raise ValueError('Boundaries are overlapping')
         # Finally, merge both boundary grids into a single grid and get its boundary
-        grid = self.grid.get_merge_grid(other.grid)
+        grid = self.grid.get_merge_grid(other.grid, check_overlaps=False)
         boundaries = grid.boundaries
         if len(boundaries) != 1:
             raise ValueError('Something went wrong with the boundary')
@@ -1913,6 +1929,12 @@ class Grid:
             return all([ boundary in self for boundary in other.boundaries ])
         return False
 
+    def __add__(self, other : 'Grid') -> 'Grid':
+        return self.get_merge_grid(other)
+
+    def __sub__(self, other : 'Grid') -> 'Grid':
+        return self.get_substract_grid(other)
+
     # Check for each corner on each rect that, if it is inside any other rect, it is also a corner in this rect
     # Check also that rects to do not overlap, since this may happen even with no corners inside each other
     def check (self):
@@ -1925,6 +1947,7 @@ class Grid:
                         print('WARNING: Conflict rects ' + str(rect) + ' and ' + str(other_rect))
                         raise RuntimeError('Grid rects are wrong')
                 if rect.get_overlap_rect(other_rect):
+                    #add_frame(self.rects)
                     print('WARNING: Overlapping rects ' + str(rect) + ' and ' + str(other_rect))
                     raise RuntimeError('Grid rects are wrong')
 
@@ -1934,68 +1957,60 @@ class Grid:
     def compact (self):
         # Start by checking the rows
         new_rows = []
-        last_merged_row = None
-        for row_1, row_2 in pairwise(self.rows):
-            # In case the previous row was merged, consider the merged row as the current row 1
-            if last_merged_row:
-                row_1 = last_merged_row
-                last_merged_row = None
-            # Get each row rectangles
-            overall_rectangle_1, contained_rectangles_1 = row_1
-            overall_rectangle_2, contained_rectangles_2 = row_2
-            # If the number of rectangles does not match there is now way the rows can be merged
-            # This should happen most of the time
-            if len(contained_rectangles_1) != len(contained_rectangles_2):
-                new_rows.append(row_1)
-                continue
-            # In case the number of rects match we must check the minimum and maximum y values of the rows to be different
-            if overall_rectangle_1.x != overall_rectangle_2.x:
-                new_rows.append(row_1)
-                continue
-            # If the y range matches then we have 2 rows where there could be just one
-            # We must merge them
-            new_row_rect = overall_rectangle_1.wrap(overall_rectangle_2)
-            new_rects = [ rect_1.wrap(contained_rectangles_2[i]) for i, rect_1 in enumerate(contained_rectangles_1) ]
-            last_merged_row = new_row_rect, new_rects
-        # Join the last row
-        if last_merged_row:
-            new_rows.append(last_merged_row)
-        else:
-            new_rows.append(self.rows[-1])
+        row_pool = [ *self.rows ]
+        while len(row_pool) > 0:
+            # Get the next first element in the pool
+            current_row = row_pool[0]
+            del row_pool[0]
+            # Find another element in the pool which is connected to the current element
+            while True:
+                current_row_overall_rectangle, current_row_contained_rects = current_row
+                next_row = next((row for row in row_pool if row[0].is_connected_with(current_row_overall_rectangle)), None)
+                # If there are no more rows connected to the current next row then we are done
+                if not next_row:
+                    break
+                row_pool.remove(next_row)
+                # Join the next row to the current row
+                next_row_overall_rectangle, next_row_contained_rects = next_row
+                new_row_overall_rectangle = current_row_overall_rectangle.wrap(next_row_overall_rectangle)
+                new_row_contained_rects = []
+                for current_row_contained_rect in current_row_contained_rects:
+                    connected_contained_rect = next(rect for rect in next_row_contained_rects if rect.is_connected_with(current_row_contained_rect))
+                    merged_rect = current_row_contained_rect.wrap(connected_contained_rect)
+                    new_row_contained_rects.append(merged_rect)
+                current_row = new_row_overall_rectangle, new_row_contained_rects
+            # Add the current row, including all the merges (if any) to the list of new rows
+            new_rows.append(current_row)
         # Update the grid rects with the new merged rects
         self._rects = sum([ new_row[1] for new_row in new_rows ], [])
         # Reset the columns just in case they were previously calculated, since they will be not valid anymore
         self._columns = None
         # Now repeat the whole process with columns
         new_columns = []
-        last_merged_column = None
-        for column_1, column_2 in pairwise(self.columns):
-            # In case the previous column was merged, consider the merged column as the current column 1
-            if last_merged_column:
-                column_1 = last_merged_column
-                last_merged_column = None
-            # Get each column rectangles
-            overall_rectangle_1, contained_rectangles_1 = column_1
-            overall_rectangle_2, contained_rectangles_2 = column_2
-            # If the number of rectangles does not match there is now way the columns can be merged
-            # This should happen most of the time
-            if len(contained_rectangles_1) != len(contained_rectangles_2):
-                new_columns.append(column_1)
-                continue
-            # In case the number of rects match we must check the minimum and maximum y values of the columns to be different
-            if overall_rectangle_1.y != overall_rectangle_2.y:
-                new_columns.append(column_1)
-                continue
-            # If the y range matches then we have 2 columns where there could be just one
-            # We must merge them
-            new_column_rect = overall_rectangle_1.wrap(overall_rectangle_2)
-            new_rects = [ rect_1.wrap(contained_rectangles_2[i]) for i, rect_1 in enumerate(contained_rectangles_1) ]
-            last_merged_column = new_column_rect, new_rects
-        # Join the last column
-        if last_merged_column:
-            new_columns.append(last_merged_column)
-        else:
-            new_columns.append(self.columns[-1])
+        column_pool = [ *self.columns ]
+        while len(column_pool) > 0:
+            # Get the next first element in the pool
+            current_column = column_pool[0]
+            del column_pool[0]
+            # Find another element in the pool which is connected to the current element
+            while True:
+                current_column_overall_rectangle, current_column_contained_rects = current_column
+                next_column = next((column for column in column_pool if column[0].is_connected_with(current_column_overall_rectangle)), None)
+                # If there are no more columns connected to the current next column then we are done
+                if not next_column:
+                    break
+                column_pool.remove(next_column)
+                # Join the next column to the current column
+                next_column_overall_rectangle, next_column_contained_rects = next_column
+                new_column_overall_rectangle = current_column_overall_rectangle.wrap(next_column_overall_rectangle)
+                new_column_contained_rects = []
+                for current_column_contained_rect in current_column_contained_rects:
+                    connected_contained_rect = next(rect for rect in next_column_contained_rects if rect.is_connected_with(current_column_contained_rect))
+                    merged_rect = current_column_contained_rect.wrap(connected_contained_rect)
+                    new_column_contained_rects.append(merged_rect)
+                current_column = new_column_overall_rectangle, new_column_contained_rects
+            # Add the current column, including all the merges (if any) to the list of new columns
+            new_columns.append(current_column)
         # Update the grid rects with the new merged rects
         self._rects = sum([ new_column[1] for new_column in new_columns ], [])
         # Now we can keep the previously calculated columns as the current grid columns
@@ -2010,6 +2025,9 @@ class Grid:
     # These rectangles will be used to build a new grid with different rectangles which do follow the standards
     @classmethod
     def non_canonical(cls, rects : List[Rect]):
+        # There must be at least one rectangle
+        if len(rects) == 0:
+            raise ValueError('There must be at least one rect to build a grid')
         # First of all find rectangle groups
         # This is the non-canonical version of find_connected_rect_groups method
         rects_to_group = [ *rects ]
@@ -2159,6 +2177,7 @@ class Grid:
 
     # Return the merge space between two grids splitted in rectangles
     # Note that these rectangles will not follow the grid standard rules
+    # DANI: Esto antes se usaba en el get_merge_grid pero ahora ya no se usa en ningún lado
     def get_merge_rects (self, grid : 'Grid') -> List[Rect]:
         merge_rects = []
         for rect in self.rects:
@@ -2168,10 +2187,18 @@ class Grid:
         return unique(merge_rects)
 
     # Return the resulting grid after merging self grid to other grid
-    # DANI: Esto solo funciona en tanto en cuanto las grids no se overlapan
-    def get_merge_grid (self, grid : 'Grid') -> 'Grid':
-        #merge_rects = self.get_merge_rects(grid)
-        merge_rects = self.rects + grid.rects
+    # If you are sure grids do not overlap then set check_overlaps as False to avoid a lot of calculus
+    def get_merge_grid (self, grid : 'Grid', check_overlaps : bool = True) -> 'Grid':
+        overlap_rects = None
+        if check_overlaps:
+            overlap_rects = self.get_overlap_rects(grid)
+        # Get the rects of both grids together
+        # Note that rects will not follow the grid standards
+        if overlap_rects:
+            difference = grid - self
+            merge_rects = self.rects + difference.rects
+        else:
+            merge_rects = self.rects + grid.rects
         return Grid.non_canonical(merge_rects)
 
     # Return self grid space after substracting other grid space splitted in rectangles
@@ -2183,9 +2210,12 @@ class Grid:
             substract_rects += new_rects
         return substract_rects
 
-    # Return the resulting grid after substracting self grid to other grid
-    def get_substract_grid (self, grid : 'Grid') -> 'Grid':
+    # Return the resulting grid after substracting other grid to self grid
+    # Return None if the other grid fully consumes self grid
+    def get_substract_grid (self, grid : 'Grid') -> Optional['Grid']:
         substract_rects = self.get_substract_rects(grid)
+        if len(substract_rects) == 0:
+            return None
         return Grid.non_canonical(substract_rects)
 
     # Search all maximum rectangles which fulfill the specified minimum x and y sizes
@@ -2572,6 +2602,15 @@ def otherwise (values : list) -> Generator[tuple, None, None]:
         others = values[0:v] + values[v+1:]
         yield value, others
 
+# x/y coordinates sorters
+def sort_by_x (point : Point) -> number:
+    return point.x
+def sort_by_y (point : Point) -> number:
+    return point.y
+# Point sorter for points in a same line (otherwise it makes not sense)
+def sort_points (points : List[Point]) -> List[Point]:
+    return sorted( sorted( points, key=sort_by_x), key=sort_by_y)
+
 # Given a group of segments which must be in the same line, merged them into bigger segments when connected
 def merge_inline_segments (segments : List[Segment]) -> List[Segment]:
     remaining_segments = [ *segments ]
@@ -2629,11 +2668,7 @@ def get_line_non_overlap_segments (segments : 'Segment') -> List['Segment']:
         raise ValueError('Segments are not all in the same line')
     # Otherwise, order all segment points and check those regions between points where only 1 segment exists
     points = unique(sum([ list(segment.points) for segment in segments ], []))
-    def sort_by_x(point):
-        return point.x
-    def sort_by_y(point):
-        return point.y
-    sorted_points = sorted( sorted( points, key=sort_by_x), key=sort_by_y)
+    sorted_points = sort_points(points)
     # Track from which point only 1 segment is in
     first_point = None
     in_segments = { segment: False for segment in segments }

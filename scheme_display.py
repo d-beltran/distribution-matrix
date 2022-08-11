@@ -21,8 +21,10 @@ queue = Queue()
 previous_slider_value = None
 
 # Updater called from the system
-def add_frame (data):
+def add_frame (data : list):
     print(' [ frame ' + str(len(frames)) + ' ] ')
+    if type(data) != list:
+        data = [data]
     segments = get_segments_from_anything(data)
     rects = get_rects_from_anything(data)
     traced = [ element for element in data if hasattr(element, 'name') ]
