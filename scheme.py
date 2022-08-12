@@ -202,7 +202,7 @@ class Door:
         room = self.room
         if not room:
             return None
-        boundary = room.boundary
+        boundary = room.boundary if room.boundary else room.get_provisional_boundary()
         if not boundary:
             return None
         return boundary.exterior_polygon
@@ -759,24 +759,30 @@ class Room:
             room.boundary = room.set_maximum_initial_boundary(corner, space)
             return True
 
-    # Build a provisional exterior perimeter from the child boundaries
+    # Build a provisional boundary from the child boundaries, using their exterior polygons
     # This function is meant to be used only when the parent room has not boundary
-    def get_provisional_exterior_polygon (self) -> 'Polygon':
+    def get_provisional_boundary (self) -> Optional['Boundary']:
         child_boundary_segments = []
         for child in self.children:
             if not child.boundary:
                 continue
             child_boundary_segments += child.boundary.exterior_polygon.segments
-        exterior_polygon_segments = get_non_overlap_segments(child_boundary_segments)
-        exterior_polygon = Polygon.non_canonical(exterior_polygon_segments)
-        return exterior_polygon
+        if len(child_boundary_segments) == 0:
+            return None
+        # Get all children exterior polygon segments which do not overlap and make polygons from them
+        provisional_boundary_segments = get_non_overlap_segments(child_boundary_segments)
+        provisional_boundary_polygons = list(connect_segments(provisional_boundary_segments))
+        # Sort polygons by area and set the biggest polygon as the exterior polygon
+        provisional_boundary_polygons.sort(key=lambda x: x.area, reverse=True)
+        provisional_boundary = Boundary(provisional_boundary_polygons[0], provisional_boundary_polygons[1:])
+        return provisional_boundary
 
     # Build a provisional exterior grid
     # This function is meant to be used only when the parent room has not boundary
     # Create a fake square which contains all the children and then add a margin as long as the distance argument
     # This is used by children to expand outwards
     def generate_exterior_free_grid (self, margin_size : number) -> 'Grid':
-        exterior_polygon = self.get_provisional_exterior_polygon()
+        exterior_polygon = self.get_provisional_boundary().exterior_polygon
         exterior_box = exterior_polygon.get_box()
         expanded_box = exterior_box.expand_margins(margin_size)
         exterior_free_boundary = Boundary(Polygon.from_rect(expanded_box), [exterior_polygon])
@@ -835,15 +841,18 @@ class Room:
 
         # Set the corridor nodes
         # This is a preprocessing step which is required to find the shortest corridor and other similar calculations
+
+        # Get the exterior polygon
+        # If the parent has not boundary then generate a provisional exterior polygon made out of the children boundaries
+        parent_boundary = self.boundary if self.boundary else self.get_provisional_boundary()
+        exterior_polygon = parent_boundary.exterior_polygon
         
         # Use both self boundary and all children room boundary segments
         available_segments = []
-        door_points = []
         # Split self boundaries at the doors
-        if self.boundary:
-            door_points = [ door.point for door in self.doors ]
-            for self_segment in self.boundary.segments:
-                available_segments += self_segment.split_at_points(door_points)
+        door_points = [ door.point for door in self.doors ]
+        for self_segment in parent_boundary.segments:
+            available_segments += self_segment.split_at_points(door_points)
         # Add all children segments
         for child in self.children:
             if not child.boundary:
@@ -877,7 +886,6 @@ class Room:
                     nodes[point] = {'connected_segments': [segment]}
         # Find which rooms are in contact to each node and if nodes are in the exterior boundary
         # Find also which nodes are doors
-        exterior_polygon = self.boundary.exterior_polygon if self.boundary else self.get_provisional_exterior_polygon()
         for node_point, node_data in nodes.items():
             rooms = []
             for child in self.children:
@@ -885,7 +893,7 @@ class Room:
                     continue
                 if node_point in child.boundary.exterior_polygon:
                     rooms.append(child)
-            if self.boundary and node_point in exterior_polygon:
+            if node_point in exterior_polygon:
                 rooms.append(self)
             node_data['rooms'] = rooms
             node_data['is_door'] = node_point in door_points
@@ -940,7 +948,7 @@ class Room:
         # Now find all possible path combinations until we cover all doors and rooms
         # Set the rooms which must be reached by the corridor
         required_children_rooms = [ child for child in self.children if child.boundary and len(child.doors) > 0 ]
-        required_rooms = ([ self ] if self.boundary and len(self.doors) > 0 else []) + required_children_rooms
+        required_rooms = ([ self ] if len(self.doors) > 0 else []) + required_children_rooms
         # If there are less than 2 required rooms then it makes not sense finding a corridor
         if len(required_rooms) < 2:
             raise ValueError('Trying to find a corridor between less than 2 rooms')
@@ -1107,7 +1115,8 @@ class Room:
             # The closest point will be always one of the ends of one of the suitable segments
             suitable_points += list(set(sum([ list(segment.points) for segment in suitable_segments ], [])))
             # In order to find the shortest path, first, get the room exterior perimeter
-            perimetral_segments = room.boundary.exterior_polygon.segments
+            room_boundary = room.boundary if room.boundary else room.get_provisional_boundary()
+            perimetral_segments = room_boundary.exterior_polygon.segments
             # Now split those segments by both nodes and suitable points
             split_points = room_nodes + suitable_points
             splitted_segments = sum([ list(segment.split_at_points(split_points)) for segment in perimetral_segments ], [])
@@ -1328,7 +1337,8 @@ class Room:
         
         # Finally relocate doors to the new corridor boundary
         for door in doors:
-            if door.point in door.room.boundary.exterior_polygon:
+            door_room_boundary = door.room.boundary if door.room.boundary else door.room.get_provisional_boundary()
+            if door.point in door_room_boundary.exterior_polygon:
                 continue
             # Try to simply push the door as much as the corrdior was expanded
             # If it does not work then we relocate the door in any other available segment/point

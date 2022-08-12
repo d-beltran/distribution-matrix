@@ -1318,6 +1318,13 @@ class Polygon:
     # Polygon grid (read only)
     grid = property(get_grid, None, None, "The polygon grid")
 
+    # Get the polygon area
+    def get_area (self):
+        return self.grid.area
+
+    # Polygon area (read only)
+    area = property(get_area, None, None, "The polygon area")
+
     # Get the inside corners
     def get_inside_corners (self):
         return [ corner for corner in self.corners if corner.inside ]
