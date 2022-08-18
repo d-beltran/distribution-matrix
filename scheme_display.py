@@ -8,6 +8,8 @@ import math
 import numpy as np
 from multiprocessing import Process, Queue
 
+from typing import Optional
+
 # Remove the slider silly warning
 import warnings
 warnings.filterwarnings("ignore")
@@ -21,8 +23,9 @@ queue = Queue()
 previous_slider_value = None
 
 # Updater called from the system
-def add_frame (data : list):
-    print(' [ frame ' + str(len(frames)) + ' ] ')
+def add_frame (data : list, title : Optional[str] = None):
+    display_message = title if title else 'No title'
+    print(' [ frame ' + str(len(frames)) + ' ] - ' + display_message)
     if type(data) != list:
         data = [data]
     segments = get_segments_from_anything(data)

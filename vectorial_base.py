@@ -1113,7 +1113,7 @@ class Rect:
         rects = [ rect for rect in list(split) if rect != overlap ]
         return rects
 
-    # Substract several rectangles from self rectangle rectangle and return the rectangles which define the resulting grid
+    # Substract several rectangles from self rectangle and return the rectangles which define the resulting grid
     def subtract_rects (self, rects : List['Rect']) -> List['Rect']:
         # Find the overlap rects
         overlaps = []
@@ -1124,6 +1124,10 @@ class Rect:
         # If there is no overlap then just return the first rectangle intact
         if len(overlaps) == 0:
             return [self]
+        return self.subtract_overlaps(overlaps)
+
+    # Substract several rectangles which MUST overlap from self rectangle and return the rectangles which define the resulting grid
+    def subtract_overlaps (self, overlaps : List['Rect']) -> List['Rect']:
         # Split the first input rectangle using the overlap maximum and minimum points as split points
         x_splits = [ x_coord for overlap in overlaps for x_coord in [ overlap.x_min, overlap.x_max ] ]
         y_splits = [ y_coord for overlap in overlaps for y_coord in [ overlap.y_min, overlap.y_max ] ]
@@ -1863,7 +1867,6 @@ class Boundary:
     # Fuse other boundary to self boundary
     # Check that both boundaries can be joined as a single boundary
     # i.e. both exterior polygons must be colliding and the colliding region/s must be as wide as the minimum size or more
-    # DANI: No se ha provado
     def merge_boundary (self, other : 'Boundary', min_size = None) -> 'Boundary':
         # Check if both boundaries are colliding
         # i.e. both external polygons have overlapping segments
@@ -2208,8 +2211,40 @@ class Grid:
             merge_rects = self.rects + grid.rects
         return Grid.non_canonical(merge_rects)
 
+    # Return the overlaps between this grid and another grid in a specific format
+    # Return a dict where keys are self rectangles and values are the overlaps in self rectangles
+    def get_overlaps (self, grid : 'Grid') -> dict:
+        overlaps = {}
+        for self_rect in self.rects:
+            # Find the overlap rects
+            overlap_rects = []
+            for grid_rect in grid.rects:
+                overlap_rect = self_rect.get_overlap_rect(grid_rect)
+                if overlap_rect:
+                    overlap_rects.append(overlap_rect)
+            # If there is no overlap then just return the first rectangle intact
+            if len(overlap_rects) == 0:
+                continue
+            # Save the overlaps
+            overlaps[self_rect] = overlap_rects
+        return overlaps
+
     # Return self grid space after substracting other grid space splitted in rectangles
     # Note that these rectangles will not follow the grid standard rules
+    def get_substract_overlaps (self, overlaps : dict) -> List[Rect]:
+        substract_rects = []
+        for rect in self.rects:
+            overlap = overlaps.get(rect, None)
+            if overlap:
+                new_rects = rect.subtract_overlaps(overlap)
+                substract_rects += new_rects
+                continue
+            substract_rects.append(rect)
+        return substract_rects
+
+    # Return self grid space after substracting other grid space splitted in rectangles
+    # Note that these rectangles will not follow the grid standard rules
+    # DEPRECATED
     def get_substract_rects (self, grid : 'Grid') -> List[Rect]:
         substract_rects = []
         for rect in self.rects:
@@ -2220,7 +2255,11 @@ class Grid:
     # Return the resulting grid after substracting other grid to self grid
     # Return None if the other grid fully consumes self grid
     def get_substract_grid (self, grid : 'Grid') -> Optional['Grid']:
-        substract_rects = self.get_substract_rects(grid)
+        #substract_rects = self.get_substract_rects(grid)
+        overlaps = self.get_overlaps(grid)
+        if not overlaps:
+            return self
+        substract_rects = self.get_substract_overlaps(overlaps)
         if len(substract_rects) == 0:
             return None
         return Grid.non_canonical(substract_rects)

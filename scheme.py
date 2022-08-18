@@ -9,8 +9,7 @@ from math import sqrt, inf
 
 # Set the seed and print it
 seed = None
-#seed = 43177
-#seed = 798738
+#seed = 613366
 if not seed:
     seed = round(random.random() * 999999)
 print('Seed ' + str(seed))
@@ -279,8 +278,11 @@ class Room:
         # Maximum size in at least one dimension
         max_size : Optional[number] = None,
         # Set if the room boundary may me modified
-        # DANI: No está implementado todavía
         rigid : bool = False,
+        # Set the maximum number of corners in the final room boundary
+        # Note that this parameter may be passed only when the boundary is not passed
+        # Root only
+        max_corners : Optional[number] = None,
         # Corridor size (the minimum size by default)
         corridor_size : Optional[number] = None,
         # The doors to enter the room and start corridors
@@ -301,6 +303,7 @@ class Room:
     ):
         # Set internal variables
         self._boundary = None
+        self._grid = None
         self._free_grid = None
         # Set representation parameters
         self.display = display
@@ -335,6 +338,13 @@ class Room:
             raise InputError('Forced area is not sufficient for the minimum size in room ' + name)
         # Set if the boundary is rigid
         self.rigid = rigid
+        # Set the maximum number of corners
+        self.max_corners = max_corners
+        if max_corners != None:
+            if boundary:
+                raise InputError('Maximum number of corners is to be passed only when there is no predefined boundary')
+            if max_corners < 4:
+                raise InputError('It is not supported having less than 4 corners in the final boundary')
         # Set size limits
         if min_size or min_size == 0:
             self.min_size = min_size
@@ -359,6 +369,8 @@ class Room:
         # Set each door room
         for door in self.doors:
             door.room = self
+        # Set the corridor room
+        self.corridor = None
         # Set the room corridor size
         self.corridor_size = corridor_size
         if not self.corridor_size:
@@ -422,6 +434,9 @@ class Room:
             # Check if this rooms minimum size fits in the parent boundary
             if not self.boundary and not parent.does_room_fit(self, force=True):
                 raise InputError('The child room "' + self.name + '" minimum size does not fit in the parent boundary')
+        # If this room (not the root) has a max_corners input parameter
+        if self.max_corners:
+            raise InputError('Parameter max_corners is supported only in the root room')
 
     def __str__(self):
         return '<Room "' + str(self.name) + '">'
@@ -446,27 +461,51 @@ class Room:
     # Get the boundary
     # Just return the internal boundary value
     def get_boundary (self):
-        return self._boundary
+        if self._boundary:
+            return self._boundary
+        if self._grid:
+            boundaries = self.grid.boundaries
+            if len(boundaries) == 1:
+                self._boundary = boundaries[0]
+                return self._boundary
+            if len(boundaries) > 1:
+                raise ValueError('A single room can not have more than 1 boundary')
+        return None
 
     # Set the boundary
     # Reset the own rects and the parent rects also
     def set_boundary (self, boundary, skip_update_display : bool = False):
         self._boundary = boundary
+        self._grid = None
         self.reset_free_grid()
         if self.parent:
             self.parent.reset_free_grid()
         if not skip_update_display:
-            self.update_display()
+            self.update_display(title='Modified boundary in room ' + self.name)
 
     # The room boundary
     boundary = property(get_boundary, set_boundary, None, "The room boundary")
 
     # Get the grid
     # Just return the internal boundary grid value
-    def get_grid (self):
-        if not self._boundary:
-            return None
-        return self._boundary.grid
+    def get_grid (self) -> Grid:
+        if self._grid:
+            return self._grid
+        if self._boundary:
+            return self._boundary.grid
+        return None
+
+    # Set the grid
+    # Reset the boundary
+    def set_grid (self, grid : Grid):
+        self._grid = grid
+        # Reset the boundary
+        self._boundary = None
+        self.reset_free_grid()
+        if self.parent:
+            self.parent.reset_free_grid()
+        # if not skip_update_display:
+        #     self.update_display()
 
     # The room boundary
     grid = property(get_grid, None, None, "The room grid")
@@ -581,6 +620,14 @@ class Room:
         if len(rooms) > 0:
             self.set_corridor()
 
+        # If the room had no fixed boundary then set in now
+        if not self.boundary:
+            self.boundary = self.get_provisional_boundary()
+
+        # If there is a limit of corners in the room (i.e. this is the root room) then reshape children boundaries now
+        if self.max_corners:
+            self.reduce_corners()
+
         # Set children boundaries recurisvely if the recursive flag was passed
         if recursive:
             for room in rooms:
@@ -657,7 +704,7 @@ class Room:
                 # Set the child first boundary, which automatically will reset self room free grid
                 # In case it was forced, we must check that the overlapped children rooms are fine with the invasion
                 if forced:
-                    if not self.invade_children(room, initial_boundary):
+                    if not self.invade_children(room, initial_boundary.grid):
                         room.boundary = None
                         continue
                 # Otherwise just claim the boundary
@@ -1093,7 +1140,7 @@ class Room:
         elements_to_display = current_corridor
         for segment in elements_to_display:
             segment.color = 'red'
-        self.update_display(extra=elements_to_display)
+        self.update_display(extra=elements_to_display, title='Displaying corridor path')
 
         # ------------------------------------------------------------------------------------------------------------------------------
 
@@ -1204,7 +1251,7 @@ class Room:
         elements_to_display = current_corridor
         for segment in elements_to_display:
             segment.color = 'red'
-        self.update_display(extra=elements_to_display)
+        self.update_display(extra=elements_to_display, title='Displaying corridor path')
 
         # ------------------------------------------------------------------------------------------------------------------------------
 
@@ -1243,7 +1290,7 @@ class Room:
             elements_to_display = corridor_boundary.segments
             for segment in elements_to_display:
                 segment.color = 'blue'
-            self.update_display(extra=elements_to_display)
+            self.update_display(extra=elements_to_display, title='Displaying corridor boundary segments')
 
             # Check if there are regions of the corridor which are out of the parent exterior polygon
             # Get the current grid, using the provisional exterior polygon grid in case the parent has no grid
@@ -1279,7 +1326,7 @@ class Room:
                 elements_to_display = corridor_boundary.segments
                 for segment in elements_to_display:
                     segment.color = 'blue'
-                self.update_display(extra=elements_to_display)
+                self.update_display(extra=elements_to_display, title='Displaying corridor boundary')
 
             return corridor_boundary
 
@@ -1321,13 +1368,14 @@ class Room:
         # Substract this region from the rest of rooms and claim it back for the parent
         # Note that, at this point, other rooms will not expand to compensate the lost at this time
         for child in self.children:
-            if not child.truncate([corridor_boundary], force=True, skip_update_display=True):
+            if not child.truncate(corridor_boundary.grid, force=True, skip_update_display=True):
                 raise ValueError('The space required by the corridor cannot be claimed from ' + child.name)
         # Set the corridor as a new independen room which will occupy the new freed space
         # This is useful to prevent this space to be claimed back if we further expand the rooms
         # Setting the room will also update he display thus showing the corridor area
-        corridor_room = Room(boundary=corridor_boundary, name=self.name + ' corridor', fill_color=self.fill_color, parent=self)
+        corridor_room = Room(boundary=corridor_boundary, name=self.name + ' corridor', fill_color=self.fill_color, parent=self, rigid=True)
         self.children.append(corridor_room)
+        self.corridor = corridor_room
 
         # Now, if the parent has no boundary, we expand child rooms to compensate for their area loss
         if not self.boundary:
@@ -1356,7 +1404,125 @@ class Room:
             door.point = random.choice(available_points)
 
         # Show the relocated doors
-        self.update_display()
+        self.update_display(title='Displaying relocated doors')
+
+    # Reduce the number oh corners in this room exterior polygon by reshaping children boundaries
+    # This function is meant to run in the root room only
+    # Return True if the reduction suceed or False if it failed
+    def reduce_corners (self) -> bool:
+        exterior_polygon = self.boundary.exterior_polygon
+        while len(exterior_polygon.corners) > self.max_corners:
+
+            # Target corners here would be inside corners which are connected to outside corners
+            # Each pairs of corners makes what could be called "zigzag"
+            # The segment between those corners is to be removed and the envolving segments aligned
+            # The shorter the segment between those corners, the smaller the change will be
+            # Note that removing an inside corner means also removing an outside corner in non-diagonal polygons
+            # Note that the final number of corners will always be even in non-diagonal polygons
+            # Note that there will always be a zigzag in non-diagonal polygons with more than 4 corners
+
+            # Get the inside corners
+            inside_corners = exterior_polygon.get_inside_corners()
+            # Each inside corner may have 2 candidate zigzags
+            # For each zigzag, record each corner (inside and outside), the middle segment and the surrounding segments
+            zigzags = []
+            for inside_corner in inside_corners:
+                # If one of the segments in the corner is in contact with a door from this room then we do not expanded
+                conflict_door = False
+                for segment in inside_corner.segments:
+                    if any((door.point in segment) for door in self.doors):
+                        conflict_door = True
+                        break
+                if conflict_door:
+                    continue
+                # Check each of the connected segments
+                for segment in inside_corner.segments:
+                    # Check the other corner in this segment
+                    other_corner_point = segment.get_other_point(inside_corner)
+                    other_corner = exterior_polygon.get_corner(other_corner_point)
+                    # If it is also an inside corner then this is not a zigzag, but a "valley"
+                    if other_corner in inside_corners:
+                        continue
+                    # We have a zigzag
+                    # Get the surrounding segments
+                    inside_corner_other_segment = next(seg for seg in inside_corner.segments if seg != segment)
+                    outside_corner_other_segment = next(seg for seg in other_corner.segments if seg != segment)
+                    # Check segments to be paralel
+                    # For now we only support this situation
+                    if not inside_corner_other_segment.is_paralel_to(outside_corner_other_segment):
+                        print([inside_corner_other_segment, outside_corner_other_segment])
+                        raise ValueError('Zigzag surrounding segments are not in the same line, are there diagonals?')
+                    # Save the zigzag with all its properties
+                    zigzag = {
+                        'inside_corner': inside_corner,
+                        'outside_corner': other_corner,
+                        'middle_segment': segment,
+                        'inside_segment': inside_corner_other_segment,
+                        'outside_segment': outside_corner_other_segment
+                    }
+                    zigzags.append(zigzag)
+
+            # Sort zigzags to get the smallest first
+            def get_zigzag_length (zigzag : dict) -> number:
+                return zigzag['middle_segment'].length
+            zigzags.sort(key=get_zigzag_length)
+
+            # Try to remove corners in the most suitable zigzag
+            # If it fails, try with the next one
+            # WARNING:
+            # Functions which may fail are smart enought to recover boundary backups in case of failure
+            # However we must backup the self boundary, since we may succeed in several steps and then fail later
+            succeed = False
+            for zigzag in zigzags:
+                backup = { self: self.boundary }
+                # Push the inside segment and pull the outside segment
+                # The push and pull lengths must be calculated to make both segments match while the parent area is kept
+                area = zigzag['middle_segment'].length * zigzag['outside_segment'].length
+                new_segment_length = zigzag['inside_segment'].length + zigzag['outside_segment'].length
+                inside_push_length = area / new_segment_length
+                outside_pull_length = zigzag['middle_segment'].length - inside_push_length
+                # Push before pull, so we have enought area to recover after the pull
+                if not self.push_boundary_segment(zigzag['inside_segment'], inside_push_length):
+                    print('WARNING: Failed to push ' + str(zigzag['inside_segment']))
+                    # There is no need to recover the backup at this point
+                    continue
+                if not self.pull_boundary_segment(zigzag['outside_segment'], outside_pull_length):
+                    print('Failed to pull ' + str(zigzag['outside_segment']))
+                    # Revert the previous push
+                    self.restore_backup(backup)
+                    continue
+                # Relocate children to fit in the new boundary
+                child_conflict = False
+                for child in self.children:
+                    # Save a backup of the current child in case we have to recover its boundary later
+                    child_boundary_backup = child.boundary
+                    if not child.fit_to_required_area():
+                        print('Something went wrong while refitting ' + child.name)
+                        child_conflict = True
+                        break
+                    # Now add the child boundary to the backup
+                    # Note that this is not done before since in case of failure the current children is backuped already
+                    backup[child] = child_boundary_backup
+                # If there was a failure during children relocation then restore the boundary backups and proceed to the next zigzag
+                if child_conflict:
+                    self.restore_backup(backup)
+                    continue
+                # If everything was fine then stop here
+                # Only 1 zigzag may be solved at once
+                succeed = True
+                break
+
+            # If we succeeded to remove one of the corners then we continue
+            if succeed:
+                # Recalculate the exterior polygon
+                exterior_polygon = self.boundary.exterior_polygon
+                continue
+
+            # If we failed to remove the corner with all the available zigzags then we must surrender at this point
+            current_corners = len(exterior_polygon.corners)
+            print('WARNING: Failed to reduce corners to ' + str(self.max_corners) + '. Current number: ' + str(current_corners))
+            return False
+        return True
 
     # Get the minimum of all minimum sizes
     # Get to the the root and the check all children min sizes recuersively in order to get the minimum
@@ -1378,10 +1544,13 @@ class Room:
     # In case it is not able to fit at some point recover the original situation
     # Restricted segments are segments which must remain as are
     def fit_to_required_area (self, restricted_segments : list = []) -> bool:
-        # Make a boundary backup of this room and all its brothers
-        backup = self.parent.make_children_backup()
         # Calculate how much area we need to expand
         required_area = self.get_required_area()
+        # If the area is already satisfied then stop here
+        if abs(required_area / self.max_size) < minimum_resolution * self.max_size:
+            return True
+        # Make a boundary backup of this room and all its brothers
+        backup = self.parent.make_children_backup()
         # Keep expanding or contracting until the current room reaches the desired area
         # Check the required area is big enought to be meaningfull according to the resolution
         # i.e. check if expanding a segment with the minimum length would make it move more than the minimum resolution
@@ -1624,6 +1793,103 @@ class Room:
                 yield frontier, False
         print('WARNING: There are no more frontiers available')
 
+    # Push a segment in the boundary
+    # Check everything is fine after the push and, if so, return True
+    # In case there is any problem the push is not done and this function returns False
+    def push_boundary_segment (self, segment : Segment, push_length : number) -> bool:
+        # Get the push durection
+        direction = -self.boundary.exterior_polygon.get_border_inside(segment)
+        # If the push length at this point is 0 or close to it then we can not push
+        if push_length < minimum_resolution:
+            return False
+        # Create the new rect with the definitive length
+        new_point = segment.a + direction.normalized() * push_length
+        new_side = Segment(segment.a, new_point)
+        new_rect = Rect.from_segments([segment, new_side])
+        # Then add the new current rectangle by modifying the current boundary
+        # Add the new rectangle segment regions which do not overlap with current boundary segments
+        # Substract the new rectangle segment regions which overlap with current boundary segments
+        # e.g. the pushed segment will always be an overlapped region
+        new_segments = new_rect.segments
+        current_segments = self.boundary.exterior_polygon.segments
+        added_segments = [ seg for segment in new_segments for seg in segment.substract_segments(current_segments) ]
+        remaining_segments = [ seg for segment in current_segments for seg in segment.substract_segments(new_segments) ]
+        # Join all previous segments to make the new polygon
+        new_exterior_polygon = Polygon.non_canonical([ *added_segments, *remaining_segments ])
+        new_boundary = Boundary(new_exterior_polygon, self.boundary.interior_polygons)
+        # In case the boundary is extended over another room,
+        # We must substract the claimed rect from the other room and make it expand to compensate
+        # Make a backup of the current boundary in case the further expansions fail an we have to go back
+        backup_boundary = self.boundary
+        self.boundary = new_boundary
+        # Substract the claimed rect from other rooms
+        invaded_region = Grid([new_rect])
+        # Make a backup of all other room current boundaries
+        rooms = []
+        if self.parent:
+            rooms.append(self.parent)
+            rooms += [ room for room in self.parent.children if room != self ]
+        backup_room_boundaries = [ room.boundary for room in rooms ]
+        # Get the claimed region from each region
+        for room in rooms:
+            # If we claimed parent (free) space there is no need to check anything
+            if room == parent_room:
+                continue
+            # Get the overlapping region between the invaded region and each affected room boundary
+            current_room_invaded_regions = room.grid.get_overlap_grid(invaded_region)
+            if not current_room_invaded_regions:
+                continue
+            if not room.invade(current_room_invaded_regions):
+                self.boundary = backup_boundary
+                for i, modified_room in enumerate(rooms):
+                    modified_room.boundary = backup_room_boundaries[i]
+                return False
+        return True
+
+    # Pull a segment in the boundary
+    # Check everything is fine after the pull and, if so, return True
+    # In case there is any problem the pull is not done and this function returns False
+    def pull_boundary_segment (self, segment : Segment, pull_length : number) -> bool:
+        # Get the pull durection
+        direction = self.boundary.exterior_polygon.get_border_inside(segment)
+        # If the pull length at this point is 0 or close to it then we can not pull
+        if pull_length < minimum_resolution:
+            return False
+        # Create the new rect with the definitive length
+        new_point = segment.a + direction.normalized() * pull_length
+        new_side = Segment(segment.a, new_point)
+        new_rect = Rect.from_segments([segment, new_side])
+        # Then add the new current rectangle by modifying the current boundary
+        # Add the new rectangle segment regions which do not overlap with current boundary segments
+        # Substract the new rectangle segment regions which overlap with current boundary segments
+        # e.g. the pulled segment will always be an overlapped region
+        new_segments = new_rect.segments
+        current_segments = self.boundary.exterior_polygon.segments
+        added_segments = [ seg for segment in new_segments for seg in segment.substract_segments(current_segments) ]
+        remaining_segments = [ seg for segment in current_segments for seg in segment.substract_segments(new_segments) ]
+        # Join all previous segments to make the new polygon
+        new_exterior_polygon = Polygon.non_canonical([ *added_segments, *remaining_segments ])
+        new_boundary = Boundary(new_exterior_polygon, self.boundary.interior_polygons)
+        # In case the boundary is extended over another room,
+        # We must substract the claimed rect from the other room and make it expand to compensate
+        # Make a backup of the current boundary in case the further expansions fail an we have to go back
+        backup = { self: self.boundary }
+        self.boundary = new_boundary
+        # Get the boundary to be removed bron the current oundary
+        removed_region = Grid([new_rect])
+        # We must substract the new rect from this room and its children (if any) and check everything is fine after
+        for child in self.children:
+            # Save a backup of the current child in case we have to recover its boundary later
+            child_boundary_backup = child.boundary
+            if not child.truncate(removed_region):
+                # If the truncate process failed then restore backups and return True
+                self.restore_backup(backup)
+                return False
+            # Now add the child boundary to the backup
+            # Note that this is not done before since in case of failure the current children is backuped already
+            backup[child] = child_boundary_backup
+        return True
+
     # Try to expand a specific room frontier
     # Note that the frontier must contain the room it belongs to
     # Set the required (maximum) area it can expand
@@ -1798,7 +2064,7 @@ class Room:
             # Make a backup of the current boundary in case the further expansions fail an we have to go back
             backup_boundary = self.boundary
             self.boundary = new_boundary
-            invaded_region = Boundary(Polygon.from_rect(new_rect))
+            invaded_region = Grid([new_rect])
             # Substract the claimed rect from other rooms
             # Make a backup of all other room current boundaries
             backup_room_boundaries = [ room.boundary for room in rooms ]
@@ -1822,7 +2088,7 @@ class Room:
                 if room == parent_room:
                     continue
                 # Now invade other rooms
-                current_room_invaded_regions = room.boundary.get_overlap_boundaries(invaded_region)
+                current_room_invaded_regions = room.grid.get_overlap_grid(invaded_region)
                 if not room.invade(current_room_invaded_regions):
                     self.boundary = backup_boundary
                     for i, modified_room in enumerate(rooms):
@@ -1984,15 +2250,15 @@ class Room:
             # WARNING: This usually happens because of forward limits, not because the area was not big enought
             # For this reason, trying to reduce the segment and push again will have no effect almost always
             if push_length < minimum_resolution:
-                print('WARNING: The pull length is too small: ' + str(push_length))
+                #print('WARNING: The pull length is too small: ' + str(push_length))
                 return False
             # Create the new rect with the definitive length
             new_point = pushed_segment.a + forward_direction.normalized() * push_length
             new_side = Segment(pushed_segment.a, new_point)
             new_rect = Rect.from_segments([pushed_segment, new_side])
-            removed_boundary = Boundary(Polygon.from_rect(new_rect))
+            removed_region = Grid([new_rect])
             # We must substract the new rect from this room and check everything is fine after
-            if not self.truncate([removed_boundary]):
+            if not self.truncate(removed_region):
                 # If the contraction fails then try it again with the next protocol
                 # If we are in the last protocol then return False
                 if protocol != 2:
@@ -2062,11 +2328,11 @@ class Room:
     # Use the force argument to skip all checkings and simply truncate the boundary
     # Use the skip_update_display to avoid this truncate to generate a display frame
     # * This is useful when truncating several rooms at the same time, so we do not have to recalculate the parent free grid every time
-    def truncate (self, regions : List[Boundary], force : bool = False, skip_update_display : bool = False) -> bool:
-        # Calculate the boundary of this room after substracting the invaded regions
-        truncated_grid = self.grid
-        for region in regions:
-            truncated_grid = truncated_grid.get_substract_grid(region.grid)
+    def truncate (self, region : Grid, force : bool = False, skip_update_display : bool = False) -> bool:
+        # Calculate the boundary of this room after substracting the invaded region
+        truncated_grid = self.grid.get_substract_grid(region)
+        if truncated_grid == self.grid:
+            return True
         # Check the truncated grid to still respecting the minimum size
         if not force and not truncated_grid.check_minimum(self.preventive_min_size):
             print('WARNING: The room is not respecting the minimum size -> Go back')
@@ -2086,10 +2352,10 @@ class Room:
 
     # Invade this room by substracting part of its space
     # Then this room must expand to recover the lost area
-    def invade (self, regions : List[Boundary], force : bool = False, skip_update_display : bool = False) -> bool:
+    def invade (self, region : Grid, force : bool = False, skip_update_display : bool = False) -> bool:
         # Truncate the room boundary but save a backup in case we have to go back further
         backup_boundary = self.boundary
-        if not self.truncate(regions, force, skip_update_display):
+        if not self.truncate(region, force, skip_update_display):
             print('WARNING: The invaded region can not be truncated -> Go back')
             self.boundary = backup_boundary
             return False
@@ -2104,21 +2370,21 @@ class Room:
     # Invade children in this room by substracting part of their space
     # Then all children must expand to recover the lost area
     # The invasor is the children room which will claim this new space
-    def invade_children (self, invasor : 'Room', region : Boundary) -> bool:
+    def invade_children (self, invasor : 'Room', region : Grid) -> bool:
         # Make a backup of all children, which includes the invasor
         # All children boundaries will be recovered if only 1 child fails to get invaded
         backup = self.make_children_backup()
         # Claim the invaded region for the invasor room
-        invasor.merge_boundary(region)
+        invasor.merge_grid(region)
         # Now find which children are overlaped by the invade region and then truncate them
         children = [ child for child in self.children if child != invasor ]
         for child in children:
             # Get the overlap regions between the invaded region and this child
-            overlap_boundaries = child.boundary.get_overlap_boundaries(region)
-            if len(overlap_boundaries) == 0:
+            overlap_grid = child.grid.get_overlap_grid(region)
+            if not overlap_grid:
                 continue
             # In case something went wrong with any child truncation recover all children backups and stop
-            if not child.truncate(overlap_boundaries):
+            if not child.truncate(overlap_grid):
                 self.restore_children_backup(backup)
                 return False
         # Finally expand all truncated children
@@ -2132,11 +2398,24 @@ class Room:
     # Fuse a boundary to self room boundary
     # Check that boundary can be joined to current boundary as a single room
     # i.e. both boundaries must be colliding and the colliding region must be only one and as wide as the minimum size or more
+    # DANI: AHora mismo no se usa
     def merge_boundary (self, boundary : Boundary):
         if self.boundary == None:
             self.boundary = boundary
         else:
             self.boundary = self.boundary.merge_boundary(boundary, self.preventive_min_size)
+
+    # Fuse a grid to self room boundary
+    # Check that grid can be joined to current brid as a single room
+    def merge_grid (self, grid : Grid):
+        if self.grid == None:
+            self.grid = grid
+        else:
+            new_grid = self.grid.get_merge_grid(grid, check_overlaps=False)
+            # In case there is a minimum size restriction check that the colliding segment is as long as required
+            if not new_grid.check_minimum(self.preventive_min_size):
+                raise ValueError('Some colliding region is not wide enough')
+            self.grid = new_grid
 
     # Get all overlapped segments between the current room and others
     def get_frontiers_with (self, other : 'Room') -> list:
@@ -2153,51 +2432,42 @@ class Room:
         return overlap_segments
 
     # Get all self frontiers segments
-    # They come inside a tuple separated by free frontiers, brother frontiers and parent frontiers respectively
-    # i.e. "free of conflict" frontiers, "conflict" frontiers and "forbidden" frontiers respectively
+    # They come inside a tuple separated by free frontiers, conflict frontiers and forbidden frontiers respectively
+    # i.e. free parent space frontiers, brother room frontiers and parent (if parent boundary) or rigid frontiers respectively
     def get_frontiers (self) -> tuple:
+        # Now set which frontiers are free to expansion, which ones are in conflict and which ones are forbbiden
+        forbidden_frontiers = []
+        conflict_frontiers = []
+        free_frontiers = []
+        # Get the parent room
         parent_room = self.parent
         # In case we have a parent boundary, frontiers with this boundary are totally forbidden to expansion
         if parent_room.boundary:
             # The parent limits are not allowed for expansion
             parent_frontiers = self.get_frontiers_with(parent_room)
-            # Other rooms inside the same parent may be displaced if there is no free space available
-            brother_rooms = [ room for room in parent_room.children if room is not self and room.boundary ]
-            brother_frontiers = []
-            for room in brother_rooms:
-                # This function assign the frontier.rooms already
-                frontiers = self.get_frontiers_with(room)
-                if frontiers:
-                    brother_frontiers += frontiers
-            # The prefered limits to expand are those connected to free space inside the current parent
-            # First of all get all already found frontier segments
-            conflict_frontiers = [*parent_frontiers, *brother_frontiers]
-            # Now susbstract all previous frontiers from the rest of the external polygon to find free frontiers
-            free_frontiers = []
-            for segment in self.boundary.exterior_polygon.segments:
-                free_frontiers += segment.substract_segments(conflict_frontiers)
-            # Set the room all free segment belong to as None
-            for frontier in free_frontiers:
-                frontier.rooms = [parent_room]
-            return free_frontiers, brother_frontiers, parent_frontiers
-        # If there is no paren boundary then any frontier which has no brothers conflict is suitable for expansion
-        else:
-            # Other rooms inside the same parent may be displaced if there is no free space available
-            brother_rooms = [ room for room in parent_room.children if room is not self and room.boundary ]
-            brother_frontiers = []
-            for room in brother_rooms:
-                # This function assign the frontier.rooms already
-                frontiers = self.get_frontiers_with(room)
-                if frontiers:
-                    brother_frontiers += frontiers
-            # Now susbstract all previous frontiers from the rest of the external polygon to find free frontiers
-            free_frontiers = []
-            for segment in self.boundary.exterior_polygon.segments:
-                free_frontiers += segment.substract_segments(brother_frontiers)
-            # Set the room all free segment belong to as None
-            for frontier in free_frontiers:
-                frontier.rooms = [parent_room]
-            return free_frontiers, brother_frontiers, []
+            forbidden_frontiers += parent_frontiers
+        # Other rooms inside the same parent may be displaced if there is no free space available
+        brother_rooms = [ room for room in parent_room.children if room is not self and room.boundary ]
+        for room in brother_rooms:
+            # This function assign the frontier.rooms already
+            brother_frontiers = self.get_frontiers_with(room)
+            if not brother_frontiers:
+                continue
+            # If the room is flagged as 'rigid' then we add frontiers to the forbidden list
+            if room.rigid:
+                forbidden_frontiers += brother_frontiers
+            else:
+                conflict_frontiers += brother_frontiers
+        # The prefered limits to expand are those connected to free space inside the current parent
+        # First of all get all already found frontier segments
+        non_free_frontiers = [*forbidden_frontiers, *conflict_frontiers]
+        # Now susbstract all previous frontiers from the rest of the external polygon to find free frontiers
+        for segment in self.boundary.exterior_polygon.segments:
+            free_frontiers += segment.substract_segments(non_free_frontiers)
+        # Set the room all free segment belong to as None
+        for frontier in free_frontiers:
+            frontier.rooms = [parent_room]
+        return free_frontiers, conflict_frontiers, forbidden_frontiers
 
     # Go uppwards in the hyerarchy until you reach the room which has no parent
     def get_root_room (self) -> 'Room':
@@ -2213,10 +2483,16 @@ class Room:
             rooms += room.get_rooms_recuersive()
         return rooms
 
+    # Restore backup of room boundaries
+    # A backup is a dict where keys are rooms and values are boundaries
+    def restore_backup (self, backup : dict):
+        for room, boundary_backup in backup.items():
+            room.set_boundary(boundary_backup, skip_update_display=True)
+        self.update_display(title='Restored backup')
+
     # Make a backup of current children boundaries
     def make_children_backup (self) -> List[Boundary]:
         return [ child.boundary for child in self.children ]
-
     # Restore children boundaries using a backup
     def restore_children_backup (self, backup):
         for c, child in enumerate(self.children):
@@ -2224,7 +2500,7 @@ class Room:
 
     # Add a new frame in the display with the current segments of this room and its children
     # Also an 'extra' argument may be passed with extra segments to be represented
-    def update_display (self, extra : list = []):
+    def update_display (self, extra : list = [], title : Optional[str] = None):
         if not display_solving_process:
             return
         # Find the root room
@@ -2233,7 +2509,7 @@ class Room:
         rooms = root.get_rooms_recuersive()
         # Display all current rooms together
         elements_to_display = [ *rooms, *extra ]
-        add_frame(elements_to_display)
+        add_frame(elements_to_display, title)
 
 # Exception for when user input is wrong
 class InputError(Exception):
