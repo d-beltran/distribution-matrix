@@ -488,7 +488,7 @@ class Segment(Line):
             return False
         return self.is_connected_with(other)
 
-    # Check if a line is fully covered by a list of segments
+    # Check if a segment is fully covered by a list of segments
     # i.e. substract all segments from self and if there is still a remaining segment it is not covered
     def is_covered_by (self, segments : List['Segment']) -> bool:
         remaining_segments = self.substract_segments(segments)
@@ -891,7 +891,7 @@ class Rect:
 
     # Return all rectangle points in a 'polygon-friendly' order
     # Each point contains its two adjacent segments
-    def get_corners(self) -> List['Corner']:
+    def get_corners (self) -> List['Corner']:
         points = self.get_points()
         segments = [ Segment(a,b) for a, b in pairwise(points, retro=True) ]
         segment_pairs = list(pairwise(segments, retro=True))
@@ -905,7 +905,7 @@ class Rect:
         return corners
 
     # Get a corner from its point
-    def get_corner(self, point : 'Point') -> Optional['Corner']:
+    def get_corner (self, point : 'Point') -> Optional['Corner']:
         corners = self.get_corners()
         corner = next((corner for corner in corners if corner == point), None)
         if not corner:
@@ -913,21 +913,26 @@ class Rect:
         return corner
 
     # Get horizontal size
-    def get_x_size(self) -> number:
+    def get_x_size (self) -> number:
         return self.x_max - self.x_min
 
     # Get vertical size
-    def get_y_size(self) -> number:
+    def get_y_size (self) -> number:
         return self.y_max - self.y_min
 
     # Get both dimension sizes
-    def get_size(self) -> tuple:
+    def get_size (self) -> tuple:
         x_size = self.get_x_size()
         y_size = self.get_y_size()
         return x_size, y_size
 
+    # Get both dimension sizes
+    def get_diagonal_size (self) -> number:
+        x_size, y_size = self.get_size()
+        return sqrt(x_size**2 + y_size**2)
+
     # Calculate the rectangle area
-    def get_area(self) -> number:
+    def get_area (self) -> number:
         if self._area:
             return self._area
         x_size, y_size = self.get_size()
@@ -955,7 +960,7 @@ class Rect:
         raise ValueError('Segment "' + str(segment) + '" is not part of rectangle "' + str(self) + '"')
 
     # Return a segment which crosses the rectangle in diagonal from bottom left to upper right points
-    def get_crossing_segment(self) -> Segment:
+    def get_crossing_segment (self) -> Segment:
         return Segment(self.get_bottom_left_point(), self.get_upper_right_point(), self.segments_color)
 
     # Get the point in the middle of the rect
@@ -973,10 +978,10 @@ class Rect:
     # DANI: No lo he provado desde que lo moví de abajo
     def split (self, x_splits : list = [], y_splits : list = []):
         # Sort the split values and discard those values out of range
-        def x_in_range(x):
+        def x_in_range (x):
             return x > self.x_min and x < self.x_max
         formatted_x_splits = list(filter(x_in_range, sorted(x_splits)))
-        def y_in_range(y):
+        def y_in_range (y):
             return y > self.y_min and y < self.y_max
         formatted_y_splits = list(filter(y_in_range, sorted(y_splits)))
         # Set the steps to form rectangles
@@ -1045,7 +1050,7 @@ class Rect:
             return Segment(new_a, new_b)
         else:
             segment_rect = Rect.from_segments([segment])
-            overlap_rect = self.get_overlap_rect(segment_rect)
+            overlap_rect = self.get_overlap_rect(segment_rect, borders = False)
             if not overlap_rect:
                 return None
             if overlap_rect.get_bottom_left_point() in segment:
@@ -1059,15 +1064,14 @@ class Rect:
 
     # Given another rectangle, it returns the overlapping region with this rectangle, if exists, as a new rectangle
     # DANI: No lo he provado desde que lo moví de abajo
-    def get_overlap_rect (self, rect : 'Rect') -> Optional['Rect']:
+    def get_overlap_rect (self, rect : 'Rect', borders : bool = True) -> Optional[ Union[ 'Point', 'Rect', 'Segment'] ]:
         # Find the overlap in the 'x' dimension
         # Get the maximum of the minimums
         x_minimum = max(self.x_min, rect.x_min)
         # Get the minimum of the maximums
         x_maximum = min(self.x_max, rect.x_max)
         # Check that the overlap range exists
-        x_overlap = ( x_minimum, x_maximum )
-        if x_minimum >= x_maximum:
+        if x_minimum > x_maximum or (x_minimum == x_maximum and not borders):
             return None
         # Find the overlap in the 'y' dimension
         # Get the maximum of the minimums
@@ -1075,17 +1079,25 @@ class Rect:
         # Get the minimum of the maximums
         y_maximum = min(self.y_max, rect.y_max)
         # Check that the overlap range exists
-        y_overlap = ( y_minimum, y_maximum )
-        if y_minimum >= y_maximum:
+        if y_minimum > y_maximum or (y_minimum == y_maximum and not borders):
             return None
+        # In case the overlap is happening in a border
+        if (x_minimum == x_maximum and y_minimum != y_maximum) or (x_minimum != x_maximum and y_minimum == y_maximum):
+            a = Point(x_minimum, y_minimum)
+            b = Point(x_maximum, y_maximum)
+            return Segment(a,b)
+        # In case the overlap is happening in a corner
+        if x_minimum == x_maximum and y_minimum == y_maximum:
+            return Point(x_minimum, y_minimum)
+        # Otherwise, the overlap is a whole rectangle
         # Build a rectangle with both dimensional overlaps
-        return Rect(x_overlap[0], y_overlap[0], x_overlap[1], y_overlap[1])
+        return Rect(x_minimum, y_minimum, x_maximum, y_maximum)
 
     # Join 2 rectangles by returning a list of all rectangles which define the resulting grid
     # The overlapped region, if exists is transformed to a single rectangle
     def join_rect (self, rect : 'Rect') -> List['Rect']:
         # Find the overlap between these two rectangles
-        overlap = self.get_overlap_rect(rect)
+        overlap = self.get_overlap_rect(rect, borders = False)
         # If there is no overlap then just return both input rectangles
         if not overlap:
             return [self, rect]
@@ -1101,7 +1113,7 @@ class Rect:
     # Substract the second rectangle form the first rectangle and return the rectangles which define the resulting grid
     def subtract_rect (self, rect : 'Rect') -> List['Rect']:
         # Find the overlap between these two rectangles
-        overlap = self.get_overlap_rect(rect)
+        overlap = self.get_overlap_rect(rect, borders = False)
         # If there is no overlap then just return the first rectangle intact
         if not overlap:
             return [self]
@@ -1118,7 +1130,7 @@ class Rect:
         # Find the overlap rects
         overlaps = []
         for rect in rects:
-            overlap = self.get_overlap_rect(rect)
+            overlap = self.get_overlap_rect(rect, borders = False)
             if overlap:
                 overlaps.append(overlap)
         # If there is no overlap then just return the first rectangle intact
@@ -1483,7 +1495,7 @@ class Polygon:
         return False
 
     # Get a specific polygon corner or segment by specifying a point that matches this element
-    def get_border_element (self, point : Point) -> Optional[Union[Point,Segment]]:
+    def get_border_element (self, point : Point) -> Optional[Union[Point, Segment]]:
         for corner in self.corners:
             if point == corner:
                 return corner
@@ -1956,7 +1968,7 @@ class Grid:
                     if corner in other_rect and corner not in other_corners:
                         print('WARNING: Conflict rects ' + str(rect) + ' and ' + str(other_rect))
                         raise RuntimeError('Grid rects are wrong')
-                if rect.get_overlap_rect(other_rect):
+                if rect.get_overlap_rect(other_rect, borders = False):
                     #add_frame(self.rects)
                     print('WARNING: Overlapping rects ' + str(rect) + ' and ' + str(other_rect))
                     raise RuntimeError('Grid rects are wrong')
@@ -2034,7 +2046,7 @@ class Grid:
     # However these rectangles must never overlap each other
     # These rectangles will be used to build a new grid with different rectangles which do follow the standards
     @classmethod
-    def non_canonical(cls, rects : List[Rect]):
+    def non_canonical (cls, rects : List[Rect]):
         # There must be at least one rectangle
         if len(rects) == 0:
             raise ValueError('There must be at least one rect to build a grid')
@@ -2068,13 +2080,13 @@ class Grid:
         return grid
 
     # Grid rectangles are read only
-    def get_rects(self) -> List[Rect]:
+    def get_rects (self) -> List[Rect]:
         return self._rects
     rects = property(get_rects, None, None, "Grid rectangles")
 
     # Get maximum possible rectangles in the grid
     # This variable is treated appart since its calculation may be an expensive calculation
-    def get_max_rects(self) -> List[Rect]:
+    def get_max_rects (self) -> List[ Tuple [ Rect, List[Rect] ] ]:
         # If maximum rectangles are previously calculated then return them
         if self._max_rects:
             return self._max_rects
@@ -2086,7 +2098,7 @@ class Grid:
 
     # Get row rectangles in the grid
     # This variable is treated appart since its calculation may be an expensive calculation
-    def get_rows(self) -> List[ Tuple [ Rect, List[Rect] ] ]:
+    def get_rows (self) -> List[ Tuple [ Rect, List[Rect] ] ]:
         # If row rectangles are previously calculated then return them
         if self._rows:
             return self._rows
@@ -2098,7 +2110,7 @@ class Grid:
 
     # Get column rectangles in the grid
     # This variable is treated appart since its calculation may be an expensive calculation
-    def get_columns(self) -> List[ Tuple [ Rect, List[Rect] ] ]:
+    def get_columns (self) -> List[ Tuple [ Rect, List[Rect] ] ]:
         # If column rectangles are previously calculated then return them
         if self._columns:
             return self._columns
@@ -2110,7 +2122,7 @@ class Grid:
 
     # Get the area of the whole grid
     # This variable is treated appart since its calculation may be an expensive calculation
-    def get_area(self):
+    def get_area (self) -> number:
         # If the area is previously calculated then return it
         if self._area:
             return self._area
@@ -2164,7 +2176,7 @@ class Grid:
     # Check if a rect is overlapping at some rect in this grid
     def is_rect_overlapping (self, rect : Rect) -> bool:
         for self_rect in self.rects:
-            overlap = self_rect.get_overlap_rect(rect)
+            overlap = self_rect.get_overlap_rect(rect, borders = False)
             if overlap:
                 return True
         return False
@@ -2175,14 +2187,16 @@ class Grid:
         overlap_rects = []
         for rect in self.rects:
             for other in grid.rects:
-                overlap_rect = rect.get_overlap_rect(other)
+                overlap_rect = rect.get_overlap_rect(other, borders = False)
                 if overlap_rect:
                     overlap_rects.append(overlap_rect)
         return overlap_rects
 
     # Return the resulting grid after overlapping self grid to other grid
-    def get_overlap_grid (self, grid : 'Grid') -> 'Grid':
+    def get_overlap_grid (self, grid : 'Grid') -> Optional['Grid']:
         overlap_rects = self.get_overlap_rects(grid)
+        if len(overlap_rects) == 0:
+            return None
         return Grid.non_canonical(overlap_rects)
 
     # Return the merge space between two grids splitted in rectangles
@@ -2219,7 +2233,7 @@ class Grid:
             # Find the overlap rects
             overlap_rects = []
             for grid_rect in grid.rects:
-                overlap_rect = self_rect.get_overlap_rect(grid_rect)
+                overlap_rect = self_rect.get_overlap_rect(grid_rect, borders = False)
                 if overlap_rect:
                     overlap_rects.append(overlap_rect)
             # If there is no overlap then just return the first rectangle intact
@@ -2270,7 +2284,8 @@ class Grid:
     def get_fitting_space (self, x_fit_size : number, y_fit_size : Optional[number] = None) -> Generator[Rect, None, None]:
         if not y_fit_size:
             y_fit_size = x_fit_size
-        for rect in self.max_rects:
+        for max_rect in self.max_rects:
+            rect = max_rect[0]
             x_size, y_size = rect.get_size()
             if x_fit_size <= x_size and y_fit_size <= y_size:
                 yield rect
@@ -2313,10 +2328,10 @@ class Grid:
         return [ rect for rect in [ left_rect, right_rect, upper_rect, bottom_rect ] if rect != None ]
 
     # Check the grid to respect minimum size in both x and y dimensions
-    # DANI: No se ha comprovado bien que funcione
     def check_minimum (self, minimum : number) -> bool:
         # Check all maximum rectangles
-        for rect in self.max_rects:
+        for max_rect in self.max_rects:
+            rect = max_rect[0]
             x_size, y_size = rect.get_size()
             # If there is at least one maximum rectangle which does not respect minimum size in both x and y dimensions then it is wrong
             if x_size < minimum and y_size < minimum:
@@ -2348,22 +2363,89 @@ class Grid:
                 return False
         return True
 
+    # This function is used to generate a new grid without all regions which do not respect a minimum size
+    def keep_minimum (self, minimum : number) -> Optional['Grid']:
+        # Find the maximum size both in x and y for each rect in the grid
+        # To do so, find all maximum rects which include a specific rect and get the maximum sizes among them
+        respecting_rects = []
+        for rect in self.rects:
+            max_rects = [ max_rect[0] for max_rect in self.max_rects if rect in max_rect[1] ]
+            max_x_size = max([ rect.get_x_size() for rect in max_rects ])
+            max_y_size = max([ rect.get_y_size() for rect in max_rects ])
+            # If any of the sizes is not enough to cover the size then set the rect as non respecting
+            if max_x_size < minimum or  max_y_size < minimum:
+                continue
+            respecting_rects.append(rect)
+        # Make a new grid from the minimum rects which do respect the minimum size
+        # Use self grid in case all self rects are respecting the minimum size
+        # Return None if there are not respecting rects at this point
+        if len(respecting_rects) == 0:
+            return None
+        respecting_region = self if len(self.rects) == len(respecting_rects) else Grid(respecting_rects)
+        # Now, from the respecting regions, find groups of connected rects which respect the minimum size at the connections
+        # Note that there may be more than one region (even when there are not regions which do not respect it)
+        # Note that these regions may even overlap (see figure 01)
+        pool = [ *respecting_region.max_rects ]
+        minimum_regions = []
+        while len(pool) > 0:
+            next_group = [ pool[0] ]
+            del pool[0]
+            # Find connected rects to the current group of rects until there are no more
+            while True:
+                next_rect = None
+                for max_rect in pool:
+                    for group_rect in next_group:
+                        # Get the overlap between the current maximum rectangle and the next rectangle in the group
+                        overlap = max_rect[0].get_overlap_rect(group_rect[0])
+                        if not overlap:
+                            continue
+                        # If the overlap is a point then rects are no connected
+                        if isinstance(overlap, Point):
+                            continue
+                        # Find the overlap size
+                        size = 0
+                        if isinstance(overlap, Segment):
+                            size = overlap.length
+                        if isinstance(overlap, Rect):
+                            size = overlap.get_diagonal_size()
+                        # If the size is equal or greater than the minimum then we join this rect to the group
+                        if size >= minimum:
+                            next_rect = max_rect
+                            break
+                    # Exit the second for loop if we already found a new max_rect
+                    if next_rect:
+                        break
+                # If we found a new rect then keep searching
+                if next_rect:
+                    next_group.append(next_rect)
+                    pool.remove(next_rect)
+                    continue
+                # If there are not more connected rects then we are done
+                # If the number of max rects in this group matches the number of max rects in the respecting region then we are done
+                # It means the whole respecting region grid is to be returned (which may be self, so no change would be done)
+                if len(next_group) == len(respecting_region.max_rects):
+                    return respecting_region
+                # Append the current group to the groups list. Save only the minimum rects as a grid
+                minimum_rects = list(set(sum([ max_rect[1] for max_rect in next_group ], [])))
+                minimum_region = Grid(minimum_rects) 
+                minimum_regions.append(minimum_region)
+                break
+        # DANI: Esto no se ha provado
+        print('DANI: Hay más de una minimum region, comprueba que todo esté bien')
+        # At this point must be always more than one minimum region
+        # Sort minimum regions by area (bigger goes first)
+        minimum_regions.sort(key=lambda x: x.area, reverse=True)
+        # Return the bigger minimum region
+        return minimum_regions[0]
+
     # One by one for each *available rectangle, where available rectangles are the splitted rectangles
     # Get as many rectanges as possible which are connected horizontally to the current rectangle
     # Get as many rows of rectangles as possible which are connected vertically to all previous rectangles
     # Consider all previous rectangles as a single rectange
     # Repeat in the inverse order (first vertically, then horizontally)
     # Remove all previous rectangles from the *available rectangles list
-    def find_maximum_rectangles(self) -> List[Rect]:
-
-        # Set a function to merge multiple rects into a single big rect
-        # Do it by finding the most maximum x and y values
-        def merge_rectangles(rects):
-            min_x_min = min([ rect.x_min for rect in rects ])
-            min_y_min = min([ rect.y_min for rect in rects ])
-            max_x_max = max([ rect.x_max for rect in rects ])
-            max_y_max = max([ rect.y_max for rect in rects ])
-            return Rect(min_x_min, min_y_min, max_x_max, max_y_max)
+    # Returned maximum rectangles contain both the overall maximum rectangle and the contained rectangles on it
+    def find_maximum_rectangles (self) -> List[ Tuple [ Rect, List[Rect] ] ]:
 
         # Trace which rectangles have been already checked both horizontally and vertically to avoid repeating
         for rect in self.rects:
@@ -2420,7 +2502,7 @@ class Grid:
             maximum_rect = merge_rectangles(group)
             # Add the new maximum rectnagle to the list if it is not there already
             if maximum_rect not in maximum_rectangles:
-                maximum_rectangles.append(maximum_rect)
+                maximum_rectangles.append((maximum_rect, group))
 
         # Now repeat the process in the inverse order (first vertically, then horizontally)
         for rect in self.rects:
@@ -2469,7 +2551,7 @@ class Grid:
             maximum_rect = merge_rectangles(group)
             # Add the new maximum rectnagle to the list if it is not there already
             if maximum_rect not in maximum_rectangles:
-                maximum_rectangles.append(maximum_rect)
+                maximum_rectangles.append((maximum_rect, group))
 
         return maximum_rectangles
 
@@ -2479,16 +2561,6 @@ class Grid:
     # Remove all previous rectangles from the *available rectangles list
     # Returned rows contain both the overall row rectangle and the contained rectangles in the row
     def find_rows(self) -> List[ Tuple [ Rect, List[Rect] ] ]:
-
-        # Set a function to merge multiple rects in a row into a single big rect
-        # Do it by finding the most maximum x and y values
-        # Note that all rects will match in both min and max y values
-        def merge_rectangles(rects):
-            min_x_min = min([ rect.x_min for rect in rects ])
-            min_y_min = rects[0].y_min
-            max_x_max = max([ rect.x_max for rect in rects ])
-            max_y_max = rects[0].y_max
-            return Rect(min_x_min, min_y_min, max_x_max, max_y_max)
 
         # Trace which rectangles have been already checked both horizontally and vertically to avoid repeating
         for rect in self.rects:
@@ -2522,7 +2594,7 @@ class Grid:
             for rect in row:
                 rect.check = True
             # Merge all rectangles in row
-            row_rectangle = merge_rectangles(row)
+            row_rectangle = merge_row_rectangles(row)
             # Save both the final row rectangle and the rectangles contained in the row
             rows.append((row_rectangle, row))
 
@@ -2534,16 +2606,6 @@ class Grid:
     # Remove all previous rectangles from the *available rectangles list
     # Returned columns contain both the overall column rectangle and the contained rectangles in the column
     def find_columns(self) -> List[ Tuple [ Rect, List[Rect] ] ]:
-
-        # Set a function to merge multiple rects in a column into a single big rect
-        # Do it by finding the most maximum x and y values
-        # Note that all rects will match in both min and max x values
-        def merge_rectangles(rects):
-            min_x_min = rects[0].x_min
-            min_y_min = min([ rect.y_min for rect in rects ])
-            max_x_max = rects[0].x_max
-            max_y_max = max([ rect.y_max for rect in rects ])
-            return Rect(min_x_min, min_y_min, max_x_max, max_y_max)
 
         # Trace which rectangles have been already checked both horizontally and vertically to avoid repeating
         for rect in self.rects:
@@ -2577,7 +2639,7 @@ class Grid:
             for rect in column:
                 rect.check = True
             # Merge all rectangles in column
-            column_rectangle = merge_rectangles(column)
+            column_rectangle = merge_column_rectangles(column)
             columns.append((column_rectangle, column))
 
         return columns
@@ -2656,6 +2718,35 @@ def sort_by_y (point : Point) -> number:
 # Point sorter for points in a same line (otherwise it makes not sense)
 def sort_points (points : List[Point]) -> List[Point]:
     return sorted( sorted( points, key=sort_by_x), key=sort_by_y)
+
+# Set a function to merge multiple rects into a single big rect
+# Do it by finding the most maximum x and y values
+def merge_rectangles (rects : List[Rect]) -> Rect:
+    min_x_min = min([ rect.x_min for rect in rects ])
+    min_y_min = min([ rect.y_min for rect in rects ])
+    max_x_max = max([ rect.x_max for rect in rects ])
+    max_y_max = max([ rect.y_max for rect in rects ])
+    return Rect(min_x_min, min_y_min, max_x_max, max_y_max)
+
+# Set a function to merge multiple rects in a row into a single big rect
+# Do it by finding the most maximum x and y values
+# Note that all rects will match in both min and max y values
+def merge_row_rectangles (rects : List[Rect]) -> Rect:
+    min_x_min = min([ rect.x_min for rect in rects ])
+    min_y_min = rects[0].y_min
+    max_x_max = max([ rect.x_max for rect in rects ])
+    max_y_max = rects[0].y_max
+    return Rect(min_x_min, min_y_min, max_x_max, max_y_max)
+
+# Set a function to merge multiple rects in a column into a single big rect
+# Do it by finding the most maximum x and y values
+# Note that all rects will match in both min and max x values
+def merge_column_rectangles (rects : List[Rect]) -> Rect:
+    min_x_min = rects[0].x_min
+    min_y_min = min([ rect.y_min for rect in rects ])
+    max_x_max = rects[0].x_max
+    max_y_max = max([ rect.y_max for rect in rects ])
+    return Rect(min_x_min, min_y_min, max_x_max, max_y_max)
 
 # Given a group of segments which must be in the same line, merged them into bigger segments when connected
 def merge_inline_segments (segments : List[Segment]) -> List[Segment]:

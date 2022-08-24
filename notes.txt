@@ -1,8 +1,12 @@
 RAM
 
-- tiene que encontrar el pasillo
-	* construir el pasillo persé
-		-> a veces quedan rincocnillos, hay que darle una vuelta
+- que cuando expandes sobre una puerta esta intente recolocarse antes de impedir el push
+
+- reduce corners
+	* estrategia de emergencias (pesada pero robusta):
+		reducir las habitaciones afectadas a sus minimos de tamaño junto a la perua
+		volver a rellenar
+	* reduce corners para zigzags se solo dos colores entre habitaciones hermanas
 
 - que en caso de no haber perímetro fijado en el padre coloque las habitaciones libremente
 	** se puede utilizar esto a nuestro favor para que todo cuadre super bien
