@@ -9,7 +9,8 @@ from math import sqrt, inf
 
 # Set the seed and print it
 seed = None
-seed = 304072 # Una habitación queda con una región que no respecta el tamaño mínimo después de que se instale el pasillo
+#seed = 304072 # Una habitación queda con una región que no respecta el tamaño mínimo después de que se instale el pasillo
+seed = 404619
 if not seed:
     seed = round(random.random() * 999999)
 print('Seed ' + str(seed))
@@ -283,6 +284,47 @@ class Door:
                 suitable_segments.append(suitable_segment)
         return suitable_segments, suitable_points
 
+    # Relocate self door in a suitable region in contact with the parent corridor
+    # Find suitable regions in the room boundaries which contact the corridor
+    def relocate (self) -> bool:
+        if not self.room or not self.width:
+            return False
+        parent_room = self.room.parent
+        # If there is no parent (i.e. room is the root) then the parent corridor is not a restriction
+        parent_corridor = parent_room.corridor if parent_room else None
+        # Get self corridor, in case it exists
+        self_corridor = self.room.corridor
+        # Get the available corridors
+        corridors = [ corridor for corridor in [ parent_corridor, self_corridor ] if corridor != None ]
+        # Get the available segments to place the door
+        # Regions where the exterior polygon of the door room and all its corridors converge
+        exterior_polygon = self.room.boundary.exterior_polygon
+        available_segments = exterior_polygon.segments
+        for corridor in corridors:
+            available_segments = corridor.boundary.exterior_polygon.get_segments_overlap_segments(available_segments)
+        # If there are not available segments at this point then we can not relocate the door
+        if len(available_segments) == 0:
+            return False
+        # Find suitable regions to place the door according to its size and margins among the available segments
+        suitable_segments, suitable_points = self.find_suitable_regions(available_segments)
+        if len(suitable_segments) == 0 and len(suitable_points) == 0:
+            return False
+        # Reduce to suitable points
+        suitable_points += sum([ list(segment.points) for segment in suitable_segments ], [])
+        # Now priorize those suitable regions which are a better placement for the door
+        # The ideal place is which makes the open door to stay next to a wall
+        def sort_by_distance_to_wall (point : Point) -> number:
+            polygon_segment = exterior_polygon.get_border_element(point)
+            corners = [ exterior_polygon.get_corner(p) for p in polygon_segment.points ]
+            outside_corners = [ corner for corner in corners if not corner.inside ]
+            if len(outside_corners) == 0:
+                return inf
+            corner_distances = [ point.get_distance_to(corner) for corner in outside_corners ]
+            return min(corner_distances)
+        suitable_points.sort(key=sort_by_distance_to_wall)
+        # Set the most suitable point as the current door point
+        # Note that setting the point already resets the segment, the pivot, etc.
+        self.point = suitable_points[0]
         
 # A room is a smart boundary that may contain other boundaries with conservative areas and size restrictions
 class Room:
@@ -388,7 +430,7 @@ class Room:
         self.door_args = door_args
         # Save input doors
         # If there is no input doors set a single defualt door
-        self.doors = doors if doors else [ Door() ]
+        self.doors = doors if doors != None else [ Door() ]
         # Set each door room
         for door in self.doors:
             door.room = self
@@ -672,6 +714,16 @@ class Room:
         # If there is a limit of corners in the room (i.e. this is the root room) then reshape children boundaries now
         if self.max_corners:
             self.reduce_corners()
+        # Reshaped children boundaries to reduce unnecessary corners as well
+        self.reduce_children_corners()
+
+        # Relocate the doors to the most suitable placement now that boundaries will change no more
+        for child in self.children:
+            for door in child.doors:
+                door.relocate()
+
+        # Show the relocated doors
+        self.update_display()
 
         # Set children boundaries recurisvely if the recursive flag was passed
         if recursive:
@@ -747,7 +799,7 @@ class Room:
             # Find the point in the current exterior polygon which is close to any point in the current corridor
             # Note that this point may not be a corner in the exterior polygon
             minimum_distance_point = None
-            # If we find a point in the polygon which is already in the corrdior then we are done
+            # If we find a point in the polygon which is already in the corridor then we are done
             common_point = next(( point for point in exterior_polygon_segment_points if point in corridor_points ), None)
             if common_point:
                 minimum_distance_point = common_point
@@ -1060,7 +1112,7 @@ class Room:
         # Set the doors which must be reached by the corridor
         # Doors may have a point (i.e. they are already set) or not
         # Doors which have a point must be reached by the corridor
-        # Doors which do not have a point must be set after the corridor and then the corrdior must be expanded to cover them
+        # Doors which do not have a point must be set after the corridor and then the corridor must be expanded to cover them
         doors = sum([ room.doors for room in required_rooms ], [])
         already_set_doors = []
         unset_doors = []
@@ -1425,7 +1477,14 @@ class Room:
         # Set the corridor as a new independen room which will occupy the new freed space
         # This is useful to prevent this space to be claimed back if we further expand the rooms
         # Setting the room will also update he display thus showing the corridor area
-        corridor_room = Room(boundary=corridor_boundary, name=self.name + ' corridor', fill_color=self.fill_color, parent=self, rigid=True)
+        corridor_room = Room(
+            boundary=corridor_boundary,
+            name=self.name + ' corridor',
+            fill_color=self.fill_color,
+            parent=self,
+            rigid=True,
+            doors=[] # To avoid having a ghost default door in the corridor
+        )
         # Do not 'append' the child or you will miss all the 'set_children' logic
         self.children = self.children + [ corridor_room ]
         self.corridor = corridor_room
@@ -1442,7 +1501,7 @@ class Room:
             door_room_boundary = door.room.boundary
             if door.point in door_room_boundary.exterior_polygon:
                 continue
-            # Try to simply push the door as much as the corrdior was expanded
+            # Try to simply push the door as much as the corridor was expanded
             # If it does not work then we relocate the door in any other available segment/point
             suitable_segments = getattr(door, 'suitable_segments', [])
             suitable_points = getattr(door, 'suitable_points', [])
@@ -1482,7 +1541,6 @@ class Room:
                 for room, room_score in room_scores.items():
                     if room_score != score:
                         continue
-                    print(room)
                     connected_rooms = room_connections[room]
                     for connected_room in connected_rooms:
                         connected_room_score = room_scores.get(connected_room, None)
@@ -1490,7 +1548,6 @@ class Room:
                             new_scores[connected_room] = score + 1
                 room_scores = { **room_scores, **new_scores }
                 score += 1
-            print(room_scores)
             # Now sort rooms using previous scores
             def by_score (room : 'Room') -> int:
                 return room_scores[room]
@@ -1502,66 +1559,29 @@ class Room:
                 if not child.fit_to_required_area():
                     raise ValueError(child.name + ' failed to fit to required area after corridor area truncation')
 
-    # Reduce the number oh corners in this room exterior polygon by reshaping children boundaries
+    # Reduce the number of corners in this room exterior polygon by reshaping self and children boundaries
     # This function is meant to run in the root room only
     # Return True if the reduction suceed or False if it failed
     def reduce_corners (self) -> bool:
         exterior_polygon = self.boundary.exterior_polygon
         while len(exterior_polygon.corners) > self.max_corners:
 
-            # Target corners here would be inside corners which are connected to outside corners
-            # Each pairs of corners makes what could be called "zigzag"
-            # The segment between those corners is to be removed and the envolving segments aligned
-            # The shorter the segment between those corners, the smaller the change will be
-            # Note that removing an inside corner means also removing an outside corner in non-diagonal polygons
-            # Note that the final number of corners will always be even in non-diagonal polygons
-            # Note that there will always be a zigzag in non-diagonal polygons with more than 4 corners
+            # Get self zigzags
+            zigzags = get_polygon_zigzags(exterior_polygon)
+            
+            # Check zigzag segments to be modified are not in contact with rigid rooms which must not be modified
+            forbidden_segments = list(set(sum([ child.boundary.exterior_polygon.segments for child in self.children if child.rigid ], [])))
+            def has_rigid_conflict (zigzag : dict) -> bool:
+                modified_segments = [ zigzag['inside_segment'], zigzag['middle_segment'], zigzag['outside_segment'] ]
+                for modified_segment in modified_segments:
+                    for forbidden_segment in forbidden_segments:
+                        overlap = modified_segment.get_overlap_segment(forbidden_segment)
+                        if overlap:
+                            return True
+                return False
 
-            # Get the inside corners
-            inside_corners = exterior_polygon.get_inside_corners()
-            # Each inside corner may have 2 candidate zigzags
-            # For each zigzag, record each corner (inside and outside), the middle segment and the surrounding segments
-            zigzags = []
-            for inside_corner in inside_corners:
-                # If one of the segments in the corner is in contact with a door from this room then we do not expanded
-                conflict_door = False
-                for segment in inside_corner.segments:
-                    if any((door.point in segment) for door in self.doors):
-                        conflict_door = True
-                        break
-                if conflict_door:
-                    continue
-                # Check each of the connected segments
-                for segment in inside_corner.segments:
-                    # Check the other corner in this segment
-                    other_corner_point = segment.get_other_point(inside_corner)
-                    other_corner = exterior_polygon.get_corner(other_corner_point)
-                    # If it is also an inside corner then this is not a zigzag, but a "valley"
-                    if other_corner in inside_corners:
-                        continue
-                    # We have a zigzag
-                    # Get the surrounding segments
-                    inside_corner_other_segment = next(seg for seg in inside_corner.segments if seg != segment)
-                    outside_corner_other_segment = next(seg for seg in other_corner.segments if seg != segment)
-                    # Check segments to be paralel
-                    # For now we only support this situation
-                    if not inside_corner_other_segment.is_paralel_to(outside_corner_other_segment):
-                        print([inside_corner_other_segment, outside_corner_other_segment])
-                        raise ValueError('Zigzag surrounding segments are not in the same line, are there diagonals?')
-                    # Save the zigzag with all its properties
-                    zigzag = {
-                        'inside_corner': inside_corner,
-                        'outside_corner': other_corner,
-                        'middle_segment': segment,
-                        'inside_segment': inside_corner_other_segment,
-                        'outside_segment': outside_corner_other_segment
-                    }
-                    zigzags.append(zigzag)
-
-            # Sort zigzags to get the smallest first
-            def get_zigzag_length (zigzag : dict) -> number:
-                return zigzag['middle_segment'].length
-            zigzags.sort(key=get_zigzag_length)
+            # Filter out those zigzags with conflicts
+            zigzags = [ zigzag for zigzag in zigzags if not has_rigid_conflict(zigzag) ]
 
             # Try to remove corners in the most suitable zigzag
             # If it fails, try with the next one
@@ -1582,8 +1602,8 @@ class Room:
                     print('WARNING: Failed to push ' + str(zigzag['inside_segment']))
                     # There is no need to recover the backup at this point
                     continue
-                if not self.pull_boundary_segment(zigzag['outside_segment'], outside_pull_length):
-                    print('Failed to pull ' + str(zigzag['outside_segment']))
+                if not self.pull_boundary_segment(zigzag['outside_segment'], outside_pull_length, force_child_truncation=True):
+                    print('WARNING: Failed to pull ' + str(zigzag['outside_segment']))
                     # Revert the previous push
                     self.restore_backup(backup)
                     continue
@@ -1620,6 +1640,112 @@ class Room:
             print('WARNING: Failed to reduce corners to ' + str(self.max_corners) + '. Current number: ' + str(current_corners))
             return False
         return True
+
+    # Reduce the number of corners in children exterior polygons by reshaping children boundaries
+    # This can be done only in a very specific situation:
+    #   There must be a zigzag whose segments are fully covered by only one room on each side
+    #   These rooms must be not rigid and not the parent room
+    # Note that this function works in an environment which is not much flexible, so its changes will be limited
+    # It will not return true or false, since this function is expected to fail at some point before reaching the 4 corners
+    def reduce_children_corners (self):
+        # Iterate over children rooms
+        for child in self.children:
+            exterior_polygon = child.boundary.exterior_polygon
+            # DANI: Podría ser > child.max_corners en lugar de > 4, pero eso implicaría que el 4 fuese el por defecto
+            # DANI: O sino implicaría tener que especificar que quieres 4 corners en todos los children
+            while len(exterior_polygon.corners) > 4:
+                # Get self zigzags
+                zigzags = get_polygon_zigzags(exterior_polygon)
+                # Check zigzag segments to be suitable
+                # i.e. all segments fully overlap with the same brother non rigid room
+                # forbidden_contact_rooms = [ self ] + [ child for child in self.children if child.rigid]
+                # forbidden_segments = list(set(sum([ room.boundary.exterior_polygon.segments for room in forbidden_contact_rooms ], [])))
+                free_frontiers, brother_frontiers, parent_frontiers = child.get_frontiers()
+                suitable_frontiers = free_frontiers + brother_frontiers
+                def is_suitable (zigzag : dict) -> bool:
+                    # Check contact with parent or rigid rooms
+                    modified_segments = [ zigzag['inside_segment'], zigzag['middle_segment'], zigzag['outside_segment'] ]
+                    # for modified_segment in modified_segments:
+                    #     for forbidden_segment in forbidden_segments:
+                    #         overlap = modified_segment.get_overlap_segment(forbidden_segment)
+                    #         if overlap:
+                    #             return False
+                    # Check the three segments are among free/conflict frontiers and their frontier rooms match
+                    common_brother_room = None
+                    for modified_segment in modified_segments:
+                        equivalent_frontier = next(( frontier for frontier in suitable_frontiers if frontier == modified_segment ), None)
+                        if not equivalent_frontier:
+                            return False
+                        if len(equivalent_frontier.rooms) > 1:
+                            return False
+                        frontier_room = equivalent_frontier.rooms[0]
+                        if common_brother_room:
+                            if common_brother_room != frontier_room:
+                                return False
+                        else:
+                            common_brother_room = frontier_room
+                    # Add the common room to the dit content
+                    zigzag['room'] = common_brother_room
+                    return True
+
+                # Filter out those zigzags with conflicts
+                zigzags = [ zigzag for zigzag in zigzags if is_suitable(zigzag) ]
+
+                # Try to remove corners in the most suitable zigzag
+                # If it fails, try with the next one
+                # WARNING:
+                # Functions which may fail are smart enought to recover boundary backups in case of failure
+                # However we must backup the self boundary, since we may succeed in several steps and then fail later
+                succeed = False
+                for zigzag in zigzags:
+                    zigzag_room = zigzag['room']
+                    backup = { child: child.boundary, zigzag_room: zigzag_room.boundary }
+                    # Push the inside segment and pull the outside segment
+                    # The push and pull lengths must be calculated to make both segments match while the parent area is kept
+                    area = zigzag['middle_segment'].length * zigzag['outside_segment'].length
+                    new_segment_length = zigzag['inside_segment'].length + zigzag['outside_segment'].length
+                    inside_push_length = area / new_segment_length
+                    outside_pull_length = zigzag['middle_segment'].length - inside_push_length
+                    # Pull before push, so we have enought area to recover after the push
+                    if not child.pull_boundary_segment(zigzag['outside_segment'], outside_pull_length):
+                        print('WARNING: Failed to pull ' + str(zigzag['outside_segment']))
+                        # There is no need to recover the backup at this point
+                        continue
+                    if not child.push_boundary_segment(zigzag['inside_segment'], inside_push_length):
+                        print('WARNING: Failed to push ' + str(zigzag['inside_segment']))
+                        # Revert the previous push
+                        self.restore_backup(backup)
+                        continue
+                    # Relocate children to fit in the new boundary
+                    truncated_children = [ child for child in self.children if not child.is_fit_to_required_area()  ]
+                    child_conflict = False
+                    for child in truncated_children:
+                        # Save a backup of the current child in case we have to recover its boundary later
+                        child_boundary_backup = child.boundary
+                        if not child.fit_to_required_area():
+                            print('Something went wrong while refitting ' + child.name)
+                            child_conflict = True
+                            break
+                        # Now add the child boundary to the backup
+                        # Note that this is not done before since in case of failure the current children is backuped already
+                        backup[child] = child_boundary_backup
+                    # If there was a failure during children relocation then restore the boundary backups and proceed to the next zigzag
+                    if child_conflict:
+                        self.restore_backup(backup)
+                        continue
+                    # If everything was fine then stop here
+                    # Only 1 zigzag may be solved at once
+                    succeed = True
+                    break
+
+                # If we succeeded to remove one of the corners then we continue
+                if succeed:
+                    # Recalculate the exterior polygon
+                    exterior_polygon = child.boundary.exterior_polygon
+                    continue
+
+                # If there are not more suitable zigzags or the current ones failed to collapse then we stop here
+                break
 
     # Get the minimum of all children minimum sizes
     # Get to the the root and the check all children min sizes recuersively in order to get the minimum
@@ -1949,7 +2075,7 @@ class Room:
         # Get the claimed region from each region
         for room in rooms:
             # If we claimed parent (free) space there is no need to check anything
-            if room == parent_room:
+            if room == self.parent:
                 continue
             # Get the overlapping region between the invaded region and each affected room boundary
             current_room_invaded_regions = room.grid.get_overlap_grid(invaded_region)
@@ -1965,7 +2091,7 @@ class Room:
     # Pull a segment in the boundary
     # Check everything is fine after the pull and, if so, return True
     # In case there is any problem the pull is not done and this function returns False
-    def pull_boundary_segment (self, segment : Segment, pull_length : number) -> bool:
+    def pull_boundary_segment (self, segment : Segment, pull_length : number, force_child_truncation : bool = False) -> bool:
         # Get the pull durection
         direction = self.boundary.exterior_polygon.get_border_inside(segment)
         # If the pull length at this point is 0 or close to it then we can not pull
@@ -1997,7 +2123,7 @@ class Room:
         for child in self.children:
             # Save a backup of the current child in case we have to recover its boundary later
             child_boundary_backup = child.boundary
-            if not child.truncate(removed_region):
+            if not child.truncate(removed_region, force=force_child_truncation):
                 # If the truncate process failed then restore backups and return True
                 self.restore_backup(backup)
                 return False
@@ -2224,7 +2350,6 @@ class Room:
                         return push_segment(pushed_segment, 2)
                     return False
             if expanding_parent_grid:
-                print('Pushing parent')
                 parent_room.push_boundary_segment(pushed_segment, push_length)
             return True
                 
@@ -2866,3 +2991,50 @@ def generate_path_boundary (path : List['Segment'], size : Union[number, Callabl
         raise ValueError('There should be only 1 polygon at this point')
     path_boundary = Boundary(polygons[0])
     return path_boundary
+
+# Target corners here would be inside corners which are connected to outside corners
+# Each pairs of corners makes what could be called "zigzag"
+# The segment between those corners is to be removed and the envolving segments aligned
+# The shorter the segment between those corners, the smaller the change will be
+# Note that removing an inside corner means also removing an outside corner in non-diagonal polygons
+# Note that the final number of corners will always be even in non-diagonal polygons
+# Note that there will always be a zigzag in non-diagonal polygons with more than 4 corners
+def get_polygon_zigzags (polygon : Polygon) -> List[dict]:
+    # Get the inside corners
+    inside_corners = polygon.get_inside_corners()
+    # Each inside corner may have 2 candidate zigzags
+    # For each zigzag, record each corner (inside and outside), the middle segment and the surrounding segments
+    zigzags = []
+    for inside_corner in inside_corners:
+        # Check each of the connected segments
+        for segment in inside_corner.segments:
+            # Check the other corner in this segment
+            other_corner_point = segment.get_other_point(inside_corner)
+            other_corner = polygon.get_corner(other_corner_point)
+            # If it is also an inside corner then this is not a zigzag, but a "valley"
+            if other_corner in inside_corners:
+                continue
+            # We have a zigzag
+            # Get the surrounding segments
+            inside_corner_other_segment = next(seg for seg in inside_corner.segments if seg != segment)
+            outside_corner_other_segment = next(seg for seg in other_corner.segments if seg != segment)
+            # Check segments to be paralel
+            # For now we only support this situation
+            if not inside_corner_other_segment.is_paralel_to(outside_corner_other_segment):
+                print([inside_corner_other_segment, outside_corner_other_segment])
+                raise ValueError('Zigzag surrounding segments are not in the same line, are there diagonals?')
+            # Save the zigzag with all its properties
+            zigzag = {
+                'inside_corner': inside_corner,
+                'outside_corner': other_corner,
+                'middle_segment': segment,
+                'inside_segment': inside_corner_other_segment,
+                'outside_segment': outside_corner_other_segment
+            }
+            zigzags.append(zigzag)
+
+    # Sort zigzags to get the smallest first
+    def get_zigzag_length (zigzag : dict) -> number:
+        return zigzag['middle_segment'].length
+    zigzags.sort(key=get_zigzag_length)
+    return zigzags

@@ -96,8 +96,11 @@ def represent (queue):
         previous_slider_value = slider_value
 
         # Clear previous segments and rects
-        #ax.segments = []
         ax.clear()
+
+        # Make axes respect the 1:1 ration
+        # Otherwise the whole image is deformed in case there is a dmension larger than the other
+        ax.axes.set_aspect('equal')
 
         # In case something went wrong in the solving process and there are no frames from the begining
         # Prevent error logs from the display to be shown in the console
