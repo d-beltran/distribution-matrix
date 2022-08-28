@@ -145,6 +145,24 @@ class Door:
             raise ValueError('The door segment (' + str(Segment(a,b)) + ') does not fit in its room polygon (' + self.room.name + ')')
         return Segment(a,b)
 
+    # Make a backup of the current door
+    def make_backup (self) -> dict:
+        return {
+            'point': self._point,
+            'segment': self._segment,
+            'margined_segment': self._margined_segment,
+            'direction': self._direction,
+            'pivot': self._pivot
+        }
+
+    # Restore a backup
+    def restore_backup (self, backup : dict):
+        self._point = backup['point']
+        self._segment = backup['segment']
+        self._margined_segment = backup['margined_segment']
+        self._direction = backup['direction']
+        self._pivot = backup['pivot']
+
     # Generate a rect containing the minimum required space for this door
     # If inside is true (default) then the rect in the inside side of the room is returned
     # Otherwise the outside side rect is returned
@@ -286,7 +304,8 @@ class Door:
 
     # Relocate self door in a suitable region in contact with the parent corridor
     # Find suitable regions in the room boundaries which contact the corridor
-    def relocate (self) -> bool:
+    # The polygon to place the door is the room polygon by default, but a custom polygon may be passed
+    def relocate (self, polygon : Optional[Polygon] = None) -> bool:
         if not self.room or not self.width:
             return False
         parent_room = self.room.parent
@@ -298,8 +317,8 @@ class Door:
         corridors = [ corridor for corridor in [ parent_corridor, self_corridor ] if corridor != None ]
         # Get the available segments to place the door
         # Regions where the exterior polygon of the door room and all its corridors converge
-        exterior_polygon = self.room.boundary.exterior_polygon
-        available_segments = exterior_polygon.segments
+        available_polygon = polygon if polygon else self.room.boundary.exterior_polygon
+        available_segments = available_polygon.segments
         for corridor in corridors:
             available_segments = corridor.boundary.exterior_polygon.get_segments_overlap_segments(available_segments)
         # If there are not available segments at this point then we can not relocate the door
@@ -314,8 +333,8 @@ class Door:
         # Now priorize those suitable regions which are a better placement for the door
         # The ideal place is which makes the open door to stay next to a wall
         def sort_by_distance_to_wall (point : Point) -> number:
-            polygon_segment = exterior_polygon.get_border_element(point)
-            corners = [ exterior_polygon.get_corner(p) for p in polygon_segment.points ]
+            polygon_segment = available_polygon.get_border_element(point)
+            corners = [ available_polygon.get_corner(p) for p in polygon_segment.points ]
             outside_corners = [ corner for corner in corners if not corner.inside ]
             if len(outside_corners) == 0:
                 return inf
@@ -325,6 +344,7 @@ class Door:
         # Set the most suitable point as the current door point
         # Note that setting the point already resets the segment, the pivot, etc.
         self.point = suitable_points[0]
+        return True
         
 # A room is a smart boundary that may contain other boundaries with conservative areas and size restrictions
 class Room:
@@ -2606,6 +2626,25 @@ class Room:
                 return False
         return True
 
+    # Relocate doors in a new (truncated) grid
+    # Return True if the relocation succed or False if it failed
+    def relocate_doors (self, truncated_boundary : Boundary) -> bool:
+        # Make a backup in case any door fails to relocate
+        door_backups = { door: door.make_backup() for door in self.doors }
+        # Get the truncated grid polygon
+        truncated_polygon = truncated_boundary.exterior_polygon
+        # Relocate each door
+        succeed = True
+        for door in self.doors:
+            if not door.relocate(truncated_polygon):
+                succeed = False
+                break
+        # Restore the backups in case something went wrong
+        if not succeed:
+            for door, backup in door_backups.items():
+                door.restore_backup(backup)
+        return succeed
+
     # Remove part of the room space and check everything is fine after
     # Use the force argument to skip all checkings and simply truncate the boundary
     # Use the skip_update_display to avoid this truncate to generate a display frame
@@ -2622,15 +2661,18 @@ class Room:
         elif not truncated_grid.check_minimum(self.preventive_min_size):
             print('WARNING: The room is not respecting the minimum size -> Go back')
             return False
-        # Check doors to be respected
-        if not force and not self.check_doors(truncated_grid):
-            print('WARNING: The room is not respecting door spaces -> Go back')
-            return False
         truncated_boundaries = truncated_grid.find_boundaries()
         # In case the room has been splitted in 2 parts as a result of the invasion we go back
         if not force and len(truncated_boundaries) > 1:
             print('WARNING: The room has been splitted -> Go back')
             return False
+        truncated_boundary = truncated_boundaries[0]
+        # Check doors to be respected
+        if not force and not self.check_doors(truncated_grid):
+            print('WARNING: Door conflict -> Relocating doors')
+            if not self.relocate_doors(truncated_boundary):
+                print('WARNING: The room is not respecting door spaces -> Go back')
+                return False
         # DANI: Es posible que se coma toda la habitación??
         if not force and len(truncated_boundaries) == 0:
             print('WARNING: The invaded room has been fully consumed -> Go back')
