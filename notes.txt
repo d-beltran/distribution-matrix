@@ -1,11 +1,5 @@
 RAM
 
-- que cuando expandes sobre una puerta esta intente recolocarse antes de impedir el push
-
-- reduce corners
-	* reduce corners para zigzags de solo dos colores entre habitaciones hermanas
-
-
 Largo plazo:
 
 - Puertas y pasillos

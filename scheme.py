@@ -9,8 +9,8 @@ from math import sqrt, inf
 
 # Set the seed and print it
 seed = None
-#seed = 304072 # Una habitación queda con una región que no respecta el tamaño mínimo después de que se instale el pasillo
-seed = 404619
+seed = 304072 # Una habitación queda con una región que no respecta el tamaño mínimo después de que se instale el pasillo
+#seed = 404619
 if not seed:
     seed = round(random.random() * 999999)
 print('Seed ' + str(seed))
@@ -482,10 +482,10 @@ class Room:
             # Check areas of all children rooms to do not sum up more than the parent area
             # In addition check if any of the children room has boundary and, if so, check the boundary is inside the parent
             children_area = sum([ child.forced_area for child in self.children ])
-            if self.area and children_area > self.area + minimum_resolution:
+            if self.area and greater(children_area, self.area):
                 raise InputError('Children together require more area than the parent has')
             # In case children do not cover the whole parent area set a new dummy room to cover this free area first
-            if children_area < self.forced_area - minimum_resolution:
+            if lower(children_area, self.forced_area):
                 remaining_area = self.forced_area - children_area
                 dummy_room_name = self.name + ' (free)'
                 dummy_room = Room(forced_area=remaining_area, min_size=self.min_size, name=dummy_room_name, fill_color=self.fill_color)
@@ -1670,6 +1670,9 @@ class Room:
     def reduce_children_corners (self):
         # Iterate over children rooms
         for child in self.children:
+            # Skip rigid children
+            if child.rigid:
+                continue
             exterior_polygon = child.boundary.exterior_polygon
             # DANI: Podría ser > child.max_corners en lugar de > 4, pero eso implicaría que el 4 fuese el por defecto
             # DANI: O sino implicaría tener que especificar que quieres 4 corners en todos los children
@@ -1678,18 +1681,11 @@ class Room:
                 zigzags = get_polygon_zigzags(exterior_polygon)
                 # Check zigzag segments to be suitable
                 # i.e. all segments fully overlap with the same brother non rigid room
-                # forbidden_contact_rooms = [ self ] + [ child for child in self.children if child.rigid]
-                # forbidden_segments = list(set(sum([ room.boundary.exterior_polygon.segments for room in forbidden_contact_rooms ], [])))
                 free_frontiers, brother_frontiers, parent_frontiers = child.get_frontiers()
                 suitable_frontiers = free_frontiers + brother_frontiers
                 def is_suitable (zigzag : dict) -> bool:
                     # Check contact with parent or rigid rooms
                     modified_segments = [ zigzag['inside_segment'], zigzag['middle_segment'], zigzag['outside_segment'] ]
-                    # for modified_segment in modified_segments:
-                    #     for forbidden_segment in forbidden_segments:
-                    #         overlap = modified_segment.get_overlap_segment(forbidden_segment)
-                    #         if overlap:
-                    #             return False
                     # Check the three segments are among free/conflict frontiers and their frontier rooms match
                     common_brother_room = None
                     for modified_segment in modified_segments:
@@ -2263,7 +2259,7 @@ class Room:
             # Find out how much we can push this segment
             # i.e. find the connected frontier/s and get the maximum length of these segments
             corner_push_limit = None
-            if pushed_segment.length < self.preventive_min_size - minimum_resolution:
+            if lower(pushed_segment.length, self.preventive_min_size):
                 other_segments = [ segment for segment in exterior_polygon.segments if pushed_segment not in segment]
                 for point in pushed_segment.points:
                     if point in inside_corners:

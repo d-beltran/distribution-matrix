@@ -43,9 +43,13 @@ def resolute(num, base_offset = 0):
 # Calculate the minimum resolution
 # i.e. changes below this resolution make no sense
 minimum_resolution = 1 / 10 ** base_resolution
-# Set a function to compare float equality according to the minimum resolution
+# Set functions to compare float according to the minimum resolution
 def equal (a : float, b : float) -> bool:
     return a < b + minimum_resolution and a > b - minimum_resolution
+def greater (a : float, b : float) -> bool:
+    return a > b + minimum_resolution
+def lower (a : float, b : float) -> bool:
+    return a < b - minimum_resolution
 
 # Set another function to check if two numbers are very close, out of resolution matters
 # We do the double check because the 'isclose' function may fail for values close to 0
@@ -2334,10 +2338,10 @@ class Grid:
             rect = max_rect[0]
             x_size, y_size = rect.get_size()
             # If there is at least one maximum rectangle which does not respect minimum size in both x and y dimensions then it is wrong
-            if x_size < minimum and y_size < minimum:
+            if lower(x_size, minimum) and lower(y_size, minimum):
                 return False
             # Ignore rectangles which respect size only in one dimension
-            if x_size < minimum or y_size < minimum:
+            if lower(x_size, minimum) or lower(y_size, minimum):
                 continue
             # For all rectangles which respect size in both dimensions,
             # Find their free borders: border regions which are not overlapping with the grid boundaries
@@ -2348,7 +2352,7 @@ class Grid:
             # Check free borders to respect the minimum size
             for s, segment in enumerate(free_borders):
                 # If the segment is wide enough then skip it
-                if segment.length >= minimum:
+                if not lower(segment.length, minimum):
                     continue
                 # If the segment is not wide enough it may make a corner with other free regions thus beeing correct
                 # Find out if the free border is making a corner
