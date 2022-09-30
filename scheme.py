@@ -9,8 +9,9 @@ from math import sqrt, inf
 
 # Set the seed and print it
 seed = None
-seed = 304072 # Una habitación queda con una región que no respecta el tamaño mínimo después de que se instale el pasillo
-#seed = 404619
+#seed = 304072 # Una habitación queda con una región que no respecta el tamaño mínimo después de que se instale el pasillo
+#seed = 404619 # Ahora va bien
+seed = 210537 # Huequecillos entre pasillo y padre
 if not seed:
     seed = round(random.random() * 999999)
 print('Seed ' + str(seed))
