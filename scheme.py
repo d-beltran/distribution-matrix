@@ -11,7 +11,8 @@ from math import sqrt, inf
 seed = None
 #seed = 304072 # Una habitación queda con una región que no respecta el tamaño mínimo después de que se instale el pasillo
 #seed = 404619 # Ahora va bien
-seed = 210537 # Huequecillos entre pasillo y padre
+#seed = 210537 # Huequecillos entre pasillo y padre
+seed = 838807 # No se respeta un minimum size
 if not seed:
     seed = round(random.random() * 999999)
 print('Seed ' + str(seed))
@@ -1980,6 +1981,10 @@ class Room:
         # Then use this value to set the "score" of each brother room frontiers and sort them
         def sort_by_shortest_path (frontiers_group : list) -> list:
             colliding_rooms = unique([ frontier.rooms[0] for frontier in frontiers_group ])
+            # WARNING: We must shuffle the colliding rooms at this point
+            # Otherwise frontiers from the same room are always returned first
+            # This has been observed experimentally
+            random.shuffle(colliding_rooms)
             meaningful_frontiers = []
             for colliding_room in colliding_rooms:
                 previous_rooms = [ self ]
@@ -2058,6 +2063,13 @@ class Room:
         # If the push length at this point is 0 or close to it then we can not push
         if push_length < minimum_resolution:
             return False
+        # Get the parent room
+        parent_room = self.parent
+        # Check if the segment to be pushed is in the parent boundary
+        # If it is, then we can not push it
+        # You must push the parent boundary first
+        if parent_room and next(parent_room.boundary.exterior_polygon.get_segment_overlap_segments(segment), None):
+            return False
         # Create the new rect with the definitive length
         new_point = segment.a + direction.normalized() * push_length
         new_side = Segment(segment.a, new_point)
@@ -2080,19 +2092,19 @@ class Room:
         # We must substract the claimed rect from the other room and make it expand to compensate
         # Make a backup of the current boundary in case the further expansions fail an we have to go back
         backup_boundary = self.boundary
-        self.boundary = new_boundary
+        self.set_boundary(new_boundary)
         # Substract the claimed rect from other rooms
         invaded_region = Grid([new_rect])
         # Make a backup of all other room current boundaries
         rooms = []
-        if self.parent:
-            rooms.append(self.parent)
-            rooms += [ room for room in self.parent.children if room != self ]
+        if parent_room:
+            rooms.append(parent_room)
+            rooms += [ room for room in parent_room.children if room != self ]
         backup_room_boundaries = [ room.boundary for room in rooms ]
         # Get the claimed region from each region
         for room in rooms:
             # If we claimed parent (free) space there is no need to check anything
-            if room == self.parent:
+            if room == parent_room:
                 continue
             # Get the overlapping region between the invaded region and each affected room boundary
             current_room_invaded_regions = room.grid.get_overlap_grid(invaded_region)
@@ -2345,7 +2357,7 @@ class Room:
             #          The recently pushed segments must remain as they are
             #          They do not exist for other rooms so me must exlcude them during the fitting to avoid inconsistency
             if protocol == 3 and self.get_required_area() < 0:
-                #print('LOANED PUSH -> NEW REQUIRED AREA: ' + str(self.get_required_area()))
+                print('LOANED PUSH -> NEW REQUIRED AREA: ' + str(self.get_required_area()))
                 if not self.fit_to_required_area(restricted_segments=new_segments):
                     self.boundary = backup_boundary
                     for i, modified_room in enumerate(rooms):

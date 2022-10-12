@@ -23,6 +23,10 @@ Largo plazo:
 
 FONDO (opcional, poco prioritario)
 
+- el reduce children corner no contempla la posibilidad de que el zigzag esté en el parent boundary
+	* el push_boundary_segment si que lo contempla e impide que suceda, pero igual habría que matarlo antes
+		** o plantearse un sistema alternativo para que si pueda pasar? habría que pushear/pullear la parent boundary antes del child
+
 - expand corner
 	* solucionará uno de los problemas más habituales de la cruz
 	* intentar que las habitaciones sean más cuadradas
