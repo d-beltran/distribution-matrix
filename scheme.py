@@ -11,8 +11,8 @@ from math import sqrt, inf
 seed = None
 #seed = 304072 # Una habitación queda con una región que no respecta el tamaño mínimo después de que se instale el pasillo
 #seed = 404619 # Ahora va bien
-#seed = 210537 # Huequecillos entre pasillo y padre
-seed = 838807 # No se respeta un minimum size
+seed = 210537 # Huequecillos entre pasillo y padre
+#seed = 838807 # No se respeta un minimum size
 if not seed:
     seed = round(random.random() * 999999)
 print('Seed ' + str(seed))
@@ -1718,19 +1718,47 @@ class Room:
                 for zigzag in zigzags:
                     zigzag_room = zigzag['room']
                     backup = { child: child.boundary, zigzag_room: zigzag_room.boundary }
+                    # Get the zigzag segments
+                    inside_segment = zigzag['inside_segment']
+                    middle_segment = zigzag['middle_segment']
+                    outside_segment = zigzag['outside_segment']
                     # Push the inside segment and pull the outside segment
                     # The push and pull lengths must be calculated to make both segments match while the parent area is kept
-                    area = zigzag['middle_segment'].length * zigzag['outside_segment'].length
-                    new_segment_length = zigzag['inside_segment'].length + zigzag['outside_segment'].length
+                    area = middle_segment.length * outside_segment.length
+                    new_segment_length = inside_segment.length + outside_segment.length
                     inside_push_length = area / new_segment_length
-                    outside_pull_length = zigzag['middle_segment'].length - inside_push_length
+                    outside_pull_length = middle_segment.length - inside_push_length
                     # Pull before push, so we have enought area to recover after the push
-                    if not child.pull_boundary_segment(zigzag['outside_segment'], outside_pull_length):
-                        print('WARNING: Failed to pull ' + str(zigzag['outside_segment']))
-                        # There is no need to recover the backup at this point
-                        continue
-                    if not child.push_boundary_segment(zigzag['inside_segment'], inside_push_length):
-                        print('WARNING: Failed to push ' + str(zigzag['inside_segment']))
+                    if not child.pull_boundary_segment(outside_segment, outside_pull_length):
+                        print('WARNING: Failed to pull ' + str(outside_segment))
+                        # Before we give up we try to pull a more conservative distance
+                        # It may happen that the resulting grid is not respecting the minimum size
+                        # This will never happen if we pull the segment to align it to its closer paralel neighbour segment
+                        other_outside_corner_point = next( point for point in outside_segment.points if point != zigzag['outside_corner'] )
+                        other_outside_corner = exterior_polygon.get_corner(other_outside_corner_point)
+                        # If the other corner is an inside corner then we can not do the trick
+                        if other_outside_corner.inside:
+                            # There is no need to recover the backup at this point
+                            continue
+                        other_outside_segment = next( segment for segment in other_outside_corner.segments if segment != outside_segment )
+                        # The safe pull distance cannot be larger that the default distance if this was the problem
+                        # In this case, it means the previous pull failed for other reason and not the minimum size
+                        safe_pull_length = other_outside_segment.length
+                        if safe_pull_length >= outside_pull_length:
+                            # There is no need to recover the backup at this point
+                            continue
+                        # Now if we reduce the pull length we must also reduce the push length
+                        reduction = safe_pull_length / outside_pull_length
+                        inside_push_length = inside_push_length * reduction
+                        # Now we are ready to try to pull again
+                        # If it fails again then the problem was not the minimum size
+                        print('     Retrying safe pull')
+                        if not child.pull_boundary_segment(outside_segment, safe_pull_length):
+                            print('     Safe pull failed as well')
+                            # There is no need to recover the backup at this point
+                            continue
+                    if not child.push_boundary_segment(inside_segment, inside_push_length):
+                        print('WARNING: Failed to push ' + str(inside_segment))
                         # Revert the previous push
                         self.restore_backup(backup)
                         continue
@@ -2141,6 +2169,9 @@ class Room:
         # Join all previous segments to make the new polygon
         new_exterior_polygon = Polygon.non_canonical([ *added_segments, *remaining_segments ])
         new_boundary = Boundary(new_exterior_polygon, self.boundary.interior_polygons)
+        # Check that the new boundary is respecting the minimum size
+        if not new_boundary.grid.check_minimum(self.preventive_min_size):
+            return False
         # In case the boundary is extended over another room,
         # We must substract the claimed rect from the other room and make it expand to compensate
         # Make a backup of the current boundary in case the further expansions fail an we have to go back
