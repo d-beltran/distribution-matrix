@@ -3,7 +3,7 @@ from scheme import *
 from scheme_display import setup_display
 
 # Import some predefined test polygons
-from test_boundaries import *
+from tests import *
 
 # This is for windows to dont loop
 if __name__ == '__main__':
@@ -44,12 +44,12 @@ if __name__ == '__main__':
                 name='Habitación 1',
                 fill_color='red',
                 children=[
-                    # Room(
-                    #     forced_area='25%',
-                    #     min_size=10,
-                    #     name='Lavabo de habitación',
-                    #     fill_color='purple',
-                    # )
+                    Room(
+                        forced_area='25%',
+                        min_size=10,
+                        name='Lavabo de habitación',
+                        fill_color='purple',
+                    )
                 ]),
             Room(
                 forced_area=1800,
@@ -65,6 +65,8 @@ if __name__ == '__main__':
                 fill_color='green')
         ]
     )
+
+    test = test_room_1
 
     solve(test, display=display)
 

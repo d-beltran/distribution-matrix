@@ -1276,6 +1276,9 @@ class Polygon:
     def __repr__ (self):
         return ', '.join([str(segment) for segment in self.segments])
 
+    def __hash__(self):
+        return hash(tuple(self.segments))
+
     def __lt__(self, other):
         return self.get_box().area < other.get_box().area
 
@@ -1592,6 +1595,13 @@ class Polygon:
                 overall_overlap_segments += overlap_segments
         return list(set(overall_overlap_segments))
 
+    # Check if a segment overlaps self polygon at any region
+    def does_segment_overlap (self, segment : 'Segment') -> bool:
+        overlap = next(self.get_segment_overlap_segments(segment), None)
+        if overlap:
+            return True
+        return False
+
     # Get polygon segments after substracting the overlap region with a list of segments
     def get_non_overlap_segments (self, segments : List[Segment]) -> List[Segment]:
         overall_non_overlap_segments = []
@@ -1825,7 +1835,9 @@ class Boundary:
             rect.color = self.fill_color
         # Set, save and return the grid
         grid = Grid(rects)
-        grid._boundaries = [self]
+        # WARNING: Do not save the current boundary as the _boundaries attribute in the new grid
+        # It seems it is a save of work, but the new grid may produce a different boundary (a preferred one). See figure 2.
+        # i.e. NEVER DO: grid._boundaries = [self]
         self._grid = grid
         return grid
 
@@ -2771,6 +2783,13 @@ def merge_inline_segments (segments : List[Segment]) -> List[Segment]:
             merged_segment = merged_segment.combine_segment(connected_segment)
     return merged_segments
 
+# Given a group of grids, merge them all
+def merge_grids (grids : List[Grid]) -> Grid:
+    final_grid = grids[0]
+    for grid in grids[1:]:
+        final_grid += grid
+    return final_grid
+
 # Find groups of connected segments in a list of segments
 # Yield any closed polygon when it is found
 def connect_segments (segments : List[Segment]) -> Generator[Polygon, None, None]:
@@ -2799,6 +2818,42 @@ def connect_segments (segments : List[Segment]) -> Generator[Polygon, None, None
                 discarded_segments = polygon_segments[0:closing_segment]
                 previous_segments += discarded_segments
                 break
+
+# Given a list of polygons, try to group them by boundaries
+# i.e. polygons which are contained inside other polygons are considered interior polygons of the boundary
+# DANI: No se ha provado en profundidad
+def connect_polygons (polygons : List[Polygon]) -> List[Boundary]:
+    # First of all, for each polygon, find which other polygons are contained inside of it
+    contained_polygons = {}
+    for polygon, other_polygons in otherwise(polygons):
+        contained = []
+        for other in other_polygons:
+            if other in polygon.grid:
+                contained.append(other)
+        contained_polygons[polygon] = contained
+    # Find which polygons are not contained in any other polygon
+    uncontained_polygons = []
+    for polygon in polygons:
+        container = next(( container for container, coontained_polygons in contained_polygons.items() if polygon in coontained_polygons ), None)
+        if not container:
+            uncontained_polygons.append(polygon)
+    # Create a new boundary for each uncontained polygon
+    connected_boundaries = []
+    for exterior_polygon in uncontained_polygons:
+        interior_polygons = contained_polygons[exterior_polygon]
+        # It may happend that we have polygons which are reciprocally inside polygons
+        # In these cases we must generate several boundaries
+        # A polygon which is right inside of an interior polygon is actually an exterior polygon from a new boundary
+        reciprocal_interior_polygons = []
+        for interior_polygon, other_interior_polygons in otherwise(interior_polygons):
+            container = next(( container for container in other_interior_polygons if interior_polygon in contained_polygons[container] ), None)
+            if container:
+                reciprocal_interior_polygons.append(interior_polygon)
+        interior_polygons = [ p for p in interior_polygons if p not in reciprocal_interior_polygons ]
+        new_boundary = Boundary(exterior_polygon, interior_polygons)
+        connected_boundaries.append(new_boundary)
+        connected_boundaries += connect_polygons(reciprocal_interior_polygons)
+    return connected_boundaries
 
 # Get the non overlap segments between a list of segments
 # Segments must all be in the same line
