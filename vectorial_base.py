@@ -1,4 +1,4 @@
-from typing import Union, Optional, List, Tuple, Generator
+from typing import Union, Optional, List, Tuple, Generator, Callable
 
 from scheme_display import add_frame
 
@@ -1213,7 +1213,7 @@ class Polygon:
             # If there are no more available segments return error
             # This may happen in case there was a duplicated segment, which means the polygon is wrong
             if len(available_segments) == 0:
-                add_frame(segments)
+                add_frame(segments, 'Open polygon error')
                 raise cls.open_polygon_error
             # Get the last ordered segment to find which is the next connected segment
             last_ordered_segment = ordered_segments[-1]
@@ -1221,7 +1221,7 @@ class Polygon:
             # Get the segment which is connected with the previous segment
             connected_segment = next((segment for segment in available_segments if last_point in segment.points), None)
             if not connected_segment:
-                add_frame(segments)
+                add_frame(segments, 'Open polygon error')
                 raise cls.open_polygon_error
             # Remove the connected segment from the available 
             available_segments = [ segment for segment in available_segments if segment != connected_segment ]
@@ -1232,7 +1232,7 @@ class Polygon:
             ordered_segments.append(connected_segment)
         # Finally, check that the first segment and the last segment are also connected
         if ordered_segments[0].a != ordered_segments[-1].b:
-            add_frame(segments)
+            add_frame(segments, 'Open polygon error')
             raise cls.open_polygon_error
         segments = ordered_segments
             
@@ -1455,7 +1455,7 @@ class Polygon:
         if abs(angle_count) != 360:
             # If you see this error there may be splitted segments in your polygon
             # Use the non-canonical class method to set your polygon
-            add_frame(self.segments)
+            add_frame(self.segments, 'Wrong polygon error')
             raise RuntimeError('There is something wrong with the polygon')
 
         # Check if are more corners in the counted direction (true) or the other (false)
@@ -1869,7 +1869,7 @@ class Boundary:
                 interior_segments = polygon.segments
                 for segment in interior_segments:
                     segment.color = 'red'
-                add_frame(exterior_segments + interior_segments)
+                add_frame(exterior_segments + interior_segments, 'Interior polygon outside error')
                 raise ValueError('At least one interior polygon is not fully inside the exterior polygon')
 
     # Split the space inside the boundary in a list of rectangles in a grid friendly format
@@ -2922,3 +2922,221 @@ def mark_point (point : Point, color : str = 'black', size : number = 1):
     point_2b = point + Vector(1, 1).normalized() * size
     segment_2 = Segment(point_2a, point_2b, color)
     return segment_1, segment_2
+
+# Given a list of segments (path) return the sum of their lengths
+def get_path_length (path : List['Segment']) -> number:
+    return sum([ segment.length for segment in path ])
+
+# Given a list of segments, set a function to generate a boundary around them
+# Size is the tickness of the new boundary
+# Alternatively, the size may be a function whose input is a segments in the path and a direction
+def generate_path_boundaries (path : List['Segment'], size : Union[number, Callable]) -> List['Boundary']:
+    # Size must be a function
+    # If it is a number then convert it to a function which returns half the size number
+    if not callable(size):
+        half_size = size / 2
+        def size (segment, direction) -> number:
+            return half_size
+    # Generate data for each point between segments (similar to nodes) by recording the connected segments
+    # Generate data for each segment by generating 2 boundary lines
+    point_connected_segments = {}
+    segment_lines = {}
+    for segment in path:
+        # Get the points connected segments
+        points = segment.points
+        for point in points:
+            connected_segments = point_connected_segments.get(point, None)
+            if connected_segments:
+                connected_segments.append(segment)
+            else:
+                point_connected_segments[point] = [segment]
+        # Set the segment boundary lines
+        # Each segment will have 2 lines: one on each side
+        # We call these sides as clockwise and counter-clockwise sides
+        # Each line will be half the size far from the segment
+        segment_direction = segment.direction
+        clockwise_direction = segment_direction.rotate(90)
+        counterclockwise_direction = segment_direction.rotate(-90)
+        clockwise_point = segment.a + clockwise_direction * size(segment, clockwise_direction)
+        counterclockwise_point = segment.a + counterclockwise_direction * size(segment, counterclockwise_direction)
+        clockwise_line = Line(clockwise_point, segment_direction)
+        counterclockwise_line = Line(counterclockwise_point, segment_direction)
+        # Save both lines in a data dictionary
+        data = { 'clockwise': clockwise_line, 'counterclockwise': counterclockwise_line }
+        # Save the data dictionary inside another dictionary where the key is the segment itself
+        segment_lines[segment] = data
+
+    # Join all segment lines together in a dictionary where lines are the keys
+    # Each line value will be a list of intersections which will be set empty at this moment
+    # At the end of the next step each line must have exactly 2 intersections
+    # Note that duplicated lines will remain as a single key
+    line_intersections = {}
+    for lines in segment_lines.values():
+        clockwise_line = lines['clockwise']
+        counterclockwise_line = lines['counterclockwise']
+        for line in [ clockwise_line, counterclockwise_line ]:
+            line_intersections[line] = []
+
+    # Now for each segment in the path get the segments of the boundary
+    # First, segments must be built by finding the intersection point between segment lines
+    boundary_segments = []
+    for point, connected_segments in point_connected_segments.items():
+        # In case we have only 1 connected segment it means this is a death end of the path
+        # In this case we generate a new segment perpendicular to the only segment and which crosses the point itself
+        # This segment will be generated from a line which intersects both of the boundary lines in the only segment
+        if len(connected_segments) == 1:
+            segment = connected_segments[0]
+            # Using the current point as the reference point of view
+            is_segment_pointing_outside = point == segment.a
+            lines = segment_lines[segment]
+            clockwise_line = lines['clockwise'] if is_segment_pointing_outside else lines['counterclockwise']
+            counterclockwise_line = lines['counterclockwise'] if is_segment_pointing_outside else lines['clockwise']
+            perpendicular_vector = clockwise_line.vector.rotate(90)
+            perpendicular_line = Line(point, perpendicular_vector)
+            clockwise_line_intersection = clockwise_line.get_line_intersection_point(perpendicular_line)
+            counterclockwise_line_intersection = counterclockwise_line.get_line_intersection_point(perpendicular_line)
+            line_intersections[clockwise_line].append((clockwise_line_intersection, segment))
+            line_intersections[counterclockwise_line].append((counterclockwise_line_intersection, segment))
+            new_segment = Segment(clockwise_line_intersection, counterclockwise_line_intersection)
+            boundary_segments.append(new_segment)
+            continue
+
+        # Using the current point as the reference point of view:
+        # Sort segments according to their order around the point
+        reference_vector = Vector(0,1) # This could be any vector
+        def get_reference_angle (segment : 'Segment') -> number:
+            pointing_outside_vector = segment.vector if point == segment.a else -segment.vector
+            return reference_vector.get_angle_with(pointing_outside_vector)
+        sorted_connected_segments = sorted(connected_segments, key=get_reference_angle)
+        # print('SORTED ' + str(point))
+        # print([ segment.vector for segment in sorted_connected_segments ])
+        # For each pair of segments, there is a pair of boundary lines (one from each segment) which must intersect
+        # As an exception, if segments are paralel, we must check if lines are the same line
+        # In this case there the intersection point will be the middle point (bot segments will be merged further)
+        # Otherwise, we will have to add a perpendicular segment to intercept both lines to close the boundary at some point
+        for current, nextone in pairwise(sorted_connected_segments, retro=True):
+            # Using the current point as the reference point of view:
+            # Get the intersection point between the line in the clockwise side of the current segment and
+            #   the line in the counterclockwise side of the next one
+            is_current_pointing_outside = point == current.a
+            current_side = 'clockwise' if is_current_pointing_outside else 'counterclockwise'
+            current_lines = segment_lines[current]
+            current_clockwise_line = current_lines[current_side]
+            is_nextone_pointing_outside = point == nextone.a
+            nextone_side = 'counterclockwise' if is_nextone_pointing_outside else 'clockwise'
+            nextone_lines = segment_lines[nextone]
+            nextone_counterclockwise_line = nextone_lines[nextone_side]
+            intersection = current_clockwise_line.get_line_intersection_point(nextone_counterclockwise_line)
+            # If there is an intersection then save this point as an intersection for both lines
+            if intersection:
+                line_intersections[current_clockwise_line].append((intersection, current))
+                line_intersections[nextone_counterclockwise_line].append((intersection, nextone))
+            # If there is no intersection it means lines are paralel
+            else:
+                # If they are the same line then there is no intersection at this point
+                if current_clockwise_line == nextone_counterclockwise_line:
+                    continue
+                # Otherwise, generate a new paralel segment which cuts both lines thus closing the boundary
+                perpendicular_vector = current_clockwise_line.vector.rotate(90)
+                # Find which line is closer to the point and find if this line 
+                current_line_distance = current_clockwise_line.get_distance_to(point)
+                nextone_line_distance = nextone_counterclockwise_line.get_distance_to(point)
+                current_is_closer = current_line_distance < nextone_line_distance
+                closer_line = current_clockwise_line if current_is_closer else nextone_counterclockwise_line
+                # If the line is intersecting with the point itself then the new segment must start at the point itself
+                # (Note that we are in a corner of the parent exterior boundary)
+                if point in closer_line:
+                    new_line = Line(point, perpendicular_vector)
+                # Otherwise, the new line must be pushed in one direction in order to make space for the boundary
+                # The direction of the push must be through where is the segment whom the closer line comes from
+                else:
+                    if current_is_closer:
+                        offset_direction = current.direction
+                        if not is_current_pointing_outside:
+                            offset_direction = -offset_direction
+                    else:
+                        offset_direction = nextone.direction
+                        if not is_nextone_pointing_outside:
+                            offset_direction = -offset_direction
+                    offset = offset_direction * size
+                    offset_point = point + offset
+                    new_line = Line(offset_point, perpendicular_vector)
+                # Find the intersection points with each line and create a new segment from both interactions
+                current_line_intersection = current_clockwise_line.get_line_intersection_point(new_line)
+                nextone_line_intersection = nextone_counterclockwise_line.get_line_intersection_point(new_line)
+                line_intersections[current_clockwise_line].append((current_line_intersection, current))
+                line_intersections[nextone_counterclockwise_line].append((nextone_line_intersection, nextone))
+                new_segment = Segment(current_line_intersection, nextone_line_intersection)
+                boundary_segments.append(new_segment)
+
+    # Build segments out of all found intersection points
+    for line, intersections in line_intersections.items():
+        # It may happen in a few ocassions that a line has more than 2 intersections (e.g. 4)
+        # This happens when boundaries overlap in a 'U' shaped path
+        # It also may happen in two segments in the same line separated in a 'T' shaped path
+        # Sort the intersection points and the build segments by pairs of points
+        # First of all check intersections to be even and remove duplicates (all duplicates)
+        intersection_points = [ intersection[0] for intersection in intersections ]
+        if len(intersection_points) % 2 != 0:
+            print('Line ' + str(line) + ' from the original segment ' + str(original_segment))
+            raise ValueError('The number of intersection points in the line is not even: ' + str(intersection_points))
+        duplicated_points = list(set([ point for point in intersection_points if intersection_points.count(point) > 1 ]))
+        unique_points = [ point for point in intersection_points if point not in duplicated_points ]
+        sorted_points = sort_points(unique_points)
+        for a, b in pairwise(sorted_points, loyals=True):
+            new_segment = Segment(a, b)
+            boundary_segments.append(new_segment)
+
+    # Generate a boundary from the previous segments
+    # DANI: Con la implementación actual debería haber siempre un único polígono
+    # DANI: Es posible que esto cambie en el futuro
+    polygons = list(connect_segments(boundary_segments))
+    path_boundaries = connect_polygons(polygons)
+    return path_boundaries
+
+# Target corners here would be inside corners which are connected to outside corners
+# Each pairs of corners makes what could be called "zigzag"
+# The segment between those corners is to be removed and the envolving segments aligned
+# The shorter the segment between those corners, the smaller the change will be
+# Note that removing an inside corner means also removing an outside corner in non-diagonal polygons
+# Note that the final number of corners will always be even in non-diagonal polygons
+# Note that there will always be a zigzag in non-diagonal polygons with more than 4 corners
+def get_polygon_zigzags (polygon : Polygon) -> List[dict]:
+    # Get the inside corners
+    inside_corners = polygon.get_inside_corners()
+    # Each inside corner may have 2 candidate zigzags
+    # For each zigzag, record each corner (inside and outside), the middle segment and the surrounding segments
+    zigzags = []
+    for inside_corner in inside_corners:
+        # Check each of the connected segments
+        for segment in inside_corner.segments:
+            # Check the other corner in this segment
+            other_corner_point = segment.get_other_point(inside_corner)
+            other_corner = polygon.get_corner(other_corner_point)
+            # If it is also an inside corner then this is not a zigzag, but a "valley"
+            if other_corner in inside_corners:
+                continue
+            # We have a zigzag
+            # Get the surrounding segments
+            inside_corner_other_segment = next(seg for seg in inside_corner.segments if seg != segment)
+            outside_corner_other_segment = next(seg for seg in other_corner.segments if seg != segment)
+            # Check segments to be paralel
+            # For now we only support this situation
+            if not inside_corner_other_segment.is_paralel_to(outside_corner_other_segment):
+                print([inside_corner_other_segment, outside_corner_other_segment])
+                raise ValueError('Zigzag surrounding segments are not in the same line, are there diagonals?')
+            # Save the zigzag with all its properties
+            zigzag = {
+                'inside_corner': inside_corner,
+                'outside_corner': other_corner,
+                'middle_segment': segment,
+                'inside_segment': inside_corner_other_segment,
+                'outside_segment': outside_corner_other_segment
+            }
+            zigzags.append(zigzag)
+
+    # Sort zigzags to get the smallest first
+    def get_zigzag_length (zigzag : dict) -> number:
+        return zigzag['middle_segment'].length
+    zigzags.sort(key=get_zigzag_length)
+    return zigzags

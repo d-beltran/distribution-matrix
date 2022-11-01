@@ -159,14 +159,25 @@ test_room_1 = Room(
             ])),
             name='Hab 5',
             fill_color='cyan'),
-        # Room(
-        #     boundary=Boundary(Polygon.from_corners([
-        #         Point(80,0),
-        #         Point(80,40),
-        #         Point(100,40),
-        #         Point(100,0),
-        #     ])),
-        #     name='Hab 6',
-        #     fill_color='orange'),
+        Room(
+            boundary=Boundary(Polygon.from_corners([
+                Point(80,0),
+                Point(80,40),
+                Point(100,40),
+                Point(100,0),
+            ])),
+            name='Hab 6',
+            fill_color='orange',
+            children=[
+                Room(
+                    boundary=Boundary(Polygon.from_corners([
+                        Point(80,0),
+                        Point(80,10),
+                        Point(100,10),
+                        Point(100,0),
+                    ])),
+                    name='Hab 7',
+                    fill_color='grey'),
+            ]),
     ]
 )
