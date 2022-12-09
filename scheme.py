@@ -808,8 +808,8 @@ class Room:
                 return True
             # Otherwise, calculate the "pre-corridor" and find the closest point in the current parent "pre-exterior-polygon"
             # First, get the current corridor points
-            corridor_segments = self.set_corridor(0)
-            corridor_points = list(set(sum([ segment.points for segment in corridor_segments ], ())))
+            corridor_segments, corridor_nodes = self.set_corridor(0)
+            corridor_points = list(set(sum([ segment.points for segment in corridor_segments ], ()))) + corridor_nodes
             # Now get all points in the exterior polygon which may be closer to the corridor
             # Note that these point may not be a corner in the exterior polygon, but a point in the middle of any segment
             # This should be easy to find since the current parent is made of rectangular rooms together
@@ -1315,9 +1315,18 @@ class Room:
             nodes_from_room_with_less_nodes = [
                 node_point for node_point, node_data in nodes.items() if node_data['is_redundant'] == False and room_with_less_nodes in node_data['rooms']
             ]
+            # Try every node
             for node in nodes_from_room_with_less_nodes:
                 start_point = node
                 start_node = nodes[start_point]
+                # It may happen that a node alone is enough to cover all rooms (and there are not set doors yet)
+                # We must check it at this point, or it will add a random segment (path) which may be not necessary and take much space
+                # If following path includes all rooms then it is a candidate to be the corridor
+                # Note that here we do not check doors. This is because if we are here then it means there are not doors
+                contains_all_rooms = all(room in start_node['rooms'] for room in required_rooms)
+                if contains_all_rooms:
+                    current_corridor_nodes = [node]
+                    break
                 start_rooms = set(start_node['rooms'])
                 start_path = current_corridor # It may contain segments already, from the free space
                 start_path_points = [ start_point ]
@@ -1338,7 +1347,7 @@ class Room:
         # ------------------------------------------------------------------------------------------------------------------------------
 
         if protocol < 1:
-            return current_corridor
+            return current_corridor, current_corridor_nodes
 
         # Now we have to set doors which are not set already in children rooms and expand the current corridor to cover these doors if needed
 
@@ -1608,6 +1617,8 @@ class Room:
         # Sort rooms according to how closer they are to free space
         # Find for each brother room the number of colliding rooms we must jump to find free space
         # Then use this value to set the "score" of each brother room frontiers and sort them
+        # WARNING: Note that rooms which are not in contact with free space by any means will be excluded
+        # e.g. when the room is splitted by the corridor some rooms may be isolated from the ones in contact with free space
         def sort_by_free_space_availability (rooms : List['Room']) -> List['Room']:
             room_connections = {}
             room_scores = {}
@@ -1630,12 +1641,16 @@ class Room:
                         connected_room_score = room_scores.get(connected_room, None)
                         if connected_room_score == None:
                             new_scores[connected_room] = score + 1
+                # If there were not new scores in this round it means we are over
+                if len(new_scores.keys()) == 0:
+                    break
                 room_scores = { **room_scores, **new_scores }
                 score += 1
             # Now sort rooms using previous scores
+            scored_rooms = list(room_scores.keys())
             def by_score (room : 'Room') -> int:
                 return room_scores[room]
-            return sorted(rooms, key=by_score)
+            return sorted(scored_rooms, key=by_score)
 
         # Now, if the parent has an adaptable boundary, we expand child rooms to compensate for their area loss
         if self._child_adaptable_boundary:
@@ -2979,7 +2994,33 @@ class Room:
         elements_to_display = [ *rooms, *extra ]
         add_frame(elements_to_display, title)
 
+    # Solve room distributions
+    # The display flag may be passed in order to generate a dynamic graph to display the solving process
+    def solve (self, display : bool = False):
+        global display_solving_process
+        display_solving_process = display
+        self.set_children_boundaries(recursive=True)
+
 # The element which connects diferent floors of a building
+class Stairs:
+    def __init__ (self,
+        # Stairs will always have two rooms: one downstairs and one upstairs
+        # These rooms will always overlap in the boundaries
+        # These rooms set the place for the actual stairs, which take place in both floors
+        # Note that stairs may stack, thus sharing the same room along different couples of floors
+        downstairs_room : Optional['Room'] = None,
+        upstairs_room : Optional['Room'] = None,
+        # In case stairs have to be generated randomly there are 4 possible configurations
+        # 0 - Vertical: Just a hole for vertical stairs or elevators
+        # 1 - One line: Regular straight stairs. The room is expected to have a rectangular shape
+        # 2 - Two lines: Stairs with a corner at some point. The room is expected to have a 'L' shape
+        # 3 - Three lines: Stairs with two corners. The room is expected to have a squared shape
+        configuration : int = 0,
+    ):
+        self.downstairs_room = downstairs_room
+        self.upstairs_room = upstairs_room
+        self.configuration = configuration
+
 
 # The building which may contain several floors
 class Building:
@@ -2988,19 +3029,47 @@ class Building:
         # Each floor is a room which may contains several rooms
         # Keys are the floor number. The 0 is the base. Negative numbers stand for the basements
         floors : dict,
-        # 
-    ):  
+        # Set the stairs
+        # Stairs are also organized by dict indices: stairs to move from floor 0 to floor 1 will be sotred in the index 0
+        # Note that each floor may have several stairs
+        # If not staris are provided then the default is one stairs per floor
+        stairs : Optional[ List['Stairs'] ] = None,
+    ):
+        # Set the floors
         self.floors = floors
+        # Check input floors to make sense according to floor indices
+        floor_indices = sorted(list(floors.keys()))
+        self.floor_indices = floor_indices
+        lowest_floor_index = min(floor_indices)
+        self.lowest_floor_index = lowest_floor_index
+        highest_floor_index = max(floor_indices)
+        self.highest_floor_index = highest_floor_index
+        # There must always be a floor 0
+        if not 0 in floor_indices:
+            raise InputError('A building must have a floor 0 (i.e. the first floor)')
+        # Floor indices must not have gaps
+        # i.e. if there is a floor 1 and a floor 3 then there must be a floor 2
+        for index in range(lowest_floor_index +1, highest_floor_index):
+            if index not in floor_indices:
+                raise InputError('Missing floor ' + str(index))
+        # Set the stairs
+        self.stairs = stairs
+        # If stairs are missing then set the default values
+        # By default all floors are connected by one staris
+        if not stairs:
+            self.stairs = {}
+            for floor_index_a, floor_index_b in pairwise(floor_indices):
+                self.stairs[floor_index_a] = Stairs()
+
+    # Solve each floor starting by the floor 0 (the first floor), then solving the superior floors and finally the basements
+    def solve (self, display : bool = False):
+        sorted_floor_indices = list(range(self.highest_floor_index +1)) + list(range(self.lowest_floor_index, 0))
+        for floor_index in sorted_floor_indices:
+            floor = self.floors[floor_index]
+            floor.solve(display)
 
 # Exception for when user input is wrong
 class InputError(SystemExit):
     pass
-
-# Solve room distributions
-# The display flag may be passed in order to generate a dynamic graph to display the solving process
-def solve(room : Room, display : bool = False):
-    global display_solving_process
-    display_solving_process = display
-    room.set_children_boundaries(recursive=True)
 
 # -----------------------------------------------------
