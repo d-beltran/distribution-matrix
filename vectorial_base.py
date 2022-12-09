@@ -1804,8 +1804,9 @@ class Boundary:
         if not self.simple:
             self.check()
 
-    def __contains__(self, other):
-        return other in self.grid
+    def __contains__(self, other) -> bool:
+        return any( other in polygon for polygon in self.polygons)
+
 
     def __eq__(self, other):
         if not other:
@@ -1861,7 +1862,7 @@ class Boundary:
     def check (self):
         simple_boundary = self.get_simple_boundary()
         for polygon in self.interior_polygons:
-            if polygon not in simple_boundary:
+            if polygon not in simple_boundary.grid:
                 # Represent polygons in the problematic boundary
                 exterior_segments = self.exterior_polygon.segments
                 for segment in exterior_segments:

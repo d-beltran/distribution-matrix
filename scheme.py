@@ -507,7 +507,7 @@ class Room:
         # In case the parent has a boundary, check this room may fit on it
         if parent.boundary:
             # Check this room is inside the parent boundary, if they have a predefined boundary
-            if self.boundary and self.boundary not in parent.boundary:
+            if self.boundary and self.boundary not in parent.grid:
                 raise InputError('The child room "' + self.name + '" is out of the parent boundary')
             # Check if this rooms minimum size fits in the parent boundary
             if not self.boundary and not parent.does_room_fit(self, force=True):
@@ -1592,7 +1592,10 @@ class Room:
         # Finally relocate doors to the new corridor boundary
         for door in doors:
             door_room_boundary = door.room.boundary
-            if door.point in door_room_boundary.exterior_polygon:
+            # If the door is already in both the corridor and its room boundaries then we do not need to relocate
+            door_in_room = door.margined_segment in door_room_boundary.exterior_polygon
+            door_in_corridor = any(door.margined_segment in boundary for boundary in corridor_grid.boundaries)
+            if door_in_room and door_in_corridor:
                 continue
             # Try to simply push the door as much as the corridor was expanded
             # If it does not work then we relocate the door in any other available segment/point
