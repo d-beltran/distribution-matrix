@@ -23,6 +23,8 @@ Largo plazo:
 
 FONDO (opcional, poco prioritario)
 
+- el pasillo podría salirse del perímetro cuando el perímetro no está forzado
+
 - el reduce children corner no contempla la posibilidad de que el zigzag esté en el parent boundary
 	* el push_boundary_segment si que lo contempla e impide que suceda, pero igual habría que matarlo antes
 		** o plantearse un sistema alternativo para que si pueda pasar? habría que pushear/pullear la parent boundary antes del child

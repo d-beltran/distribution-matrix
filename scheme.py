@@ -9,8 +9,9 @@ from math import sqrt, inf
 
 # Set the seed and print it
 seed = None
-seed = 267086 # Algo va mal con una recolocación de puerta después de generar el pasillo
-seed = 146551
+#seed = 518578 # Puerta fuera de sitio
+seed = 749462
+
 if not seed:
     seed = round(random.random() * 999999)
 print('Seed ' + str(seed))
@@ -307,6 +308,39 @@ class Door:
                 suitable_segments.append(suitable_segment)
         return suitable_segments, suitable_points
 
+    # Find suitable unique points and extreme points from suitable segment regions
+    def find_suitable_points (self, available_segments : Optional[List[Segment]] = None) -> List['Point']:
+        # Find suitable regions
+        suitable_segments, suitable_points = self.find_suitable_regions(available_segments)
+        if len(suitable_segments) == 0 and len(suitable_points) == 0:
+            return []
+        # Reduce to suitable points
+        suitable_points += sum([ list(segment.points) for segment in suitable_segments ], [])
+        return suitable_points
+
+    # Check if a point is siutable for placing this door
+    # i.e. check if the point is in the door room boundary and there is space enough around for its margined width
+    def is_point_suitable (self, point : Point) -> bool:
+         # If width is 0 then the segment can not exist
+        if self.width == 0:
+            raise ValueError('Cannot generate a segment for a door of width 0')
+        # If the door point or polygon are not assigned we can not generate the segment
+        room_polygon = self.get_room_polygon()
+        if not room_polygon:
+            raise ValueError('There is no room polygon to place the door')
+        # Otheriwse, generate the margined segment
+        polygon_segment = next(( segment for segment in room_polygon.segments if self.point in segment ), None)
+        if not polygon_segment:
+            return False
+        direction = polygon_segment.direction
+        half_width = width / 2
+        a = self.point - direction * half_width
+        b = self.point + direction * half_width
+        if a not in polygon_segment or b not in polygon_segment:
+            return False
+        return True
+
+
     # Relocate self door in a suitable region in contact with the parent corridor
     # Find suitable regions in the room boundaries which contact the corridor
     # The polygon to place the door is the room polygon by default, but a custom polygon may be passed
@@ -516,6 +550,49 @@ class Room:
         if self.max_corners:
             raise InputError('Parameter max_corners is supported only in the root room')
 
+    # Set a function to run the final setup in a top-down order
+    # This functions is called in the root room once after the room has been declared and before the solving process
+    # Then this function is called recursively through all children rooms
+    def _top_down_init (self, parent : Optional['Room'] = None):
+        # Set the parent
+        self.parent = parent
+        # Setup the doors
+        # Set the default door arguments in case they were not specified
+        if not self.door_args:
+            # If we are not the root, inherit parent default door arguments
+            if self.parent:
+                self.door_args = self.parent.door_args
+            # If we are the root, we have to guess the most suitable arguments
+            else:
+                # Make the margined width of all doors equal to the minimum room minimum size
+                # Make the width of all doors the 80% of the margined width
+                margined_width = self.get_root_min_min_size()
+                # If we have not a margined width at this point me must complain about the inputs
+                if not margined_width:
+                    raise InputError('Cannot guess the door width. Please set a minimum size or provide explicit "door_args" in the root room.')
+                width = margined_width * 0.8
+                margin = margined_width * 0.1
+                self.door_args = {
+                    'width': width,
+                    'margin': margin
+                }
+        # Set each missing door args
+        for door in self.doors:
+            for arg, value in self.door_args.items():
+                current_value = getattr(door, arg)
+                if not current_value:
+                    setattr(door, arg, value)
+        # Set each children missing door args
+        for room in self.children:
+            for door in room.doors:
+                for arg, value in self.door_args.items():
+                    current_value = getattr(door, arg)
+                    if not current_value:
+                        setattr(door, arg, value)
+        # Now set some parameters in children
+        for child in self.children:
+            child._top_down_init(self)
+
     def __str__(self):
         return '<Room "' + str(self.name) + '">'
 
@@ -688,41 +765,7 @@ class Room:
                 if not self.set_child_room_boundary(room):
                     raise SystemExit('Child ' + room.name + ' has failed to be set')
 
-        # Now that all children bondaries are set we must set the doors and the corridor
-
-        # Setup the doors
-        # Set the default door arguments in case they were not specified
-        if not self.door_args:
-            # If we are not the root, inherit parent default door arguments
-            if self.parent:
-                self.door_args = self.parent.door_args
-            # Otherwise, we have to guess the most suitable arguments
-            else:
-                # Make the margined width of all doors equal to the minimum room minimum size
-                # Make the width of all doors the 80% of the margined width
-                margined_width = self.get_root_min_min_size()
-                # If we have not a margined width at this point me must complain about the inputs
-                if not margined_width:
-                    raise InputError('Cannot guess the door width. Please set a minimum size or provide explicit "door_args" in the root room.')
-                width = margined_width * 0.8
-                margin = margined_width * 0.1
-                self.door_args = {
-                    'width': width,
-                    'margin': margin
-                }
-        # Set each missing door args
-        for door in self.doors:
-            for arg, value in self.door_args.items():
-                current_value = getattr(door, arg)
-                if not current_value:
-                    setattr(door, arg, value)
-        # Set each children missing door args
-        for room in rooms:
-            for door in room.doors:
-                for arg, value in self.door_args.items():
-                    current_value = getattr(door, arg)
-                    if not current_value:
-                        setattr(door, arg, value)
+        # Now that all children bondaries are set we must set the corridor
 
         # If the room had a provisional boundary then set in now
         # The "child adaptable" condition is lost
@@ -1033,6 +1076,8 @@ class Room:
     # 1 - Place the children doors (thus possibly expanding a bit the corridor segments) and return the corridor segments
     # 2 - Claim the corridor area, return nothing
     # Note that this function may be used several times to find a "pre-corridor" before definitely setting it
+    # NEVER FORGET: The algorithm to solve the corridor finds all possible combinations of nodes to know the final result is the shortest possible path
+    # NEVER FORGET: Once I tried to add as many nodes as 'candidate doors' and as a result the algorithm was taking hours to solve the problem
     def set_corridor (self, protocol : int = 2) -> Optional[List['Segment']]:
 
         # Set the corridor nodes
@@ -1340,13 +1385,21 @@ class Room:
                     start_rooms
                 )
 
+        # At this point we have the backbone of the corridor
+        # Check there is something
+        if len(current_corridor) == 0 and len(current_corridor_nodes) == 0:
+            raise ValueError('Empty corridor')
+
         # Display the current corridor
         elements_to_display = [ segment.get_colored_segment('red') for segment in current_corridor ]
         self.update_display(extra=elements_to_display, title='Display the base corridor path')
 
         # ------------------------------------------------------------------------------------------------------------------------------
 
-        if protocol < 1:
+        # At this point we have the backbone of the corridor
+
+        # In protocol 0 we return now the backbone corridor segments and node points
+        if protocol == 0:
             return current_corridor, current_corridor_nodes
 
         # Now we have to set doors which are not set already in children rooms and expand the current corridor to cover these doors if needed
@@ -1455,7 +1508,7 @@ class Room:
 
         # ------------------------------------------------------------------------------------------------------------------------------
 
-        if protocol < 2:
+        if protocol == 1:
             return current_corridor
 
         # Check we have a valid corridor size
@@ -1616,6 +1669,12 @@ class Room:
 
         # Show the relocated doors
         self.update_display(title='Displaying relocated doors')
+
+        # At this point there should be no free space
+        if self.free_grid:
+            problematic_rects = [ rect.get_colored_rect('red') for rect in self.free_grid.rects ]
+            self.update_display(title='Displaying problematic free spaces', extra=problematic_rects)
+            raise ValueError('We are having problematic free spaces after corridor area truncation')
 
         # Sort rooms according to how closer they are to free space
         # Find for each brother room the number of colliding rooms we must jump to find free space
@@ -2731,7 +2790,7 @@ class Room:
         for door in stablished_doors:
             # Check the inside space to be fully inside
             inside_rect = door.generate_rect(inside=True)
-            # This may happen when the door is not even in hte boundary
+            # This may happen when the door is not even in the boundary
             if not inside_rect:
                 return False
             inside_space = Grid([inside_rect])
@@ -2740,7 +2799,7 @@ class Room:
                 return False
             # Check the outside space to be fully outside
             outside_rect = door.generate_rect(inside=False)
-             # This may happen when the door is not even in hte boundary
+             # This may happen when the door is not even in the boundary
             if not outside_rect:
                 return False
             outside_space = Grid([outside_rect])
@@ -3002,6 +3061,7 @@ class Room:
     def solve (self, display : bool = False):
         global display_solving_process
         display_solving_process = display
+        self._top_down_init() # Run the final setup before starting the solving process
         self.set_children_boundaries(recursive=True)
 
 # The element which connects diferent floors of a building
