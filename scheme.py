@@ -10,7 +10,9 @@ from math import sqrt, inf
 # Set the seed and print it
 seed = None
 #seed = 518578 # Puerta fuera de sitio
-seed = 749462
+#seed = 749462
+#seed = 45123
+seed = 878225
 
 if not seed:
     seed = round(random.random() * 999999)
@@ -1732,6 +1734,9 @@ class Room:
             
             # Check zigzag segments to be modified are not in contact with rigid rooms which must not be modified
             forbidden_segments = list(set(sum([ child.boundary.exterior_polygon.segments for child in self.children if child.rigid ], [])))
+            # Add corridor contact segments to the list of forbidden segments
+            for boundary in self.corridor_grid.boundaries:
+                forbidden_segments += boundary.segments
             def has_rigid_conflict (zigzag : dict) -> bool:
                 modified_segments = [ zigzag['inside_segment'], zigzag['middle_segment'], zigzag['outside_segment'] ]
                 for modified_segment in modified_segments:
