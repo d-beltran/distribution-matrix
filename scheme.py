@@ -11,8 +11,7 @@ from math import sqrt, inf
 seed = None
 #seed = 518578 # Puerta fuera de sitio
 #seed = 749462
-#seed = 45123
-seed = 878225
+seed = 45123
 
 if not seed:
     seed = round(random.random() * 999999)
@@ -1558,7 +1557,7 @@ class Room:
             corridor_boundary_segments = sum([ boundary.segments for boundary in corridor_boundaries ], [])
             # Display the corridor boundary
             elements_to_display = [ segment.get_colored_segment('blue') for segment in corridor_boundary_segments ]
-            self.update_display(extra=elements_to_display, title='Displaying corridor boundary segments')
+            self.update_display(extra=elements_to_display, title='Displaying corridor boundary sketch')
 
             # Check if there are regions of the corridor which are out of the parent exterior polygon
             # Get the current grid, using the provisional exterior polygon grid in case the parent has no grid
@@ -1591,14 +1590,26 @@ class Room:
                 # Once we have these segments we must "project" a corridor from them
                 # This is like creating a corridor along the exterior polygon, which is fully inside of the polygon
                 def all_inside (segment : Segment, direction : Vector) -> number:
+                    # For the dead ends
+                    # Note that for dead ends direction will always be equal to segment.direction, and not -segment.direction
+                    if direction == segment.direction:
+                        return corridor_size
+                    # For the inside
                     if direction == exterior_polygon.get_border_inside(segment):
                         return corridor_size
+                    # For the outside
                     return 0
                 extension_boundaries = generate_path_boundaries(fixed_exterior_overlap, all_inside)
                 # Now add the extended boundary to the corridor boundary
                 # Note that both grids will always overlap
                 for boundary in extension_boundaries:
                     corridor_grid += boundary.grid
+
+            # Display the corridor boundaries
+            corridor_boundaries = corridor_grid.boundaries
+            corridor_boundary_segments = sum([ boundary.segments for boundary in corridor_boundaries ], [])
+            elements_to_display = [ segment.get_colored_segment('blue') for segment in corridor_boundary_segments ]
+            self.update_display(extra=elements_to_display, title='Displaying corridor boundaries')
 
             return corridor_grid
 
@@ -1614,10 +1625,14 @@ class Room:
                 # WARNING: This is important since these segments in the corridor may overlap the current door room polygon
                 # WARNING: However, they will not exist once the corridor has been set (it is hard to imagine if you don't see it)
                 corridor_boundaries = corridor_grid.boundaries
-                avaliable_corridor_segments = sum([ boundary.exterior_polygon.get_polygon_non_overlap_segments(exterior_polygon) for boundary in corridor_boundaries ], [])
+                restricted_polygon = door.room.boundary.exterior_polygon
+                avaliable_corridor_segments = sum([ boundary.exterior_polygon.get_polygon_non_overlap_segments(restricted_polygon) for boundary in corridor_boundaries ], [])
                 common_segments = door.room.grid.get_segments_overlap_segments(avaliable_corridor_segments)
                 suitable_segments, suitable_points = door.find_suitable_regions(common_segments)
                 if len(suitable_segments) > 0 or len(suitable_points) > 0:
+                    # Save the already found suitable segments and points in case we need them further
+                    setattr(door, 'suitable_segments', suitable_segments)
+                    setattr(door, 'suitable_points', suitable_points)
                     break
                 # In case there is not available space to relocate the door in the boundary we must relocate the door now
                 # Then we will expand the corridor to cover the door and remake the boundary
@@ -1631,9 +1646,6 @@ class Room:
                 expand_corridor_to_place_door(door, suitable_segments, suitable_points)
                 # Remake the boundary now that the corridor has been expaned
                 corridor_grid = generate_corridor_grid()
-            # Save the already found suitable segments and points in case we need them further
-            setattr(door, 'suitable_segments', suitable_segments)
-            setattr(door, 'suitable_points', suitable_points)
 
         # Save the corridor grid
         self.corridor_grid = corridor_grid
@@ -1643,12 +1655,15 @@ class Room:
         for child in self.children:
             if not child.truncate(corridor_grid, force=True, skip_update_display=True):
                 raise ValueError('The space required by the corridor cannot be claimed from ' + child.name)
+
+        # Show the relocated doors
+        self.update_display(title='Displaying corridor')
         
         # Finally relocate doors to the new corridor boundary
         for door in doors:
-            door_room_boundary = door.room.boundary
+            door_polygon = door.room.boundary.exterior_polygon
             # If the door is already in both the corridor and its room boundaries then we do not need to relocate
-            door_in_room = door.margined_segment in door_room_boundary.exterior_polygon
+            door_in_room = door.margined_segment in door_polygon
             door_in_corridor = any(door.margined_segment in boundary for boundary in corridor_grid.boundaries)
             if door_in_room and door_in_corridor:
                 continue
@@ -1667,7 +1682,8 @@ class Room:
             available_points = suitable_points + suitable_segment_points
             if len(available_points) == 0:
                 raise ValueError('Not available points for door in ' + door.room.name)
-            door.point = random.choice(available_points)
+            random_point = random.choice(available_points)
+            door.point = random_point
 
         # Show the relocated doors
         self.update_display(title='Displaying relocated doors')

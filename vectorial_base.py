@@ -2983,17 +2983,26 @@ def generate_path_boundaries (path : List['Segment'], size : Union[number, Calla
     boundary_segments = []
     for point, connected_segments in point_connected_segments.items():
         # In case we have only 1 connected segment it means this is a death end of the path
-        # In this case we generate a new segment perpendicular to the only segment and which crosses the point itself
+        # In this case we generate a new segment perpendicular to the only segment and which crosses the point itself*
+        # *WARNING: If the segment is shorter than the size then we push the new line/segment to compensate the difference
+        # WARNING: If not done, unreachable areas would appear. See figure 4
         # This segment will be generated from a line which intersects both of the boundary lines in the only segment
         if len(connected_segments) == 1:
             segment = connected_segments[0]
+            size_difference = size(segment, segment.direction) - segment.length
             # Using the current point as the reference point of view
             is_segment_pointing_outside = point == segment.a
             lines = segment_lines[segment]
             clockwise_line = lines['clockwise'] if is_segment_pointing_outside else lines['counterclockwise']
             counterclockwise_line = lines['counterclockwise'] if is_segment_pointing_outside else lines['clockwise']
             perpendicular_vector = clockwise_line.vector.rotate(90)
-            perpendicular_line = Line(point, perpendicular_vector)
+            # Push the segment point in case the segment is to short to fill the size
+            if size_difference > 0:
+                push_direction = -segment.direction if is_segment_pointing_outside else segment.direction
+                pushed_point = point + push_direction * size_difference
+                perpendicular_line = Line(pushed_point, perpendicular_vector)
+            else:
+                perpendicular_line = Line(point, perpendicular_vector)
             clockwise_line_intersection = clockwise_line.get_line_intersection_point(perpendicular_line)
             counterclockwise_line_intersection = counterclockwise_line.get_line_intersection_point(perpendicular_line)
             line_intersections[clockwise_line].append((clockwise_line_intersection, segment))
