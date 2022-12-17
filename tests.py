@@ -234,6 +234,50 @@ test_room_2 = Room(
         ]
     )
 
+# Polygono exterior preestablecido
+test_room_3 = Room(
+        boundary=test_boundary_5,
+        display=True,
+        name='Planta',
+        doors=[ Door() ],
+        children=[
+            Room(
+                forced_area='37.5%',
+                min_size=15,
+                name='Comedor',
+                fill_color='blue'),
+            Room(
+                forced_area='18%',
+                min_size=15,
+                name='Cocina',
+                fill_color='yellow'),
+            Room(
+                forced_area='21%',
+                display=True,
+                min_size=15,
+                name='Habitación 1',
+                fill_color='red',
+                children=[
+                    Room(
+                        forced_area=200,
+                        min_size=10,
+                        name='Lavabo de habitación',
+                        fill_color='purple',
+                    )
+                ]),
+            Room(
+                forced_area='16.50%',
+                min_size=15,
+                name='Habitación 2',
+                fill_color='orange'),
+            Room(
+                forced_area='7%',
+                min_size=10,
+                name='Lavabo',
+                fill_color='green')
+        ]
+    )
+
 # Familar house with 2 floors
 test_building_1 = Building(
     floors = {

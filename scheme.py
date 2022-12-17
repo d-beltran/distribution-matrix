@@ -11,7 +11,8 @@ from math import sqrt, inf
 seed = None
 #seed = 518578 # Puerta fuera de sitio
 #seed = 749462
-seed = 45123
+#seed = 45123
+seed = 390857 # Initial boundary se sale del padre
 
 if not seed:
     seed = round(random.random() * 999999)
@@ -2868,6 +2869,9 @@ class Room:
         # In case the truncate was forced remove all regions in the truncated grid which do not respect the minimum size
         if force:
             truncated_grid = truncated_grid.keep_minimum(self.min_size)
+        # If the grid has been fully consumed then give up
+        if truncated_grid == None:
+            return RuntimeError('We fully removed a whole room by force-truncaing')
         # Check the truncated grid to still respecting the minimum size
         elif not truncated_grid.check_minimum(self.preventive_min_size):
             print('WARNING: The room is not respecting the minimum size -> Go back')

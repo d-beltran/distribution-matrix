@@ -1,5 +1,10 @@
 RAM
 
+- al meter el lavabo de habitación este a veces puede por azar quedar super estrecho y alargado hasta salirse de la room padre
+	esto mata el código, hay que impedir que pueda pasar
+
+- hay que representar de alguna manera el pasillo para que quede claro que es pasillo y que es free space (y que es zona cancelada)
+
 - A veces quedan rinconcillos entre pasillo y perímetro del padre
 	- Hay que ver como lo arreglamos
 
