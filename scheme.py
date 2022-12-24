@@ -496,6 +496,10 @@ class Room:
         self.corridor_grid = None
         # Set the room corridor size
         self.corridor_size = corridor_size
+        # Set a grid for discarted space
+        # This is space which is not sitable to be claimed and thus is not set free to avoid the solver to try it
+        # This space may be generated when setting the corridor and it may be impossible to recover
+        self.discarded_grid = None
         # In order to respect the minimum size we are going to use a greater minimum size at the first steps
         # This is done to have margin for performing invasive steps (e.g. corridor and wall thickness build)
         if preventive_min_size_protocol == 0:
@@ -710,7 +714,8 @@ class Room:
         else:
             children_polygons = [ child.boundary.exterior_polygon for child in self.children if child.boundary ]
             corridor_polygons = [ boundary.exterior_polygon for boundary in self.corridor_grid.boundaries ] if self.corridor_grid else []
-            occupied_polygons = children_polygons + corridor_polygons
+            discareded_polygons = [ boundary.exterior_polygon for boundary in self.discarded_grid.boundaries ] if self.discarded_grid else []
+            occupied_polygons = children_polygons + corridor_polygons + discareded_polygons
             free_boundary = Boundary(self.boundary.exterior_polygon, self.boundary.interior_polygons + occupied_polygons)
             free_grid = free_boundary.grid
         # If there is no free grid (i.e. children rooms have fully consumed the parent) then return None
@@ -1690,10 +1695,17 @@ class Room:
         self.update_display(title='Displaying relocated doors')
 
         # At this point there should be no free space
+        # However, it may happen that truncating rooms to place the corridor may generate free spaces
+        # We must try to save those spaces which may be reclaimed by other rooms
+        # DANI: Esto es bastante trabajo, de momento lo descarto todo y palante
+        # However, there are places surrounded by the corridor and the exterior perimeter which may be not saved
+        # We must indetify and "flag" these regions to discard them as "free space"
         if self.free_grid:
-            problematic_rects = [ rect.get_colored_rect('red') for rect in self.free_grid.rects ]
-            self.update_display(title='Displaying problematic free spaces', extra=problematic_rects)
-            raise ValueError('We are having problematic free spaces after corridor area truncation')
+            #problematic_rects = [ rect.get_colored_rect('red') for rect in self.free_grid.rects ]
+            #self.update_display(title='Displaying problematic free spaces', extra=problematic_rects)
+            print('WARNING: We are having problematic free spaces after corridor area truncation')
+            self.discarded_grid = self.free_grid
+            self.reset_free_grid()
 
         # Sort rooms according to how closer they are to free space
         # Find for each brother room the number of colliding rooms we must jump to find free space
@@ -3037,6 +3049,12 @@ class Room:
         # Set the room all free segment belong to as None
         for frontier in free_frontiers:
             frontier.rooms = [parent_room]
+        # Use this to display final frontiers
+        # free_lines = [segment.get_colored_segment('green') for segment in free_frontiers]
+        # conflict_lines = [segment.get_colored_segment('yellow') for segment in conflict_frontiers]
+        # forbidden_lines = [segment.get_colored_segment('red') for segment in forbidden_frontiers]
+        # self.update_display(title='Frontiers display', extra = free_lines + conflict_lines + forbidden_lines)
+        # Return the calssified frontiers
         return free_frontiers, conflict_frontiers, forbidden_frontiers
 
     # Go uppwards in the hyerarchy until you reach the room which has no parent

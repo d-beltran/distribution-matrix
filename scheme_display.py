@@ -211,6 +211,13 @@ def get_rects_from_anything (things : list):
             if hasattr(thing, 'free_grid'):
                 if thing.boundary:
                     rects += thing.free_grid.rects
+            if hasattr(thing, 'discarded_grid'):
+                if thing.discarded_grid != None:
+                    print('yesss')
+                    discareded_rects = thing.discarded_grid.rects
+                    for rect in discareded_rects:
+                        rect.fill_color = 'black'
+                    rects += discareded_rects
         except:
             pass
     return rects
