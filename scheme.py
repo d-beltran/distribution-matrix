@@ -1054,10 +1054,14 @@ class Room:
         if minimum_space > first_side_length and first_side_length > margined_minimum_space:
             first_side_length = margined_minimum_space
         # Once we have calculated the first length we can calculate the second one
-        second_side_length = self.forced_area / first_side_length
+        # The second length will be over the maximum space
+        maximum_space = max(x_space, y_space)
+        maximum_side_length = self.forced_area / first_side_length
+        second_side_length = min(maximum_space, maximum_side_length)
         # In case the second side length is between the limit space and the margined limit space we must fit it to the limit as well
-        if minimum_space > second_side_length and second_side_length > margined_minimum_space:
-            second_side_length = margined_minimum_space
+        margined_maximum_space = maximum_space - self.parent_free_limit
+        if maximum_space > second_side_length and second_side_length > margined_maximum_space:
+            second_side_length = margined_maximum_space
         # Create the new rect fitting the biggest size in the biggest space and the opposite
         # For each size of the new rect use the calculated size only if it is not longer than the space
         if x_space >= y_space:
