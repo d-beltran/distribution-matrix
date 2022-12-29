@@ -173,6 +173,11 @@ def get_segments_from_anything (things : list):
                 segments += boundary.exterior_polygon.segments
                 for polygon in boundary.interior_polygons:
                     segments += polygon.segments
+        # If it has a discarded grid (i.e. it is a room)
+        if hasattr(thing, 'discarded_grid'):
+            if thing.discarded_grid != None:
+                discareded_segments = sum([ boundary.segments for boundary in thing.discarded_grid.boundaries ], [])
+                segments += discareded_segments
         # If it is a room or something with doors
         if hasattr(thing, 'doors'):
             doors = thing.doors
@@ -205,19 +210,22 @@ def get_rects_from_anything (things : list):
         if hasattr(thing, 'grid'):
             if thing.grid:
                 rects += thing.grid.rects
-        # If it is a room
+        # If it has a discarded grid (i.e. it is a room)
+        if hasattr(thing, 'discarded_grid'):
+            if thing.discarded_grid != None:
+                discareded_rects = thing.discarded_grid.rects
+                for rect in discareded_rects:
+                    rect.fill_color = 'black'
+                rects += discareded_rects
+        # If it has a free grid (i.e. it is a room)
         # This may fail for a parent free grid in steps where children overlap
         try:
             if hasattr(thing, 'free_grid'):
+                # WARNING: Do not put any code below this part or it may not be run in some frames
+                # This part is prote to fail
                 if thing.boundary:
                     rects += thing.free_grid.rects
-            if hasattr(thing, 'discarded_grid'):
-                if thing.discarded_grid != None:
-                    print('yesss')
-                    discareded_rects = thing.discarded_grid.rects
-                    for rect in discareded_rects:
-                        rect.fill_color = 'black'
-                    rects += discareded_rects
+                # WARNING: Do not write code here!!
         except:
             pass
     return rects

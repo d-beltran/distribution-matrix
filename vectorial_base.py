@@ -1783,15 +1783,10 @@ class Boundary:
         self.interior_polygons = interior_polygons
         self.polygons = [ exterior_polygon, *interior_polygons ]
         self.segments = [ segment for polygon in self.polygons for segment in polygon.segments ]
-        # Calculate some internal values -------------------------------------------------------------------------
-        # The size is the length to cross the whole boundary
-        self.size = exterior_polygon.get_box().get_crossing_segment().length
-        # Inside corners are the exterior polygon inside corners and the interior polygons outside corners
-        self.exterior_inside_corners = [ corner for corner in exterior_polygon.corners if corner.inside == True ]
-        self.interior_inside_corners = []
-        for polygon in interior_polygons:
-            self.interior_inside_corners += [ corner for corner in polygon.corners if corner.inside == False ]
-        self.inside_corners = self.exterior_inside_corners + self.interior_inside_corners
+        self.corners = [ corner for polygon in self.polygons for corner in polygon.corners ]
+        # Set some internal values which are calculated on request -----------------------------------------------
+        self._inside_corners = None
+        self._outside_corners = None
         # --------------------------------------------------------------------------------------------------------
         # Set some display parameters
         self.color = color
@@ -1806,7 +1801,6 @@ class Boundary:
 
     def __contains__(self, other) -> bool:
         return any( other in polygon for polygon in self.polygons)
-
 
     def __eq__(self, other):
         if not other:
@@ -1850,8 +1844,32 @@ class Boundary:
         return self.grid.area
     area = property(get_area, None, None, "The area inside the boundary")
 
+    # Get the inside corners
+    def get_inside_corners (self) -> List['Corner']:
+        # If the values has been previously calculated then return the saved value
+        if self._inside_corners != None:
+            return self._inside_corners
+        # Otherwise, calculate the inside corners
+        # Inside corners are the exterior polygon inside corners and the interior polygons outside corners
+        exterior_inside_corners = [ corner for corner in self.exterior_polygon.corners if corner.inside == True ]
+        interior_inside_corners = []
+        for polygon in self.interior_polygons:
+            interior_inside_corners += [ corner for corner in polygon.corners if corner.inside == False ]
+        self._inside_corners = exterior_inside_corners + interior_inside_corners
+        return self._inside_corners
+    inside_corners = property(get_inside_corners, None, None, "Corners pointing to the inside of the boundary")
+
+    # Get the outside corners
+    def get_outside_corners (self) -> List['Corner']:
+        # If the values has been previously calculated then return the saved value
+        if self._outside_corners != None:
+            return self._outside_corners
+        self._outside_corners = [ corner for corner in self.corners if corner not in self.inside_corners ]
+        return self._outside_corners
+    outside_corners = property(get_outside_corners, None, None, "Corners pointing to the outside of the boundary")
+
     # Get a boundary made with the exterior polygon only
-    def get_simple_boundary(self):
+    def get_exterior_boundary (self) -> 'Boundary':
         if self.simple:
             return self
         return Boundary(self.exterior_polygon)
@@ -1860,7 +1878,7 @@ class Boundary:
     # Note that this function is called when the self grid is not made yet, so checking this is not that easy
     # To do so, we calculate the grid of the exterior polygon alone and then we check if each interior polygon is inside
     def check (self):
-        simple_boundary = self.get_simple_boundary()
+        simple_boundary = self.get_exterior_boundary()
         for polygon in self.interior_polygons:
             if polygon not in simple_boundary.grid:
                 # Represent polygons in the problematic boundary

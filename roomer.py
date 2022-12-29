@@ -15,7 +15,7 @@ if __name__ == '__main__':
     if display:
         setup_display()
 
-    test = test_room_3
+    test = test_room_1
     #test = test_building_1
 
     test.solve(display=display)
