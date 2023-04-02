@@ -300,7 +300,7 @@ class Door:
             if segment.length < minimum_segment_length:
                 continue
             # Cut the margins of all available segments for the reminaing segments to be available to store the door point (center)
-            elif segment.length == minimum_segment_length:
+            elif equal(segment.length, minimum_segment_length):
                 suitable_point = segment.get_middle_point()
                 suitable_points.append(suitable_point)
             else:
@@ -746,9 +746,12 @@ class Room:
     # Get the corridor grid
     def get_corridor_grid (self) -> Optional[Grid]:
         return self._corridor_grid
-    def set_corridor_grid (self, new_corridor_grid : Grid):
+    def set_corridor_grid (self, new_corridor_grid : Optional[Grid]):
         # Save the new corridor grid
         self._corridor_grid = new_corridor_grid
+        # If new grid is None then stop here
+        if new_corridor_grid == None:
+            return
         # Substract this region from the rest of rooms and claim it back for the parent
         # Note that, at this point, other rooms may not expand to compensate the lost area
         for child in self.children:
@@ -1461,12 +1464,19 @@ class Room:
         # This process is wrapped in a function because we may have to change the corridor and redo the boundary further
         # e.g. a door can not be relocated in the boundary so it must be relocated now and the corridor will change
         def generate_corridor_grid () -> Grid:
-            # Now we must substract segments in the free space (fake corridors)
             corridor = current_corridor
+            # Now we must substract segments in the free space (fake corridors)
             if self.free_grid:
                 corridor = [ segment for segment in corridor if segment not in free_corridor_segments ]
-            # Generate a boundary around the current corridor path
-            corridor_boundaries = generate_path_boundaries(corridor, corridor_size)
+            # It may happen that there are no corridor segments at this point when all rooms are connected by a point
+            if len(corridor) == 0:
+                # Check that there is just one node, as expected
+                if len(current_corridor_nodes) != 1:
+                    raise SystemExit('There is something very wrong with corridor backbone')
+                corridor_boundaries = [ generate_point_boundary(current_corridor_nodes[0], corridor_size) ]
+            else:
+                # Generate a boundary around the current corridor path
+                corridor_boundaries = generate_path_boundaries(corridor, corridor_size)
             corridor_boundary_segments = sum([ boundary.segments for boundary in corridor_boundaries ], [])
             # Display the corridor boundary
             elements_to_display = [ segment.get_colored_segment('blue') for segment in corridor_boundary_segments ]
@@ -1530,6 +1540,10 @@ class Room:
 
         # Save the corridor grid
         self.corridor_grid = corridor_grid
+
+        # At this point there must be corridor grid
+        if not corridor_grid:
+            raise SystemExit('Failed to set a corridor grid')
 
         # At this point there should be no free space
         # However, it may happen that truncating rooms to place the corridor may generate free spaces
@@ -1765,10 +1779,10 @@ class Room:
             # If it fails, try with the next one
             # WARNING:
             # Functions which may fail are smart enought to recover boundary backups in case of failure
-            # However we must backup the self boundary, since we may succeed in several steps and then fail later
+            # However we must backup self and children boundaries, since we may succeed in several steps and then fail later
             succeed = False
             for zigzag in zigzags:
-                backup = { self: self.boundary }
+                backup = self.make_backup()
                 # Push the inside segment and pull the outside segment
                 # The push and pull lengths must be calculated to make both segments match while the parent area is kept
                 area = zigzag['middle_segment'].length * zigzag['outside_segment'].length
@@ -1780,6 +1794,8 @@ class Room:
                     print('WARNING: Failed to push ' + str(zigzag['inside_segment']))
                     # There is no need to recover the backup at this point
                     continue
+                # Now pull the boundary
+                # Note tha this will truncate any children in the pulled area automatically
                 if not self.pull_boundary_segment(zigzag['outside_segment'], outside_pull_length, force_child_truncation=True):
                     print('WARNING: Failed to pull ' + str(zigzag['outside_segment']))
                     # Revert the previous push
@@ -1789,15 +1805,10 @@ class Room:
                 truncated_children = [ child for child in self.children if not child.is_fit_to_required_area()  ]
                 child_conflict = False
                 for child in truncated_children:
-                    # Save a backup of the current child in case we have to recover its boundary later
-                    child_boundary_backup = child.boundary
                     if not child.fit_to_required_area():
                         print('Something went wrong while refitting ' + child.name)
                         child_conflict = True
                         break
-                    # Now add the child boundary to the backup
-                    # Note that this is not done before since in case of failure the current children is backuped already
-                    backup[child] = child_boundary_backup
                 # If there was a failure during children relocation then restore the boundary backups and proceed to the next zigzag
                 if child_conflict:
                     self.restore_backup(backup)
@@ -3053,6 +3064,14 @@ class Room:
         for room in self.children:
             rooms += room.get_rooms_recuersive()
         return rooms
+
+    # Make backup of self and children room boundaries
+    # A backup is a dict where keys are rooms and values are boundaries
+    def make_backup (self) -> dict:
+        backup = { self: self.boundary }
+        for child in self.children:
+            backup[child] = child.boundary
+        return backup
 
     # Restore backup of room boundaries
     # A backup is a dict where keys are rooms and values are boundaries

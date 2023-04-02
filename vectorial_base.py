@@ -2946,6 +2946,29 @@ def mark_point (point : Point, color : str = 'black', size : number = 1):
 def get_path_length (path : List['Segment']) -> number:
     return sum([ segment.length for segment in path ])
 
+# Generate a boundary around a point
+def generate_point_boundary (point : Point, size : number) -> Boundary:
+    half_size = size / 2
+    # Set the dimension values
+    x_rigth = point.x + half_size
+    x_left  = point.x - half_size
+    y_upper = point.y + half_size
+    y_lower = point.y - half_size
+    # Set the corners
+    upper_left  = Point(x_left,  y_upper)
+    upper_right = Point(x_rigth, y_upper)
+    lower_right = Point(x_rigth, y_lower)
+    lower_left  = Point(x_left,  y_lower)
+    # Set the segments
+    upper = Segment(upper_left,  upper_right)
+    right = Segment(upper_right, lower_right)
+    lower = Segment(lower_right, lower_left )
+    left  = Segment(lower_left,  upper_left )
+    # Set the polygon and thus the boundary
+    exterior_polygon = Polygon([ upper, right, lower, left ])
+    boundary = Boundary(exterior_polygon)
+    return boundary
+
 # Given a list of segments, set a function to generate a boundary around them
 # Size is the tickness of the new boundary
 # Alternatively, the size may be a function whose input is a segments in the path and a direction
