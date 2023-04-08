@@ -186,7 +186,6 @@ test_room_1 = Room(
 test_room_2 = Room(
         #boundary=test_boundary_3,
         max_corners = 6,
-        display=True,
         name='Planta',
         doors=[ Door() ],
         #doors=[ Door(), Door() ],
@@ -207,7 +206,6 @@ test_room_2 = Room(
             Room(
                 forced_area=1800,
                 #forced_area='21%',
-                display=True,
                 min_size=15,
                 name='Habitación 1',
                 fill_color='red',
@@ -237,7 +235,6 @@ test_room_2 = Room(
 # Polygono exterior preestablecido
 test_room_3 = Room(
         boundary=test_boundary_5,
-        display=True,
         name='Planta',
         doors=[ Door() ],
         children=[
@@ -253,7 +250,6 @@ test_room_3 = Room(
                 fill_color='yellow'),
             Room(
                 forced_area='21%',
-                display=True,
                 min_size=15,
                 name='Habitación 1',
                 fill_color='red',
@@ -327,5 +323,6 @@ test_building_1 = Building(
                     fill_color='green')
             ]
         )
-    }
+    },
+    floor_heights = 20
 )

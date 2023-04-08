@@ -1,8 +1,6 @@
 RAM
 
-- Una habitación que solo tiene un hijo pequeño y una puerta puede, por azar,
-	quedar con el hijo delante de la puerta. Si la habitación se va a cubrir
-	por completo esto tiene sentido pero sino no. Hay que darle una vuelta
+- Al hacer los zig zags las puertas impiden cuando podrían no hacerlo
 
 - A veces quedan rinconcillos entre pasillo y perímetro del padre
 	- Hay que ver como lo arreglamos

@@ -619,7 +619,19 @@ class Segment(Line):
             result_segments.append(segment)
         return result_segments
 
+    # Given two segments, return a segment made of the extreme points
+    # WARNING: Note that it is not checked if points are aligned or segments are touching/overlapping
+    def merge_segment (self, other : 'Segment') -> 'Segment':
+        # Find all segment points and sort them
+        segment_points = [ self.a, self.b, other.a, other.b ]
+        sorted_segment_points = sort_points(segment_points)
+        # Return a segmend made of the extreme points
+        a = sorted_segment_points[0]
+        b = sorted_segment_points[-1]
+        return Segment(a,b)
+
     # Given two segments which have a point in common, return a segment from the non-common points
+    # WARNING: Note that it is not checked if points are aligned
     def combine_segment (self, other : 'Segment') -> 'Segment':
         # Find the non-common point in self, which must be only one
         different_self_points = [ point for point in self.points if not other.has_point(point) ]
@@ -1008,6 +1020,54 @@ class Rect:
         y_max = max(self.y_max, rect.y_max)
         return Rect(x_min, y_min, x_max, y_max)
 
+    # Get the border intersections with a given line
+    # Note that there may be 0, 1 or 2 intersection points
+    def get_line_border_intersection_points (self, line : 'Line') -> Optional[List[Point]]:
+        intersection_points = []
+        for segment in self.segments:
+            intersection_point = segment.get_line_intersection_point(line)
+            if intersection_point:
+                intersection_points.append(intersection_point)
+        return list(set(intersection_points))
+
+    # Get the border intersections with a given segment
+    # Note that there may be 0, 1 or 2 intersection points
+    def get_segment_border_intersection_points (self, segment : 'Segment') -> Optional[List[Point]]:
+        intersection_points = []
+        for segment in rect.segments:
+            intersection_point = segment.get_segment_intersection_point(segment)
+            if intersection_point:
+                intersection_points.append(intersection_point)
+        return list(set(intersection_points))
+
+    # Get overlap segments between this rect and a given line
+    def get_line_overlap_segment (self, line : 'Line') -> Optional['Segment']:
+        if line.is_horizontal():
+            y = line.point.y
+            if y < self.y_min or y > self.y_max:
+                return None
+            # Find the new a and b x coords
+            new_a_x = self.x_min
+            new_b_x = self.x_max
+            new_a = Point(new_a_x, y)
+            new_b = Point(new_b_x, y)
+            return Segment(new_a, new_b)
+        elif line.is_vertical():
+            x = line.point.x
+            if x < self.x_min or x > self.x_max:
+                return None
+            # Find the new a and b y coords
+            new_a_y = self.y_min
+            new_b_y = self.y_max
+            new_a = Point(x, new_a_y)
+            new_b = Point(x, new_b_y)
+            return Segment(new_a, new_b)
+        else:
+            intersection_points = self.get_line_border_intersection_points(line)
+            if len(intersection_points) == 2:
+                return Segment(intersection_points[0], intersection_points[1])
+            return None
+
     # Given another segment, it returns the overlapping segment with this rectangle if exists, as a new segment
     def get_overlap_segment (self, segment : 'Segment') -> Optional['Segment']:
         if segment.is_horizontal():
@@ -1053,18 +1113,11 @@ class Rect:
             new_b = Point(x, new_b_y)
             return Segment(new_a, new_b)
         else:
-            segment_rect = Rect.from_segments([segment])
-            overlap_rect = self.get_overlap_rect(segment_rect, borders = False)
-            if not overlap_rect:
-                return None
-            if overlap_rect.get_bottom_left_point() in segment:
-                new_a = overlap_rect.get_bottom_left_point()
-                new_b = overlap_rect.get_upper_right_point()
-                return Segment(new_a, new_b)
-            else:
-                new_a = overlap_rect.get_bottom_right_point()
-                new_b = overlap_rect.get_upper_left_point()
-                return Segment(new_a, new_b)
+            intersection_points = self.get_segment_border_intersection_points(segment)
+            if len(intersection_points) == 2:
+                return Segment(intersection_points[0], intersection_points[1])
+            return None
+
 
     # Given another rectangle, it returns the overlapping region with this rectangle, if exists, as a new rectangle
     # DANI: No lo he provado desde que lo moví de abajo
@@ -1477,14 +1530,15 @@ class Polygon:
         return [ segment.a for segment in self.segments ]
 
     # Get a rectangle which contains the whole polygon
-    def get_box (self) -> 'Rect':
+    # Optionally, you may pass a margin
+    def get_box (self, margin : number = 0) -> 'Rect':
         points = self.get_points()
         x_coords = [ point.x for point in points ]
         y_coords = [ point.y for point in points ]
-        x_min = min(x_coords)
-        x_max = max(x_coords)
-        y_min = min(y_coords)
-        y_max = max(y_coords)
+        x_min = min(x_coords) - margin
+        x_max = max(x_coords) + margin
+        y_min = min(y_coords) - margin
+        y_max = max(y_coords) + margin
         return Rect(x_min, y_min, x_max, y_max)
 
     # Get the perimeter of the polygon, which is the sum of all its segment lengths
@@ -1526,6 +1580,34 @@ class Polygon:
             raise ValueError('The segment is not in the polyigon')
         angle = 90 if self.clockwise else -90
         return polygon_segment.direction.rotate(angle)
+
+    # Given a line, get all points in this line which intersect with the polygon
+    def get_line_intersection_points (self, line : Line) -> List[Point]:
+        intersection_points = []
+        # Get all corners in the polygon which intersect the line
+        for corner in self.corners:
+            if corner in line:
+                intersection_points.append(corner)
+        # Get all intersection points between the line and each segment in the polygon
+        for segment in self.segments:
+            intersection_point = line.get_segment_intersection_point(segment)
+            if intersection_point:
+                intersection_points.append(intersection_point)
+        # Now sort the points and remove duplicated points
+        intersection_points = list(set(sort_points(intersection_points)))
+        return intersection_points
+
+    # Given a line, get all segments in this line which intersect with the polygon
+    def get_line_intersection_segments (self, line : Line) -> List[Segment]:
+        # Get all points where the line intersect, sorted and without duplicates
+        intersection_points = self.get_line_intersection_points(line)
+        # Now set segments between each pair of points and check if each segment is indeed intersecting the polygon
+        intersection_segments = []
+        for point_a, point_b in pairwise(intersection_points):
+            new_segment = Segment(point_a, point_b)
+            if new_segment.get_middle_point() in self:
+                intersection_segments.append(new_segment)
+        return intersection_segments
 
     # Return all points in the polygon segments which intersect with a given segment
     # Points are sorted according to their distance with the 'a' point of the segment (from less to more distance)
@@ -1799,6 +1881,11 @@ class Boundary:
         if not self.simple:
             self.check()
 
+    def __str__ (self):
+        return 'Boundary (area: ' + str(self.area) + ')' 
+    def __repr__ (self):
+        return 'Boundary (area: ' + str(self.area) + ')' 
+
     def __contains__(self, other) -> bool:
         return any( other in polygon for polygon in self.polygons)
 
@@ -1910,6 +1997,16 @@ class Boundary:
         # Get the overlap grid of self boundary grid and the other boundary grid
         overlap_grid = self.grid.get_overlap_grid(other.grid)
         return overlap_grid.boundaries
+
+    # Get the overlap segments between 2 boundaries
+    def get_boundary_overlap_segments (self, other : 'Boundary') -> List['Segment']:
+        overlaps = []
+        for segment in self.segments:
+            for other_segment in other.segments:
+                overlap = segment.get_overlap_segment(other_segment)
+                if overlap:
+                    overlaps.append(overlap)
+        return overlaps
 
     # Fuse other boundary to self boundary
     # Check that both boundaries can be joined as a single boundary
@@ -2255,7 +2352,10 @@ class Grid:
         # Note that rects will not follow the grid standards
         if overlap_rects:
             difference = grid - self
-            merge_rects = self.rects + difference.rects
+            if difference:
+                merge_rects = self.rects + difference.rects
+            else:
+                merge_rects = self.rects
         else:
             merge_rects = self.rects + grid.rects
         return Grid.non_canonical(merge_rects)
@@ -2692,6 +2792,19 @@ class Grid:
             rect_groups.append(new_group)
         return rect_groups
 
+    # Given a line, get all segment regions which overlap the grid
+    def get_line_overlap_segments (self, line : Line) -> List[Segment]:
+        # Get the overlap of the segment with every rect in the grid
+        overlap_segments = []
+        for rect in self.rects:
+            overlap_segment = rect.get_line_overlap_segment(line)
+            if overlap_segment:
+                overlap_segments.append(overlap_segment)
+        # Now merge all the overlap segmetns as much as possible
+        overlap_segments = list(set(overlap_segments))
+        merged_segments = merge_inline_segments(overlap_segments)
+        return merged_segments
+
     # Given a segment, get all segment regions which overlap the grid
     def get_segment_overlap_segments (self, segment : Segment) -> List[Segment]:
         # Get the overlap of the segment with every rect in the grid
@@ -2701,8 +2814,9 @@ class Grid:
             if overlap_segment:
                 overlap_segments.append(overlap_segment)
         # Now merge all the overlap segmetns as much as possible
-        overlap_segments = merge_inline_segments(overlap_segments)
-        return overlap_segments
+        overlap_segments = list(set(overlap_segments))
+        merged_segments = merge_inline_segments(overlap_segments)
+        return merged_segments
         
     # Given a list of segments, get all segment regions which overlap the grid
     def get_segments_overlap_segments (self, segments : List[Segment]) -> List[Segment]:
@@ -2749,7 +2863,12 @@ def sort_by_x (point : Point) -> number:
     return point.x
 def sort_by_y (point : Point) -> number:
     return point.y
-# Point sorter for points in a same line (otherwise it makes not sense)
+
+# Set a function to sort aligned* points by their positions
+# * By aligned I mean in the same line
+# The sort is always from lower left to upper right
+# WARNING: Note that the alignment of the points is not checked
+# WARNING: If points are not aligned the result is unpredictable
 def sort_points (points : List[Point]) -> List[Point]:
     return sorted( sorted( points, key=sort_by_x), key=sort_by_y)
 
