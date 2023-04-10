@@ -58,8 +58,8 @@ class Door:
     ):  
         # These values are usually None at this point
         # They are usually set further from the door room 'door_args' value
-        self.width = width
-        self.margin = margin
+        self._width = width
+        self._margin = margin
         self._point = point
         self._margined_width = None
         self._segment = None
@@ -75,6 +75,44 @@ class Door:
         width = str(self.width) if self.width else 'No width'
         margin = str(self.margin) if self.margin else 'No margin'
         return '<Door ' + point + ' ' + width + '(' + margin + ')' + '>'
+
+    # Get the width
+    def get_width (self) -> number:
+        # If we have a stored value already then return it
+        if self._width != None:
+            return self._width
+        # Otherwise we must get it from the parent room args
+        # If there is no parent room then we have nothing to do
+        if not self.room:
+            return None
+        self._width = self.room.door_args['width']
+        return self._width
+
+    # Set the width (regular setter)
+    def set_width (self, new_width : number):
+        self._width = new_width
+    
+    # The door width
+    width = property(get_width, set_width, None, "The door width")
+
+    # Get the margin
+    def get_margin (self) -> number:
+        # If we have a stored value already then return it
+        if self._margin != None:
+            return self._margin
+        # Otherwise we must get it from the parent room args
+        # If there is no parent room then we have nothing to do
+        if not self.room:
+            return None
+        self._margin = self.room.door_args['margin']
+        return self._margin
+
+    # Set the margin (regular setter)
+    def set_margin (self, new_margin : number):
+        self._margin = new_margin
+    
+    # The door margin
+    margin = property(get_margin, set_margin, None, "The door margin")
 
     # Get the margined width
     def get_margined_width (self):
@@ -139,9 +177,7 @@ class Door:
         # If width is 0 then the segment can not exist
         if width == 0:
             raise ValueError('Cannot generate a segment for a door of width 0')
-        # If the door point or polygon are not assigned we can not generate the segment
-        room_polygon = self.get_room_polygon()
-        if not room_polygon or not self.point:
+        # If the door point or polygon are not assigned we c[]
             return None
         # Otheriwse, generate the margined segment
         polygon_segment = next(( segment for segment in room_polygon.segments if self.point in segment ), None)
@@ -445,6 +481,9 @@ class Room:
     ):
         # Set internal variables
         self._boundary = None
+        self.input_boundary = boundary
+        # DANI: esto no está implementado
+        # self.forced_boundary = boundary
         self._grid = None
         self._free_grid = None
         # Set representation parameters
@@ -512,13 +551,11 @@ class Room:
         # Parent free limit is the maximum min size of all parent children but this child
         self.parent_free_limit = None
         # Save input door args
-        self.door_args = door_args
-        # Save input doors
+        self._door_args = door_args
+        # Set the doors doors
         # If there is no input doors set a single defualt door
+        self._doors = None
         self.doors = doors if doors != None else [ Door() ]
-        # Set each door room
-        for door in self.doors:
-            door.room = self
         # Set the room corridor size
         self._corridor_size = corridor_size
         # Set a grid for discarted space
@@ -580,56 +617,13 @@ class Room:
         if self.max_corners:
             raise InputError('Parameter max_corners is supported only in the root room')
 
-    # Set a function to run the final setup in a top-down order
-    # This functions is called in the root room once after the room has been declared and before the solving process
-    # Then this function is called recursively through all children rooms
-    def _top_down_init (self, parent : Optional['Room'] = None):
-        # Set the parent
-        self.parent = parent
-        # Setup the doors
-        # Set the default door arguments in case they were not specified
-        if not self.door_args:
-            # If we are not the root, inherit parent default door arguments
-            if self.parent:
-                self.door_args = self.parent.door_args
-            # If we are the root, we have to guess the most suitable arguments
-            else:
-                # Make the margined width of all doors equal to the minimum room minimum size
-                # Make the width of all doors the 80% of the margined width
-                margined_width = self.get_root_min_min_size()
-                # If we have not a margined width at this point me must complain about the inputs
-                if not margined_width:
-                    raise InputError('Cannot guess the door width. Please set a minimum size or provide explicit "door_args" in the root room.')
-                width = margined_width * 0.8
-                margin = margined_width * 0.1
-                self.door_args = {
-                    'width': width,
-                    'margin': margin
-                }
-        # Set each missing door args
-        for door in self.doors:
-            for arg, value in self.door_args.items():
-                current_value = getattr(door, arg)
-                if not current_value:
-                    setattr(door, arg, value)
-        # Set each children missing door args
-        for room in self.children:
-            for door in room.doors:
-                for arg, value in self.door_args.items():
-                    current_value = getattr(door, arg)
-                    if not current_value:
-                        setattr(door, arg, value)
-        # Now set some parameters in children
-        for child in self.children:
-            child._top_down_init(self)
-
     def __str__(self):
         return '<Room "' + str(self.name) + '">'
 
     def __repr__(self):
         return '<Room "' + str(self.name) + '">'
 
-    # Get the children rooms
+    # Get the children rooms (normal getter)
     def get_children (self) -> List['Room']:
         return self._children
 
@@ -725,11 +719,13 @@ class Room:
         # If rects are previously calculated then return them
         if self._free_grid:
             return self._free_grid
+        # If there is no free grid and this room is a child adaptable room then the free grid is None
+        # Note that the grid of the parent is exactly the sum of the grid of its children
+        # There is no free space by definition, unless it has been forced (which makes total sense)
+        if self._child_adaptable_boundary:
+            return None
         # Return none if there is not boundary yet
         if not self.boundary:
-            return None
-        # If this is a child adaptable room then the free gris is always None since thi grid of the parent is exactly the sum of the grid of its children
-        if self._child_adaptable_boundary:
             return None
         # If there are no children then return the current boundary grid
         # If all children have no boundary then return the current boundary grid
@@ -817,6 +813,52 @@ class Room:
     # Free space grid (read only)
     corridor_grid = property(get_corridor_grid, set_corridor_grid, None, "The room corridor space grid")
 
+    # Get the door arguments
+    def get_door_args (self) -> dict:
+        # If we have a stored value already then return it
+        if self._door_args:
+            return self._door_args
+        # Otherwise we must guess the door args
+        # If we are not the root, inherit parent default door arguments
+        if self.parent:
+            self._door_args = self.parent.door_args
+            return self._door_args
+        # If we are the root, we have to guess the most suitable arguments
+        # Make the margined width of all doors equal to the minimum room minimum size
+        # Make the width of all doors the 80% of the margined width
+        margined_width = self.get_root_min_min_size()
+        # If we have not a margined width at this point me must complain about the inputs
+        if not margined_width:
+            raise InputError('Cannot guess the door width. Please set a minimum size or provide explicit "door_args" in the root room.')
+        width = margined_width * 0.8
+        margin = margined_width * 0.1
+        self._door_args = {
+            'width': width,
+            'margin': margin
+        }
+        return self._door_args
+
+    # Set the door arguments (regular setter)
+    def set_door_args (self, new_door_args : dict):
+        self._door_args = new_door_args
+
+    # Arguments to set doors by default in this room
+    door_args = property(get_door_args, set_door_args, None, "Arguments to set doors by default in this room")
+
+    # Get the doors (normal getter)
+    def get_doors (self) -> List[Door]:
+        return self._doors
+
+    # Set the doors
+    # As soon as doors are set, set self room as the parent room of each door
+    def set_doors (self, new_doors : List[Door]):
+        self._doors = new_doors
+        for door in self._doors:
+            door.room = self
+
+    # The room doors
+    doors = property(get_doors, set_doors, None, "The room doors")
+
     # Set the children boundaries according to the room configuration
     # This function triggers the logic to solve room distributions
     # If the recursive flag is passed then set each child's children boundaries and so on recursively
@@ -901,6 +943,7 @@ class Room:
     def set_child_room_boundary (self, room) -> bool:
         # If self is a child adaptable room
         if self._child_adaptable_boundary:
+            print(self._free_grid)
             # There are no boundary restrictions
             # All children will be set in one single step, as the maximum initial boundaries
             # To do so, we must find a suitable corner and space (rect) for the boundary to be set
@@ -1070,6 +1113,9 @@ class Room:
     def get_provisional_boundary (self) -> Optional['Boundary']:
         # Get children room grids
         children_grids = [ child.grid for child in self.children if child.grid ]
+        # Include also the free grid, if any
+        if self.free_grid:
+           children_grids.append(self.free_grid)
         # Include also the corridor grid, if any
         if self.corridor_grid:
            children_grids.append(self.corridor_grid)
@@ -1223,9 +1269,16 @@ class Room:
                     current_node['connected_segments'].append(segment)
                 else:
                     nodes[point] = {'connected_segments': [segment]}
+        # Set the rooms which are rigid for the path solving
+        # i.e. if a path is surrounded by rigid rooms then it is discarded
+        # Note that if parent is not child adaptable then its boundaries are also rigid
+        path_rigid_rooms = [ room for room in self.children if room.rigid ]
+        if not self._child_adaptable_boundary:
+            path_rigid_rooms.append(self)
         # Find which rooms are in contact to each node and if nodes are in the exterior boundary
         # Find also which nodes are doors
         for node_point, node_data in nodes.items():
+            # First find the node rooms
             rooms = []
             for child in self.children:
                 if not child.boundary:
@@ -1235,7 +1288,14 @@ class Room:
             if node_point in exterior_polygon:
                 rooms.append(self)
             node_data['rooms'] = rooms
-            node_data['is_door'] = node_point in door_points
+            # Now find out if it is a door
+            is_door = node_point in door_points
+            node_data['is_door'] = is_door
+            # Note that a door node should always have 2 rooms
+            # The exception is an scenario where the corridor is set while there is parent free space available yet
+            # Note that if a door node is surrounded by 2 rigid rooms then it will be not reachable by the corridor
+            if is_door and len(rooms) == 2 and all([ room in path_rigid_rooms for room in rooms ]):
+                raise ValueError('Door node ' + str(node_point) + ' is not reachable by the corridor. Is it between 2 rigid rooms?')
         # Now find "non-redundant" nodes and the "paths" between them
         # Redundant nodes are those whose contact rooms are already included in all connected nodes
         # Knwoing this is useful when we are expanding our corridor since a reundant node will never solve the puzzle
@@ -1254,12 +1314,12 @@ class Room:
             path_nodes = []
             for starting_segment in node_data['connected_segments']:
                 # Get the path rooms
-                # A path must always have 2 and only 2 rooms in a scenario where schildren have fully consumed parent area
+                # A path must always have 2 and only 2 rooms in a scenario where children have fully consumed parent area
                 # However, if the corridor is set while there is still free space it may happen that a node has only 1 room
                 path_rooms = [ room for room in node_data['rooms'] if starting_segment in room.boundary.exterior_polygon ]
                 # Check if both rooms from this path are rigid rooms
-                # In that case we discard the path rigth now since we cna not build a corridor here
-                if all([ room.rigid for room in path_rooms ]):
+                # In that case we discard the path rigth now since we can not build a corridor here
+                if len(path_rooms) == 2 and all([ room in path_rigid_rooms for room in path_rooms ]):
                     continue
                 last_segment = starting_segment
                 last_point = next(point for point in last_segment.points if point != node_point)
@@ -2770,7 +2830,7 @@ class Room:
             #          The recently pushed segments must remain as they are
             #          They do not exist for other rooms so me must exlcude them during the fitting to avoid inconsistency
             if protocol == 3 and self.get_required_area() < 0:
-                print('LOANED PUSH -> NEW REQUIRED AREA: ' + str(self.get_required_area()))
+                #print('LOANED PUSH -> NEW REQUIRED AREA: ' + str(self.get_required_area()))
                 if not self.fit_to_required_area(restricted_segments=new_segments):
                     self.boundary = backup_boundary
                     for i, modified_room in enumerate(rooms):
@@ -3347,7 +3407,6 @@ class Room:
     def solve (self, display : bool = False):
         global display_solving_process
         display_solving_process = display
-        self._top_down_init() # Run the final setup before starting the solving process
         self.set_children_boundaries(recursive=True)
 
 # The element which connects diferent floors of a building
@@ -3456,7 +3515,7 @@ class Stairs:
         # If shape is random:
         # WARNING: Note that there is no need to check if the upstairs room already existis to copy it
         # WARNING: When one of the rooms is set the other room is set as well
-        shape, downstairs_door, upstairs_door = self.get_random_shape()
+        shape, downstairs_door, upstairs_door = self.generate_shape()
         boundary = Boundary(shape)
         self._downstairs_room = Room(boundary=boundary, doors=[ downstairs_door ], rigid=True, name='Downstairs')
         self._upstairs_room = Room(boundary=boundary, doors=[ upstairs_door ], rigid=True, name='Upstairs')
@@ -3480,7 +3539,7 @@ class Stairs:
         # If shape is random:
         # WARNING: Note that there is no need to check if the upstairs room already existis to copy it
         # WARNING: When one of the rooms is set the other room is set as well
-        shape, downstairs_door, upstairs_door = self.get_random_shape()
+        shape, downstairs_door, upstairs_door = self.generate_shape()
         self._downstairs_room = Room(boundary=boundary, doors=[ downstairs_door ], rigid=True, name='Downstairs')
         self._upstairs_room = Room(boundary=boundary, doors=[ upstairs_door ], rigid=True, name='Upstairs')
         return self._upstairs_room
@@ -3560,7 +3619,7 @@ class Stairs:
     slope = property(get_slope, set_slope, None, "The slope")
 
     # Set a function to randomly generate a shape, downstairs door and upstairs door according to the stairs parameters
-    def get_random_shape (self) -> Tuple[Polygon, Door, Door]:
+    def generate_shape (self) -> Tuple[Polygon, Door, Door]:
         # At this point we do not know the position of the stairs, so we just build it next to the point 0,0 and in the positive side, to make it easier
         # Then the polygon with the doors can be translated, rotated or even transposed
         # Just a square using the width
@@ -3642,15 +3701,43 @@ class Building:
         # Set the stacking stairs flag
         self.stacking_stairs = stacking_stairs
 
-    # Solve each floor starting by the floor 0 (the first floor), then solving the superior floors and finally the basements
+    # Setup the stairs basics before solving boundary details
+    # This avoids hierarchy problems such as stair rooms not having a valid root floor to guess door args
+    def setup_stairs (self):
+        # Iterate over floors
+        for floor_index, stairs in self.stairs.items():
+            if not stairs:
+                continue
+            # Get the stairs current floor and check it exists
+            current_floor = self.floors.get(floor_index, None)
+            if not current_floor:
+                raise InputError('There is no floor ' + str(floor_index) + ' but there are staris for this floor')
+            # Get the stairs upper floor and check it exists
+            upper_floor = self.floors.get(floor_index + 1, None)
+            if not upper_floor:
+                raise InputError('Floor ' + str(floor_index) + ' has stairs but there is no upper floor')
+            # Set the downstair rooms for the current floor
+            downstairs_rooms = [ s.downstairs_room for s in stairs ]
+            current_floor.children += downstairs_rooms
+            # Set the upstairs room for the upper floor
+            upstairs_rooms = [ s.upstairs_room for s in stairs ]
+            upper_floor.children += upstairs_rooms
+            
+
+    # Solve all floors
     def solve (self, display : bool = False):
+        # First of all setup the stairs
+        self.setup_stairs()
+        # Solve each floor starting by the floor 0 (the first floor), then solving the superior floors and finally the basements
         sorted_floor_indices = list(range(self.highest_floor_index +1)) + list(range(self.lowest_floor_index, 0))
         for floor_index in sorted_floor_indices:
             floor = self.floors[floor_index]
             # Get the lower floor, it may be useful to aset a few parameter of the current one
             lower_floor_index = floor_index - 1
+            # Get the upper floor, it may be useful to aset a few parameter of the current one
+            upper_floor_index = floor_index + 1
             # In case this floor has not a forced boundary,
-            if not floor.boundary:
+            if not floor.input_boundary:
                 # It will be the same of the base (basement floors)
                 if floor_index < 0:
                     base_boundary = self.floors[0].boundary
@@ -3661,24 +3748,25 @@ class Building:
                     lower_floor_boundary = self.floors[lower_floor_index].boundary
                     floor.boundary = lower_floor_boundary
                     floor._child_adaptable_boundary = False
+                # In case this is the base floor
+                else:
+                    # We may need to set a bit of extra free space next to the stairs
+                    # This is for the perimeter in the floor above to have space for the corridor to reach the stairs door
+                    # Note that this has to be done now that the stair rooms are children of the floor
+                    # Otherwise the door is not able to find its arguments (width and margin) at this point since it has not root
+                    current_floor_stairs = self.stairs[floor_index]
+                    if floor_index == 0 and current_floor_stairs:
+                        # Now calculate the space required by the door
+                        for stair in current_floor_stairs:
+                            extra_space = Grid([ stair.upstairs_room.doors[0].generate_rect(inside=False) ])
+                            # DANI: Esto no funciona
+                            if floor.free_grid:
+                                floor._free_grid += extra_space
+                            else:
+                                floor._free_grid = extra_space
             # In case this floor has not forced doors there will be not doors incase it is not the base
             if not floor.doors and floor_index != 0:
                 floor.doors = []
-            # Find all stairs rooms to be added to the floor children rooms
-            stair_rooms = []
-            # Get the current floor stairs, if any
-            current_floor_stairs = self.stairs[floor_index]
-            if current_floor_stairs:
-                stair_rooms = [ stair.downstairs_room for stair in current_floor_stairs ]
-            # Get the lower floor stairs, if there is a lower floor and it has stairs
-            lower_stairs = []
-            if lower_floor_index in sorted_floor_indices:
-                lower_stairs = self.stairs[lower_floor_index]
-                if lower_stairs:
-                    stair_rooms += [ stair.upstairs_room for stair in lower_stairs ]            
-            # Add the corresponding stairs room to the floor children rooms list
-            # Add them in first place, so they are solved before (maybe?)
-            floor.children = stair_rooms + floor.children
             # Start the whole solving process
             floor.solve(display)
 

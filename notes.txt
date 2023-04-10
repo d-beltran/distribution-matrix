@@ -1,13 +1,12 @@
 RAM
 
-- Al hacer los zig zags las puertas impiden cuando podrían no hacerlo
+La escalera del floor 0 tiene que añadir espacio extra en la door de salida de la planta de arriba -> está planteada pero no acabado
+Todas las escaleras en todos los floors deberían colocarse pensando en el upper en casos de de boundary fija
 
-- A veces quedan rinconcillos entre pasillo y perímetro del padre
-	- Hay que ver como lo arreglamos
+substituir forced area por target area en un sistema de 'max_area' y 'min_area'
 
 Largo plazo:
 
-- Puertas y pasillos
 - Piso entero
 	* Elementos con herencia para plantas superiores:
 		- Escaleras
@@ -25,7 +24,8 @@ Largo plazo:
 
 FONDO (opcional, poco prioritario)
 
-- el pasillo podría salirse del perímetro cuando el perímetro no está forzado
+- A veces quedan rinconcillos entre pasillo y perímetro del padre
+	* de momento este espacio se descarta -> se le podría dar una vueltecilla
 
 - el reduce children corner no contempla la posibilidad de que el zigzag esté en el parent boundary
 	* el push_boundary_segment si que lo contempla e impide que suceda, pero igual habría que matarlo antes
