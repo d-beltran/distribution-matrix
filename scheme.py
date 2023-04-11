@@ -177,7 +177,9 @@ class Door:
         # If width is 0 then the segment can not exist
         if width == 0:
             raise ValueError('Cannot generate a segment for a door of width 0')
-        # If the door point or polygon are not assigned we c[]
+        # If the door point or polygon are not assigned we can not generate the segment
+        room_polygon = self.get_room_polygon()
+        if not room_polygon or not self.point:
             return None
         # Otheriwse, generate the margined segment
         polygon_segment = next(( segment for segment in room_polygon.segments if self.point in segment ), None)
