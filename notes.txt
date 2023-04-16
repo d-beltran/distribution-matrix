@@ -1,6 +1,7 @@
 RAM
 
-La escalera del floor 0 tiene que añadir espacio extra en la door de salida de la planta de arriba -> está planteada pero no acabado
+child adaptable debería ser una bool lista que se asigne al ser consultada por primera vez
+
 Todas las escaleras en todos los floors deberían colocarse pensando en el upper en casos de de boundary fija
 
 substituir forced area por target area en un sistema de 'max_area' y 'min_area'

@@ -21,6 +21,7 @@ random.seed(seed)
 
 # Set if the solving process must be displayed
 display_solving_process = False
+
 # Sets how much greater is the effective minimum size in the steps previous to corridor and wall tickness build
 # The most preventive margin we have, the most respect for the minimum size but the less flexibility when solving the puzzle
 # This means a strict protocol may have not solution
@@ -455,7 +456,9 @@ class Room:
         # Maximum size in at least one dimension
         max_size : Optional[number] = None,
         # Set if the room boundary may me modified
-        rigid : bool = False,
+        # It is true by default when an input boundary is passed
+        # It is false by default otherwise
+        rigid : Optional[bool] = None,
         # Set the maximum number of corners in the final room boundary
         # Note that this parameter may be passed only when the boundary is not passed
         # Root only
@@ -467,6 +470,10 @@ class Room:
         # The default inputs for all doors whose inputs are not specified
         # These options are inherited by children rooms whose options are not specified
         door_args : Optional[Dict] = None,
+        # Set the room height
+        # This height is the used to raise the 3D scheme
+        # However, it may also affect the 2D distribution, since stairs rely on this height to calculate their lengths
+        height : Optional[number] = None,
         # The name and color parameters are only representation parameters and they have no effect in the logic
         name : str = 'Unnamed',
         segments_color : str = 'black',
@@ -476,16 +483,19 @@ class Room:
         # Set the parent room from the inputs
         # Note that this can be done only when the parent has been previously initialized
         parent : Optional['Room'] = None,
-        # Set the room height
-        # This height is the used to raise the 3D scheme
-        # However, it may also affect the 2D distribution, since stairs rely on this height to calculate their lengths
-        height : Optional[number] = None
+        # Set the parent building (if any)
+        # The parent building may be used to guess some default values
+        # However the parent building is not mandatory even in the root room
+        parent_building : Optional['Room'] = None,
     ):
         # Set internal variables
         self._boundary = None
         self.input_boundary = boundary
-        # DANI: esto no está implementado
-        # self.forced_boundary = boundary
+        # The forced grid is the space which must be occupied by a room whose boundary is not fixed (child adaptable)
+        # Note that this value is totally redundant for rooms with fixed boundaries
+        # Note also that the input boundary becomes the forced grid by default
+        # Thus it makes total sense passing a boundary and flagging rigid as false
+        self.forced_grid = boundary.grid if boundary else Grid()
         self._grid = None
         self._free_grid = None
         # Set representation parameters
@@ -493,10 +503,12 @@ class Room:
         self.segments_color = segments_color
         self.fill_color = fill_color
         # Save the height
-        self.height = height
+        self._height = height
         # Set up the hierarchy of rooms
         # Parent is never assigned from the instance itself, but it is assigned by the parent
         self.parent = parent
+        # Save the parent building
+        self.parent_building = parent_building
         # Set an atrribute to sabe the corridor grid when it is set
         self._corridor_grid = None
         # Set the boundary
@@ -531,7 +543,10 @@ class Room:
         if min_size and self.forced_area and self.forced_area < min_size**2:
             raise InputError('Forced area is not sufficient for the minimum size in room ' + name)
         # Set if the boundary is rigid
-        self.rigid = rigid
+        if rigid == None:
+            self.rigid = bool(boundary)
+        else:
+            self.rigid = rigid
         # Set the maximum number of corners
         self.max_corners = max_corners
         if max_corners != None:
@@ -640,19 +655,19 @@ class Room:
     children = property(get_children, set_children, None, "The children rooms")
 
     # Get the boundary
-    # Just return the internal boundary value
     def get_boundary (self) -> Boundary:
+        # Return the internal stored value if already exists
         if self._boundary:
             return self._boundary
-        if self._grid:
+        # Otherwise, get the grid boundary
+        # WARNING: Note that we are accessing the public grid value, not the private
+        # WARNING: The grid does never read the public boundary value because we would fall in a loop
+        # The grid leads over the boundary in adaptable boundary scenarios
+        if self.grid:
             boundaries = self.grid.boundaries
-            if len(boundaries) == 1:
-                self._boundary = boundaries[0]
-                return self._boundary
             if len(boundaries) > 1:
                 raise ValueError('A single room can not have more than 1 boundary')
-        if self._child_adaptable_boundary:
-            self._boundary = self.get_provisional_boundary()
+            self._boundary = boundaries[0]
             return self._boundary
         return None
 
@@ -677,10 +692,16 @@ class Room:
     # Get the grid
     # Just return the internal boundary grid value
     def get_grid (self) -> Optional[Grid]:
-        if self._grid:
+        # Note that we explicitly evaluate the grid not to be None
+        # This is because the free grid may be an empty grid (e.g. child adaptable boundary when there are not children yet)
+        # An empty grid evaluates as false, but it has a meaning and thus it must be returned
+        if self._grid != None:
             return self._grid
         if self._boundary:
             return self._boundary.grid
+        if self._child_adaptable_boundary:
+            self._grid = self.get_provisional_grid()
+            return self._grid
         return None
 
     # Set the grid
@@ -718,44 +739,38 @@ class Room:
     # Get the available space inside the room boundary as a rectangles grid
     # i.e. space not filled by children rooms or the corridor
     def get_free_grid (self) -> Optional[Grid]:
-        # If rects are previously calculated then return them
-        if self._free_grid:
+        # If free grid is previously calculated then return it
+        # Note that we explicitly evaluate the free grid not to be None
+        # This is because the free grid may be also an empty grid (i.e. there is no free space)
+        # An empty grid evaluates as false, but it has a meaning and thus free grid must not be calculated again
+        if self._free_grid != None:
             return self._free_grid
         # If there is no free grid and this room is a child adaptable room then the free grid is None
         # Note that the grid of the parent is exactly the sum of the grid of its children
         # There is no free space by definition, unless it has been forced (which makes total sense)
-        if self._child_adaptable_boundary:
-            return None
+        # if self._child_adaptable_boundary:
+        #     return None
         # Return none if there is not boundary yet
         if not self.boundary:
             return None
         # If there are no children then return the current boundary grid
         # If all children have no boundary then return the current boundary grid
         if len(self.children) == 0 or not any([ child.boundary for child in self.children ]):
-            free_grid = self.grid
-        # Otherwise, find out the free space grid inside the room boundary
-        # Add the children room boundary exterior polygons to self room boundary interior polygons
-        # Add the corridor boundary exterior polygons to self room boundary interior polygons
-        else:
-            children_polygons = [ child.boundary.exterior_polygon for child in self.children if child.boundary ]
-            corridor_polygons = [ boundary.exterior_polygon for boundary in self.corridor_grid.boundaries ] if self.corridor_grid else []
-            discareded_polygons = [ boundary.exterior_polygon for boundary in self.discarded_grid.boundaries ] if self.discarded_grid else []
-            occupied_polygons = children_polygons + corridor_polygons + discareded_polygons
-            free_boundary = Boundary(self.boundary.exterior_polygon, self.boundary.interior_polygons + occupied_polygons)
-            free_grid = free_boundary.grid
-        # If there is no free grid (i.e. children rooms have fully consumed the parent) then return None
-        if not free_grid:
-            return None
-        # Apply the current room colors to all rectangles
-        for rect in free_grid.rects:
-            rect.segments_color = self.segments_color
-            rect.fill_color = self.fill_color
+            self._free_grid = self.grid
+            return self._free_grid
+        # Otherwise, find out the free space grid
+        # Get all non-free space grids
+        occupied_grids = [ child.grid for child in self.children if child.grid ]
+        if self.corridor_grid:
+            occupied_grids.append(self.corridor_grid)
+        if self.discarded_grid:
+            occupied_grids.append(self.discarded_grid)
+        # Substract each occupied grid from the total grid
+        free_grid = self.grid
+        for occupied_grid in occupied_grids:
+            free_grid -= occupied_grid
+        # Save the free grid and return it
         self._free_grid = free_grid
-        # ---------------------------------------------------------------------------------------------------
-        # DANI: Muestra los rects la primera vez que se calculan
-        # colored_rects = [ rect.get_colored_rect(segments_color='red') for rect in free_grid.rects ]
-        # self.update_display(colored_rects)
-        # ---------------------------------------------------------------------------------------------------
         return free_grid
     # Free space grid (read only)
     free_grid = property(get_free_grid, None, None, "The room free space grid")
@@ -781,11 +796,16 @@ class Room:
             self._corridor_size = self.min_size
             return self._corridor_size
         # If the minimum size is missing we can use the parent corridor size
-        if self.parent and self.parent.corridor_size:
+        if self.parent:
             self._corridor_size = self.parent.corridor_size
             return self._corridor_size
-        # If the parent corridor size is missing we can use the root minimum size
-        root_min_size = self.get_root_min_min_size()
+        # If we are the root but there is a parent building then inherit its value
+        if self.parent_building:
+            self._corridor_size = self.parent_building.room_args['corridor_size']
+            return self._corridor_size
+        # If we can not inherit the values then we have to guess a reasonable value
+        # Use the root minimum size as corridor size
+        root_min_size = self.get_root_min_size()
         if root_min_size:
             self._corridor_size = root_min_size
             return self._corridor_size
@@ -820,18 +840,21 @@ class Room:
         # If we have a stored value already then return it
         if self._door_args:
             return self._door_args
-        # Otherwise we must guess the door args
         # If we are not the root, inherit parent default door arguments
         if self.parent:
             self._door_args = self.parent.door_args
             return self._door_args
-        # If we are the root, we have to guess the most suitable arguments
+        # If we are the root but there is a parent building then inherit its value
+        if self.parent_building:
+            self._door_args = self.parent_building.room_args['door_args']
+            return self._door_args
+        # If we are the root and there is no parent building, we have to guess the most suitable door arguments
         # Make the margined width of all doors equal to the minimum room minimum size
         # Make the width of all doors the 80% of the margined width
-        margined_width = self.get_root_min_min_size()
+        margined_width = self.get_root_min_size()
         # If we have not a margined width at this point me must complain about the inputs
         if not margined_width:
-            raise InputError('Cannot guess the door width. Please set a minimum size or provide explicit "door_args" in the root room.')
+            raise InputError('Cannot guess the door width. Please set a minimum size or provide explicit "door_args" in the root room or in the parent building "room_args"')
         width = margined_width * 0.8
         margin = margined_width * 0.1
         self._door_args = {
@@ -847,7 +870,7 @@ class Room:
     # Arguments to set doors by default in this room
     door_args = property(get_door_args, set_door_args, None, "Arguments to set doors by default in this room")
 
-    # Get the doors (normal getter)
+    # Get the doors (regular getter)
     def get_doors (self) -> List[Door]:
         return self._doors
 
@@ -860,6 +883,29 @@ class Room:
 
     # The room doors
     doors = property(get_doors, set_doors, None, "The room doors")
+
+    # Get the height
+    def get_height (self) -> number:
+        # If there is a stored value already then return it
+        if self._height != None:
+            return self._height
+        # Otherwise, the parent height as the current room height
+        # Note that we are reading the public height, not the private
+        # Thus it is a recursive setter until we find a parent with a height value
+        if self.parent:
+            return self.height
+        # If we are the root and there is a parent building we can inherit the height from it
+        if self.parent_building:
+            return self.parent_building.room_args['height']
+        # If there is no parent (i.e. this room is the root) there is noheight to guess, so we complain
+        raise InputError('Cannot guess ' + self.name + ' height. Please set a height at least in the root room/building')
+        
+    # Set the height (regular setter)
+    def set_height (self, new_height : number):
+        self._height = new_height
+
+    # The room height
+    height = property(get_height, set_height, None, "The room height")
 
     # Set the children boundaries according to the room configuration
     # This function triggers the logic to solve room distributions
@@ -945,7 +991,6 @@ class Room:
     def set_child_room_boundary (self, room) -> bool:
         # If self is a child adaptable room
         if self._child_adaptable_boundary:
-            print(self._free_grid)
             # There are no boundary restrictions
             # All children will be set in one single step, as the maximum initial boundaries
             # To do so, we must find a suitable corner and space (rect) for the boundary to be set
@@ -1098,7 +1143,7 @@ class Room:
                 previous_initial_boundary = room.boundary
                 # If the new boundary is not respecting minimum size in the paren free grid we must skip to the next corner
                 if not self.free_grid.check_minimum(room.parent_free_limit):
-                    print('NOT RESPECTING PARENT FREE LIMIT')
+                    print('WARNING: Not respecting minimum size (' + str(room.parent_free_limit) + ') in parent free space')
                     continue
                 # Proceed with the expansion of this child room until it reaches its forced area
                 if room.fit_to_required_area():
@@ -1110,48 +1155,25 @@ class Room:
             # If at this point we still have no boundary it means there is no available place to set the perimeter
             return False
 
-    # Build a provisional boundary from the children rooms, using their grids
-    # This function is meant to be used only when the parent room has not boundary
-    def get_provisional_boundary (self) -> Optional['Boundary']:
+    # Build a provisional grid from the children room grids
+    # This function is meant to be used only when the parent (self) room has an adaptable boundary
+    def get_provisional_grid (self) -> Grid:
         # Get children room grids
         children_grids = [ child.grid for child in self.children if child.grid ]
-        # Include also the free grid, if any
-        if self.free_grid:
-           children_grids.append(self.free_grid)
+        # Include also the forced grid, if any
+        # Note that this is the canonical way to add 'free space' in a child adaptable boundary room
+        # You must never get the free grid from here, since the free grid is calculated from the gird and this function calculates the grid
+        if self.forced_grid:
+           children_grids.append(self.forced_grid)
         # Include also the corridor grid, if any
         if self.corridor_grid:
            children_grids.append(self.corridor_grid)
         # If there are no grids at this point then we are done
         if len(children_grids) == 0:
-            return None
+            return Grid()
         # Merge all grids
-        provisional_grid = children_grids[0]
-        for grid in children_grids[1:]:
-            provisional_grid += grid
-        # Return its boundary, which must be only one
-        boundaries = provisional_grid.boundaries
-        if len(boundaries) > 1:
-            raise ValueError('There should be only one boundary a this point')
-        return boundaries[0]
-
-    # Build a provisional boundary from the child boundaries, using their exterior polygons
-    # This function is meant to be used only when the parent room has not boundary
-    # DANI: Mucho más rápida, pero falla cuando hay un overlap entre dos habitaciones (i.e. mientras se invade)
-    def DEPRECTAED_get_provisional_boundary (self) -> Optional['Boundary']:
-        child_boundary_segments = []
-        for child in self.children:
-            if not child.boundary:
-                continue
-            child_boundary_segments += child.boundary.exterior_polygon.segments
-        if len(child_boundary_segments) == 0:
-            return None
-        # Get all children exterior polygon segments which do not overlap and make polygons from them
-        provisional_boundary_segments = get_non_overlap_segments(child_boundary_segments)
-        provisional_boundary_polygons = list(connect_segments(provisional_boundary_segments))
-        # Sort polygons by area and set the biggest polygon as the exterior polygon
-        provisional_boundary_polygons.sort(key=lambda x: x.area, reverse=True)
-        provisional_boundary = Boundary(provisional_boundary_polygons[0], provisional_boundary_polygons[1:])
-        return provisional_boundary
+        provisional_grid = merge_grids(children_grids)
+        return provisional_grid
 
     # Build a provisional exterior grid
     # This function is meant to be used only when the parent room has not boundary
@@ -2241,9 +2263,14 @@ class Room:
     # Get to the the root and the check all children min sizes recuersively in order to get the minimum
     # This function is meant to be used only once by the root, so its value is not stored
     # WARNING: 0 values are removed
-    def get_root_min_min_size (self) -> number:
+    def get_root_min_size (self) -> number:
         root = self.get_root_room()
-        all_rooms = root.get_rooms_recuersive()
+        return root.get_min_size_recursive()
+
+    # Get the minimum size of this room and its children recurisvely
+    # Return the lowest minimum size
+    def get_min_size_recursive (self) -> number:
+        all_rooms = self.get_rooms_recuersive()
         all_min_sizes = [ room.min_size for room in all_rooms if room.min_size > 0 ]
         if len(all_min_sizes) == 0:
             return 0
@@ -3651,10 +3678,9 @@ class Building:
         # Each floor is a room which may contains several rooms
         # Keys are the floor number. The 0 is the base. Negative numbers stand for the basements
         floors : dict,
-        # Set the height of the floors
-        # This height is set for all those floors which are missing a forced height
-        # Note that then each floor may have a different forced height
-        floor_heights : number,
+        # Set the default room arguments
+        # These values are applied to all rooms unless other values are assigned explicitly
+        room_args : Optional[dict] = None,
         # Set the stairs
         # Stairs are also organized by dict indices: stairs to move from floor 0 to floor 1 will be sotred in the index 0
         # Note that each floor may have several stairs
@@ -3683,11 +3709,9 @@ class Building:
         for index in range(lowest_floor_index +1, highest_floor_index):
             if index not in floor_indices:
                 raise InputError('Missing floor ' + str(index))
-        # Set the floor heights
-        self.floor_heights = floor_heights
-        for floor in floors.values():
-            if floor.height == None:
-                floor.height = floor_heights
+        # Set the parent building in all floors
+        for floor in self.floors.values():
+            floor.parent_building = self
         # Set the stairs
         self.stairs = stairs
         # If stairs are missing then set the default values
@@ -3702,6 +3726,32 @@ class Building:
             self.stairs[highest_floor_index] = None
         # Set the stacking stairs flag
         self.stacking_stairs = stacking_stairs
+        # Calcualte the overall min size which may be useful to set some default values
+        floor_min_sizes = [ floor.get_min_size_recursive() for floor in self.floors.values() ]
+        overall_min_size = min(floor_min_sizes)
+        if not overall_min_size:
+            raise InputError('Cannot guess the overall minimum size. Please set a minimum size somewhere')
+        # Set the room args
+        self.room_args = room_args if room_args else {}
+        # Complete the missing values with some default values
+        # If the height is not passed try to guess a reasonable height
+        if room_args.get('height', None) == None:
+            # DANI: Ya pensaré algo un poco más elaborado
+            room_args['height'] = 20
+        # If the corridor size is missing guess a resonable size from the overall minimum size
+        if room_args.get('corridor_size', None) == None:
+            room_args['corridor_size'] = overall_min_size
+        # If the door args are missing guess resonable values from the overall minimum size
+        if room_args.get('door_args', None) == None:
+            # Make the margined width of all doors equal to the overall minimum size
+            # Make the width of all doors the 80% of the margined width
+            margined_width = overall_min_size
+            width = margined_width * 0.8
+            margin = margined_width * 0.1
+            room_args['door_args'] = {
+                'width': width,
+                'margin': margin
+            }
 
     # Setup the stairs basics before solving boundary details
     # This avoids hierarchy problems such as stair rooms not having a valid root floor to guess door args
@@ -3761,11 +3811,7 @@ class Building:
                         # Now calculate the space required by the door
                         for stair in current_floor_stairs:
                             extra_space = Grid([ stair.upstairs_room.doors[0].generate_rect(inside=False) ])
-                            # DANI: Esto no funciona
-                            if floor.free_grid:
-                                floor._free_grid += extra_space
-                            else:
-                                floor._free_grid = extra_space
+                            floor.forced_grid += extra_space
             # In case this floor has not forced doors there will be not doors incase it is not the base
             if not floor.doors and floor_index != 0:
                 floor.doors = []

@@ -224,7 +224,11 @@ def get_rects_from_anything (things : list):
                 # WARNING: Do not put any code below this part or it may not be run in some frames
                 # This part is prote to fail
                 if thing.boundary:
-                    rects += thing.free_grid.rects
+                    free_grid_rects = thing.free_grid.rects
+                    for rect in free_grid_rects:
+                        rect.segments_color = thing.segments_color
+                        rect.fill_color = thing.fill_color
+                    rects += free_grid_rects
                 # WARNING: Do not write code here!!
         except:
             pass

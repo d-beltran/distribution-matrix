@@ -2046,8 +2046,9 @@ class Boundary:
 # Two connected rectangles have the whole segment connected
 # i.e. both rectangles have an identical segment
 # This class is used to handle space inside boundaries
+# Note that a grid may be empty (i.e. the list of rects may be empty)
 class Grid:
-    def __init__(self, rects : List[Rect]):
+    def __init__(self, rects : List[Rect] = []):
         self._rects = rects
         # Check rectangles to match the grid format requirements
         self.check()
@@ -2062,6 +2063,9 @@ class Grid:
 
     def __repr__(self):
         return str(self.rects)
+
+    def __bool__(self):
+        return len(self._rects) > 0
 
     def __contains__(self, other):
         if isinstance(other, Point):
@@ -2179,9 +2183,9 @@ class Grid:
     # These rectangles will be used to build a new grid with different rectangles which do follow the standards
     @classmethod
     def non_canonical (cls, rects : List[Rect]):
-        # There must be at least one rectangle
+        # If there are no rects then set an empty grid
         if len(rects) == 0:
-            raise ValueError('There must be at least one rect to build a grid')
+            return cls()
         # First of all find rectangle groups
         # This is the non-canonical version of find_connected_rect_groups method
         rects_to_group = [ *rects ]
@@ -2325,10 +2329,8 @@ class Grid:
         return overlap_rects
 
     # Return the resulting grid after overlapping self grid to other grid
-    def get_overlap_grid (self, grid : 'Grid') -> Optional['Grid']:
+    def get_overlap_grid (self, grid : 'Grid') -> 'Grid':
         overlap_rects = self.get_overlap_rects(grid)
-        if len(overlap_rects) == 0:
-            return None
         return Grid.non_canonical(overlap_rects)
 
     # Return the merge space between two grids splitted in rectangles
@@ -2391,26 +2393,12 @@ class Grid:
             substract_rects.append(rect)
         return substract_rects
 
-    # Return self grid space after substracting other grid space splitted in rectangles
-    # Note that these rectangles will not follow the grid standard rules
-    # DEPRECATED
-    def get_substract_rects (self, grid : 'Grid') -> List[Rect]:
-        substract_rects = []
-        for rect in self.rects:
-            new_rects = rect.subtract_rects(grid.rects)
-            substract_rects += new_rects
-        return substract_rects
-
     # Return the resulting grid after substracting other grid to self grid
-    # Return None if the other grid fully consumes self grid
-    def get_substract_grid (self, grid : 'Grid') -> Optional['Grid']:
-        #substract_rects = self.get_substract_rects(grid)
+    def get_substract_grid (self, grid : 'Grid') -> 'Grid':
         overlaps = self.get_overlaps(grid)
         if not overlaps:
             return self
         substract_rects = self.get_substract_overlaps(overlaps)
-        if len(substract_rects) == 0:
-            return None
         return Grid.non_canonical(substract_rects)
 
     # Search all maximum rectangles which fulfill the specified minimum x and y sizes
@@ -2512,9 +2500,9 @@ class Grid:
             respecting_rects.append(rect)
         # Make a new grid from the minimum rects which do respect the minimum size
         # Use self grid in case all self rects are respecting the minimum size
-        # Return None if there are not respecting rects at this point
+        # Return an empty grid if there are not respecting rects at this point
         if len(respecting_rects) == 0:
-            return None
+            return Grid()
         respecting_region = self if len(self.rects) == len(respecting_rects) else Grid(respecting_rects)
         # Now, from the respecting regions, find groups of connected rects which respect the minimum size at the connections
         # Note that there may be more than one region (even when there are not regions which do not respect it)

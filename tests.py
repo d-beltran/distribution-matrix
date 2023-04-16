@@ -324,5 +324,5 @@ test_building_1 = Building(
             ]
         )
     },
-    floor_heights = 20
+    room_args = { 'height': 20 }
 )
