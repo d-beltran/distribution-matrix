@@ -1094,12 +1094,17 @@ class Room:
             if forced:
                 backup = self.make_children_backup()
                 
+
             # Try to set up the new room in all possible sites until we find one
             # Each 'site' means each corner in each suitable rectangle
             # Check each site to allow other rooms to grow
             # Pick only corners wich are already in the free boundary (no matter if interior or exterior)
             sites = [ (corner, rect) for rect in sorted_suitable_rects for corner in rect.get_corners() ]
+            # Save previous boundary to not repeat already checked (and failed) boundaries
             previous_initial_boundary = None
+            # Get as reference the current free grid which is already respecting the parent free limit
+            # Note that this minimum size may not be respected already independently of the position of the initial room boundary
+            parent_limited_free_grid = self.free_grid.keep_minimum(room.parent_free_limit)
             for corner, rect in sites:
                 # In case we forced the base boundary we must check which children were invaded
                 # In addition, the base boundary must be as small as possible
@@ -1142,7 +1147,8 @@ class Room:
                     continue
                 previous_initial_boundary = room.boundary
                 # If the new boundary is not respecting minimum size in the paren free grid we must skip to the next corner
-                if not self.free_grid.check_minimum(room.parent_free_limit):
+                truncated_parent_limited_free_grid = parent_limited_free_grid - room.grid
+                if not truncated_parent_limited_free_grid.check_minimum(room.parent_free_limit):
                     print('WARNING: Not respecting minimum size (' + str(room.parent_free_limit) + ') in parent free space')
                     continue
                 # Proceed with the expansion of this child room until it reaches its forced area
@@ -3774,6 +3780,32 @@ class Building:
             # Set the upstairs room for the upper floor
             upstairs_rooms = [ s.upstairs_room for s in stairs ]
             upper_floor.children += upstairs_rooms
+
+    # DANI: Al final esto no lo he implementado
+    # Fix corridor sized regions in a non-base floor which are produced by actual corridors in previous floors
+    # These regions are common and they appear between rigid rooms (e.g. stairs) and the floor perimeter
+    # They are problematic since they are too thin to place rooms (even if possible the result is not realistic)
+    # Note that if stairs are stackable and this is not the last roof then this space must become corridor inmediatelly
+    # These regions are handled here to improve the result. For now they are just discarded.
+    # In future implementations these regions may be recycled as:
+    # - Additional corridor (useless but estetical)
+    # And if they are in contact with the perimeter (which is very common) they may be also recycled as:
+    # - Exterior balconies
+    # - Little roofs (i.e. perimeter truncation)
+    # *** Note that there may be no problem in reducing the perimeter since there may be no upper floors (also very commom)
+    def _fix_inherited_ghost_corridor_regions (self, floor : Room):
+        # Find these inherited ghost corridor regions
+        # Get all free regions not respecting the parent free limit (i.e. the highest minimum size among its children)
+        free_regions = floor.free_grid
+        correct_regions = free_regions.keep_minimum(floor.parent_free_limit)
+        wrong_regions = free_regions - correct_regions
+        if not wrong_regions:
+            return
+        # Keep only those which respect the corridor size
+        ghost_corridor_regions = Grid()
+        for wrong_region in wrong_regions.find_connected_grids():
+            if wrong_region.check_minimum(floor.corridor_size):
+                ghost_corridor_regions += wrong_region
             
 
     # Solve all floors
@@ -3790,17 +3822,19 @@ class Building:
             upper_floor_index = floor_index + 1
             # In case this floor has not a forced boundary,
             if not floor.input_boundary:
-                # It will be the same of the base (basement floors)
+                # Basement floors
                 if floor_index < 0:
+                    # We set same boundary as the base
                     base_boundary = self.floors[0].boundary
                     floor.boundary = base_boundary
                     floor._child_adaptable_boundary = False
-                # Or the lower floor (not basement floors)
+                # Upper floors
                 elif floor_index > 0:
+                    # We set same boundary as the lower floor
                     lower_floor_boundary = self.floors[lower_floor_index].boundary
                     floor.boundary = lower_floor_boundary
                     floor._child_adaptable_boundary = False
-                # In case this is the base floor
+                # Base floor
                 else:
                     # We may need to set a bit of extra free space next to the stairs
                     # This is for the perimeter in the floor above to have space for the corridor to reach the stairs door

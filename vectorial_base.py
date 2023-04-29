@@ -2275,7 +2275,7 @@ class Grid:
     def find_boundaries (self) -> List[Boundary]:
         boundaries = []
         # First of all isolate groups of connected rectangles
-        rect_groups = self.find_connected_rect_groups()
+        rect_groups = list(self.find_connected_rect_groups())
         # Now find the boundary of each group
         for group in rect_groups:
             # Get all rectangle segments and find those which are not duplicated
@@ -2487,22 +2487,22 @@ class Grid:
 
     # This function is used to generate a new grid without all regions which do not respect a minimum size
     def keep_minimum (self, minimum : number) -> Optional['Grid']:
-        # Find the maximum size both in x and y for each rect in the grid
-        # To do so, find all maximum rects which include a specific rect and get the maximum sizes among them
+        # For each maximum rect in the grid whcih respects both dimesions, keep all its contained rects
         respecting_rects = []
-        for rect in self.rects:
-            max_rects = [ max_rect[0] for max_rect in self.max_rects if rect in max_rect[1] ]
-            max_x_size = max([ rect.get_x_size() for rect in max_rects ])
-            max_y_size = max([ rect.get_y_size() for rect in max_rects ])
-            # If any of the sizes is not enough to cover the size then set the rect as non respecting
-            if max_x_size < minimum or  max_y_size < minimum:
+        for max_rect, contained_rects in self.max_rects:
+            # If any of the sizes is not enough to cover the size then this maximum rectangle is not respecting the limits
+            max_x_size, max_y_size = max_rect.get_size()
+            if max_x_size < minimum or max_y_size < minimum:
                 continue
-            respecting_rects.append(rect)
-        # Make a new grid from the minimum rects which do respect the minimum size
-        # Use self grid in case all self rects are respecting the minimum size
+            # Add the contained rects to the respecting rects list
+            respecting_rects += contained_rects
         # Return an empty grid if there are not respecting rects at this point
         if len(respecting_rects) == 0:
             return Grid()
+        # Remove duplicates
+        respecting_rects = list(set(respecting_rects))
+        # Make a new grid from the minimum rects which do respect the minimum size
+        # Use self grid in case all self rects are respecting the minimum size
         respecting_region = self if len(self.rects) == len(respecting_rects) else Grid(respecting_rects)
         # Now, from the respecting regions, find groups of connected rects which respect the minimum size at the connections
         # Note that there may be more than one region (even when there are not regions which do not respect it)
@@ -2767,9 +2767,8 @@ class Grid:
         return columns
 
     # Find groups of connected rectangles
-    def find_connected_rect_groups (self):
+    def find_connected_rect_groups (self) -> Generator[List[Rect], None, None]:
         rects_to_group = self.rects
-        rect_groups = []
         while len(rects_to_group) > 0:
             first_rect = rects_to_group[0]
             new_group = [ first_rect ]
@@ -2777,8 +2776,12 @@ class Grid:
                 connected_rects = self.get_connected_rects(current_rect)
                 new_group += [ rect for rect in connected_rects if rect not in new_group ]
             rects_to_group = [ rect for rect in rects_to_group if rect not in new_group ]
-            rect_groups.append(new_group)
-        return rect_groups
+            yield new_group
+
+    # Generate individual grids of connected rects only
+    def find_connected_grids (self) -> Generator['Grid', None, None]:
+        for connected_rect_group in self.find_connected_rect_groups():
+            yield Grid(connected_rect_group)
 
     # Given a line, get all segment regions which overlap the grid
     def get_line_overlap_segments (self, line : Line) -> List[Segment]:
