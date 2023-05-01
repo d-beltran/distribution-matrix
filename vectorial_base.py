@@ -3140,13 +3140,16 @@ def generate_path_boundaries (path : List['Segment'], size : Union[number, Calla
         # This segment will be generated from a line which intersects both of the boundary lines in the only segment
         if len(connected_segments) == 1:
             segment = connected_segments[0]
-            size_difference = size(segment, segment.direction) - segment.length
             # Using the current point as the reference point of view
             is_segment_pointing_outside = point == segment.a
             lines = segment_lines[segment]
             clockwise_line = lines['clockwise'] if is_segment_pointing_outside else lines['counterclockwise']
             counterclockwise_line = lines['counterclockwise'] if is_segment_pointing_outside else lines['clockwise']
             perpendicular_vector = clockwise_line.vector.rotate(90)
+            # Calculate the size required
+            # DANI: Notese que hay una situación (aunque rebuscada)en que se añade espacio extra cuando no se debería
+            # DANI: Vease figura 6
+            size_difference = size(segment, segment.direction) - segment.length
             # Push the segment point in case the segment is to short to fill the size
             if size_difference > 0:
                 push_direction = -segment.direction if is_segment_pointing_outside else segment.direction

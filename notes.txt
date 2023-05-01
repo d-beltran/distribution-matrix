@@ -25,6 +25,10 @@ Largo plazo:
 
 FONDO (opcional, poco prioritario)
 
+los pasillos conectados a free space a veces quedan mal (cuando entran al free space por una esquina)
+	* es una situación rebuscada, pero puede darse
+	- arreglar esto no es super banal. piensa que el pasillo que entra puede estar a su vez desplazado por un rigid boundary
+
 - A veces quedan rinconcillos entre pasillo y perímetro del padre
 	* de momento este espacio se descarta -> se le podría dar una vueltecilla
 

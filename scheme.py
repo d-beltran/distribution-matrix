@@ -55,7 +55,9 @@ class Door:
         pivot : Optional[Point] = None,
         # Set if the door is rigid
         # i.e. its point may not change as a result of the solving process
-        rigid : bool = False
+        rigid : bool = False,
+        # Set the parent room
+        room : Optional['Room'] = None
     ):  
         # These values are usually None at this point
         # They are usually set further from the door room 'door_args' value
@@ -69,7 +71,7 @@ class Door:
         self._pivot = pivot
         self.rigid = rigid
         # The room this door belongs to
-        self.room = None
+        self.room = room
 
     def __repr__ (self):
         point = str(self.point) if self.point else 'No point'
@@ -178,9 +180,12 @@ class Door:
         # If width is 0 then the segment can not exist
         if width == 0:
             raise ValueError('Cannot generate a segment for a door of width 0')
-        # If the door point or polygon are not assigned we can not generate the segment
+        # If the door point is not assigned then we can not generate the segment
+        if not self.point:
+            return None
+        # If we can not retrieve the polygon then we can not generate the segment
         room_polygon = self.get_room_polygon()
-        if not room_polygon or not self.point:
+        if not room_polygon:
             return None
         # Otheriwse, generate the margined segment
         polygon_segment = next(( segment for segment in room_polygon.segments if self.point in segment ), None)
@@ -569,9 +574,11 @@ class Room:
         self.parent_free_limit = None
         # Save input door args
         self._door_args = door_args
-        # Set the doors doors
-        # If there is no input doors set a single defualt door
+        # Set the doors
         self._doors = None
+        self.input_doors = doors
+        # If there is no input doors then set a single defualt door, by default
+        # Note that to set no doors the input must be '[]' instead of 'None'
         self.doors = doors if doors != None else [ Door() ]
         # Set the room corridor size
         self._corridor_size = corridor_size
@@ -851,7 +858,7 @@ class Room:
         # If we are the root and there is no parent building, we have to guess the most suitable door arguments
         # Make the margined width of all doors equal to the minimum room minimum size
         # Make the width of all doors the 80% of the margined width
-        margined_width = self.get_root_min_size()
+        margined_width = self.corridor_size
         # If we have not a margined width at this point me must complain about the inputs
         if not margined_width:
             raise InputError('Cannot guess the door width. Please set a minimum size or provide explicit "door_args" in the root room or in the parent building "room_args"')
@@ -1334,10 +1341,10 @@ class Room:
         # IMPORTANT: Doors are also non-redundant nodes
         for node_data in nodes.values():
             node_data['is_redundant'] = len(node_data['connected_segments']) == 2 and not node_data['is_door']
+        # Save non-redundant nodes apart
+        non_redundant_nodes = { k:v for k, v in nodes.items() if v['is_redundant'] == False }
         # Then a path between non-redundant nodes is a list of segments, which are connected by redundant nodes
-        for node_point, node_data in nodes.items():
-            if node_data['is_redundant']:
-                continue
+        for node_point, node_data in non_redundant_nodes.items():
             # Find all current node paths to other non-redundant nodes
             paths = []
             # Save the non-redundant node each path is leading to
@@ -1406,40 +1413,61 @@ class Room:
         current_corridor_nodes = []
         current_corridor_length = None
         # Get the nodes and segments which are in the free space
-        # Then include these nodes and segments in the corridor already
+        # Note that if free space is splitted then each region is treated independently
+        # WARNING: Treating all free regions as one is a problem since it may result in a splitted corridor
+        # If a free space region is reached during the solving then include its nodes and segments in the corridor
         # They will be removed further during the corridor expansion, but they must be considered as corridors for colliding rooms to be included
+        free_regions = []
+        free_region_nodes = {}
         if self.free_grid:
-            # First find all segments in free space boundaries
-            free_space_segments = []
-            for boundary in self.free_grid.boundaries:
-                for segment in boundary.segments:
-                    free_space_segments.append(segment)
-            # Now find which of the splitted segments are in the previously
-            # Note that all the previous segments should be covered by the splitted segments, but we need these segments splitted
-            free_corridor_segments = []
-            for segment in splitted_segments:
-                for free_space_segment in free_space_segments:
-                    if segment in free_space_segment:
-                        free_corridor_segments.append(segment)
-            # Get those nodes which are in the free space
-            free_corridor_nodes = []
-            for point, node in nodes.items():
-                for free_space_segment in free_space_segments:
-                    if point in free_space_segment:
-                        free_corridor_nodes.append(point)
+            # Define each region of the free space separately
+            for i, boundary in enumerate(self.free_grid.boundaries):                
+                # Now find which of the splitted segments are in the free region boundary
+                # Note that all the previous segments should be covered by the splitted segments, but we need these segments splitted
+                free_corridor_segments = []
+                for segment in splitted_segments:
+                    for free_space_segment in boundary.segments:
+                        if segment in free_space_segment:
+                            free_corridor_segments.append(segment)
+                # Get those non-redundant nodes which are in the free space
+                free_corridor_nodes = []
+                for point, node in non_redundant_nodes.items():
+                    for free_space_segment in boundary.segments:
+                        if point in free_space_segment:
+                            # If we already associate the point to one free space segment then go to the next
+                            free_corridor_nodes.append(point)
+                            break
+                # Set a region object with the already set segments and nodes
+                free_region = {
+                    'corridor_segments': free_corridor_segments,
+                    'corridor_nodes': free_corridor_nodes
+                }
+                free_regions.append(free_region)
+                # Now associate this free region data to each of its nodes so it is easier to find later
+                # Also create a fake 'node room' to be associated to this free regions and make this has a required room
+                # This way we make sure the solver reaches all free regions
+                # Note that we can assign a string as the node room since this value is just used as a key
+                free_region_room_hash = 'free_region_room_hash_' + str(i)
+                required_rooms.append(free_region_room_hash)
+                for point in free_corridor_nodes:
+                    # Set current free region to this node point
+                    free_region_nodes[point] = free_region
+                    # Add the free region room hash to the node data rooms list
+                    nodes[point]['rooms'].append(free_region_room_hash)
+            # Set the first of the free regions as part of the current corridor already
+            sample_free_region = next(free_region for free_region in free_region_nodes.values())
             # Update the current corridor values
             # WARNING: The current_corridor_length is not set since it must be only updated when the corridor is complete
-            current_corridor = free_corridor_segments
-            current_corridor_nodes = free_corridor_nodes
-            # Display the current corridor
-            elements_to_display = [ segment.get_colored_segment('red') for segment in current_corridor ]
-            self.update_display(extra=elements_to_display, title='Display the free space corridor')
+            current_corridor = sample_free_region['corridor_segments']
+            current_corridor_nodes = sample_free_region['corridor_nodes']
 
         # Set a function to check if the corridor is finished, given a list of rooms and nodes
         def is_corridor_finished (corridor_rooms : List['Room'], corridor_nodes :List[Point]) -> bool:
+            # Check all required rooms are in the corridor
             contains_all_rooms = all(room in corridor_rooms for room in required_rooms)
             if not contains_all_rooms:
                 return False
+            # Check all required doors are in the corridor
             contains_all_doors = all(door.point in corridor_nodes for door in already_set_doors)
             if not contains_all_doors:
                 return False
@@ -1478,20 +1506,32 @@ class Room:
             already_covered_path_nodes.append(current_path_nodes)
             # Try to expand the current corridor using all available paths
             for i, next_path in enumerate(available_paths):
-                # The following node will be the other next path's node
-                following_node = available_path_nodes[i]
-                # Get the corresponding node data
-                following_node_data = nodes[following_node]
                 # Get the remaining available paths/nodes after substracting the current next path
                 following_available_paths = available_paths[0:i] + available_paths[i+1:]
                 following_available_path_nodes = available_path_nodes[0:i] + available_path_nodes[i+1:]
+                # The following node will be the other next path's node
+                following_node = available_path_nodes[i]
+                # Get the new following path after adding the last path while getting the next node
+                following_path = current_path + next_path
+                following_path_nodes = current_path_nodes + [ following_node ]
+                # Get the corresponding node data
+                following_node_data = nodes[following_node]
                 # Get the following node paths which are not already included in the current path and its nodes
-                following_node_paths = following_node_data['paths']
-                following_node_path_nodes = following_node_data['path_nodes']
+                following_node_paths = [ *following_node_data['paths'] ]
+                following_node_path_nodes = [ *following_node_data['path_nodes'] ]
+                # In case we find a free region node we immediately add all its segments and nodes to the corridor
+                free_region = free_region_nodes.get(following_node, None)
+                if free_region:
+                    following_path += free_region['corridor_segments']
+                    following_path_nodes += free_region['corridor_nodes']
+                    for node in free_region['corridor_nodes']:
+                        node_data = nodes[node]
+                        following_node_paths += node_data['paths']
+                        following_node_path_nodes += node_data['path_nodes']
                 # Add the following node paths/nodes to the remaning available paths/nodes
                 # Then we get the available paths/nodes for the following path
-                for j, path in enumerate(following_node_paths):
-                    node = following_node_path_nodes[j]
+                #print(len(following_node_paths))
+                for path, node in zip(following_node_paths, following_node_path_nodes):
                     # If the node is already in the current path nodes list then we skip it
                     if node in current_path_nodes:
                         continue
@@ -1506,11 +1546,11 @@ class Room:
                     else:
                         following_available_paths.append(path)
                         following_available_path_nodes.append(node)
-                # Get the new following path after adding the last path while getting the next node
-                following_path = current_path + next_path
-                following_path_nodes = current_path_nodes + [ following_node ]
                 # Get the following path covered rooms
                 following_rooms = current_rooms.union(set(following_node_data['rooms']))
+                # DANI: Usa esto para ver los pasos intermedios
+                #elements_to_display = [ segment.get_colored_segment('red') for segment in following_path ]
+                #self.update_display(extra=elements_to_display, title='Corridor solver step')
                 # If following path includes all rooms then it is a candidate to be the corridor
                 if is_corridor_finished(following_rooms, following_path_nodes):
                     # Check if this path is shorter than the current corridor
@@ -1542,7 +1582,7 @@ class Room:
             start_path = current_corridor # It may contain segments already, from the free space
             start_path_points = current_corridor_nodes
             start_nodes = [ nodes[point] for point in start_path_points ]
-            start_non_redundant_nodes = [ node for node in start_nodes if not node['is_redundant'] ]
+            start_non_redundant_nodes = [ node for node in start_nodes if not node['is_redundant'] ] # Maybe this is redundant? (ironically)
             start_rooms = set(sum([ node['rooms'] for node in start_non_redundant_nodes ],[]))
             start_available_paths = sum([ node['paths'] for node in start_non_redundant_nodes ],[])
             start_available_path_nodes = sum([ node['path_nodes'] for node in start_non_redundant_nodes ],[])
@@ -1562,7 +1602,7 @@ class Room:
             node_room_counts = { room: all_room_ocurrences.count(room) for room in rooms  }
             room_with_less_nodes = min(node_room_counts, key=node_room_counts.get)
             nodes_from_room_with_less_nodes = [
-                node_point for node_point, node_data in nodes.items() if node_data['is_redundant'] == False and room_with_less_nodes in node_data['rooms']
+                node_point for node_point, node_data in non_redundant_nodes.items() if room_with_less_nodes in node_data['rooms']
             ]
             # It may happen that a node alone is enough to cover all rooms (and there are not set doors yet)
             # We must check it at this point, or it will add a random segment (path) which may be not necessary and take much space
@@ -1596,6 +1636,35 @@ class Room:
         # Check there is something
         if len(current_corridor) == 0 and len(current_corridor_nodes) == 0:
             raise ValueError('Empty corridor')
+
+        # Check the corridor is a unified path, and not more than one (i.e. all corridor segments are connected)
+        # If the corridor is not connected, include the minimum amount of additional segments to connect them all
+        # This may happen when the parent (self) free space is splitted by children rooms
+
+        # Instead of checking all segments to be connected (which would take longer) check all nodes to be connected
+        # To do so, check the connected segment of each node to be in the current corridor
+        # If the connected segment is in the corridor then consider its corresponding node to be connected
+        # connected_nodes = [ corridor_nodes[0] ]
+        # already_checked_nodes = []
+        # is_corridor_splitted = False
+        # while len(connected_nodes) < len(corridor_nodes):
+        #     # Get a new node which has not be checked yet
+        #     sample_node = next((node for node in connected_nodes if node not in already_checked_nodes), None)
+        #     # If there is no more nodes to check while there are still nodes to be connected then it means the corridor is broken
+        #     if not sample_node:
+        #         are_nodes_connected = True
+        #         break
+        #     # Find all connected nodes according to if their corresponding connected segment is in the current corridor
+        #     sample_node_data = nodes[sample_node]
+        #     for connected_segment, connected_node in zip(sample_node_data['connected_segments'], sample_node_data['path_nodes']):
+        #         if connected_segment in corridor_segments:
+        #             connected_nodes.append(connected_node)
+        #     already_checked_nodes.append(sample_node)
+
+        # # In case we have separated paths we must find the shortest path(s) to connect them
+        # # Note that extra nodes may be not required, but only segments. See figure 5
+        # if is_corridor_splitted:
+        #     pass
 
         # Check the current corridor contains al nodes at this point
         current_rooms = set(sum([ nodes[point]['rooms'] for point in current_corridor_nodes ],[]))
@@ -1655,6 +1724,9 @@ class Room:
             corridor = current_corridor
             # Now we must substract segments in the free space (fake corridors)
             if self.free_grid:
+                free_corridor_segments = []
+                for free_region in free_regions:
+                    free_corridor_segments += free_region['corridor_segments']
                 corridor = [ segment for segment in corridor if segment not in free_corridor_segments ]
             # It may happen that there are no corridor segments at this point when all rooms are connected by a point
             if len(corridor) == 0:
@@ -1741,7 +1813,11 @@ class Room:
                         return corridor_size
                     # For the outside
                     return 0
+                elements_to_display = [ segment.get_colored_segment('green') for segment in excluded_reference_segments ]
+                self.update_display(extra=elements_to_display, title='Debug 1')
                 extension_boundaries = generate_path_boundaries(excluded_reference_segments, all_inside)
+                elements_to_display = [ segment.get_colored_segment('purple') for segment in extension_boundaries[0].segments ]
+                self.update_display(extra=elements_to_display, title='Debug 2')
                 # Now add the extended boundary to the corridor boundary
                 # Note that both grids will always overlap
                 for boundary in extension_boundaries:
@@ -3745,13 +3821,16 @@ class Building:
             # DANI: Ya pensaré algo un poco más elaborado
             room_args['height'] = 20
         # If the corridor size is missing guess a resonable size from the overall minimum size
+        # Note that making the corridor slightly thiner than the min size makes things easier specially in upper floors
+        # This avoids the inherited corridor regions between rigid boundaries to be filled by a room
+        # This is not a "problem", but depending on the configuration the result may be "not elegant"
         if room_args.get('corridor_size', None) == None:
-            room_args['corridor_size'] = overall_min_size
-        # If the door args are missing guess resonable values from the overall minimum size
+            room_args['corridor_size'] = overall_min_size * 0.9
+        # If the door args are missing guess resonable values from the corridor size
         if room_args.get('door_args', None) == None:
-            # Make the margined width of all doors equal to the overall minimum size
+            # Make the margined width of all doors equal to the corridor size
             # Make the width of all doors the 80% of the margined width
-            margined_width = overall_min_size
+            margined_width = room_args['corridor_size']
             width = margined_width * 0.8
             margin = margined_width * 0.1
             room_args['door_args'] = {
@@ -3847,7 +3926,7 @@ class Building:
                             extra_space = Grid([ stair.upstairs_room.doors[0].generate_rect(inside=False) ])
                             floor.forced_grid += extra_space
             # In case this floor has not forced doors there will be not doors incase it is not the base
-            if not floor.doors and floor_index != 0:
+            if floor.input_doors == None and floor_index != 0:
                 floor.doors = []
             # Start the whole solving process
             floor.solve(display)
