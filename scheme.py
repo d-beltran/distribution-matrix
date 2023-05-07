@@ -791,10 +791,10 @@ class Room:
         for child in self.children:
             if lower(child.max_area, child.min_area):
                 raise InputError('Maximum area must be higher than minimum area in room ' + child.name)
-        # If the parent (self) is child adaptable then children target areas are set as their maximums
+        # If the parent (self) is child adaptable then children target areas are set randomly
         if self._child_adaptable_boundary:
             for child in self.children:
-                child._target_area = child.max_area
+                child._target_area = random.uniform(child.min_area, child.max_area)
             return
         # Get all minimum areas and calculate the overall minimum area needed
         min_areas = [ child.min_area for child in self.children ]
@@ -3376,14 +3376,14 @@ class Room:
         if truncated_grid == grid:
             return True
         # If the grid has been fully consumed then go back
-        if truncated_grid == None:
+        if not truncated_grid:
             return False
         # In case the truncate was forced remove all regions in the truncated grid which do not respect the minimum size
         if force:
             truncated_grid = truncated_grid.keep_minimum(self.min_size)
         # If the grid has been fully consumed then give up
-        if truncated_grid == None:
-            return RuntimeError('We fully removed a whole room by force-truncaing')
+        if not truncated_grid:
+            raise RuntimeError('We fully removed a whole room by force-truncaing')
         # Check the truncated grid to still respecting the minimum size
         elif not truncated_grid.check_minimum(self.preventive_min_size):
             print('WARNING: The room is not respecting the minimum size -> Go back')

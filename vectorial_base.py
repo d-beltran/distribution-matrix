@@ -2059,10 +2059,10 @@ class Grid:
         self._boundaries = None
 
     def __str__(self):
-        return str(self.rects)
+        return '<Grid ' + str(self.rects) + '>'
 
     def __repr__(self):
-        return str(self.rects)
+        return '<Grid ' + str(self.rects) + '>'
 
     def __bool__(self):
         return len(self._rects) > 0

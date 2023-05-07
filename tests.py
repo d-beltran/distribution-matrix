@@ -274,7 +274,7 @@ test_room_1 = Room(
 #         ]
 #     )
 
-# Familar house with 2 floors
+# Familar house with 2 floors, extra space in the upper floor
 test_building_1 = Building(
     floors = {
         0: Room(
@@ -327,6 +327,72 @@ test_building_1 = Building(
                     max_area=800,
                     min_size=10,
                     fill_color='green')
+            ]
+        )
+    },
+    room_args = { 'height': 20 }
+)
+
+# Apartments with 4 floors, no extra free space, first upper floor is copied upwards
+test_building_2 = Building(
+    floors = {
+        0: Room(
+            name='Primera planta',
+            min_area=6000,
+            max_area=6000,
+            max_corners = 6,
+            children = [
+                Room(
+                    name='Sala de mantenimiento',
+                    min_area=800,
+                    max_area=800,
+                    min_size=15,
+                    fill_color='blue'
+                ),
+                Room(
+                    name='Sala de máquinas',
+                    min_area=1000,
+                    max_area=1000,
+                    min_size=15,
+                    fill_color='green'
+                ),
+            ]
+        ),
+        1: Room(
+            name='Segunda planta',
+            children = [
+                Room(
+                    name='Apartamento',
+                    min_area='60%',
+                    max_area='99%',
+                    min_size=15,
+                    fill_color='red',
+                    children=[
+                        Room(
+                            name='Cocina',
+                            min_area='15%',
+                            max_area='25%',
+                            min_size=15,
+                            fill_color='purple'),
+                        Room(
+                            name='Comedor',
+                            min_area='30%',
+                            max_area='45%',
+                            min_size=15,
+                            fill_color='orange'),
+                        Room(
+                            name='Habitación',
+                            min_area='10%',
+                            max_area='18%',
+                            min_size=15,
+                            fill_color='orange'),
+                        Room(
+                            name='Lavabo',
+                            min_area='08%',
+                            max_area='12%',
+                            min_size=15,
+                            fill_color='green')
+                    ]),
             ]
         )
     },

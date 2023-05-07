@@ -20,7 +20,8 @@ if __name__ == '__main__':
         setup_display()
 
     #test = test_room_1
-    test = test_building_1
+    #test = test_building_1
+    test = test_building_2
 
     # Record the current time so we can then calculate how much time it took to run all the process
     start_time = time()
