@@ -183,96 +183,96 @@ test_room_1 = Room(
 )
 
 # Nada establecido
-test_room_2 = Room(
-        #boundary=test_boundary_3,
-        max_corners = 6,
-        name='Planta',
-        doors=[ Door() ],
-        #doors=[ Door(), Door() ],
-        children=[
-            Room(
-                #polygon=Polygon.from_corners(test_polygon_6),
-                forced_area=3600,
-                #forced_area='37.5%',
-                min_size=15,
-                name='Comedor',
-                fill_color='blue'),
-            Room(
-                forced_area=1600,
-                #forced_area='18%',
-                min_size=15,
-                name='Cocina',
-                fill_color='yellow'),
-            Room(
-                forced_area=1800,
-                #forced_area='21%',
-                min_size=15,
-                name='Habitación 1',
-                fill_color='red',
-                children=[
-                    Room(
-                        forced_area='25%',
-                        min_size=10,
-                        name='Lavabo de habitación',
-                        fill_color='purple',
-                    )
-                ]),
-            Room(
-                forced_area=1800,
-                #forced_area='16.50%',
-                min_size=15,
-                name='Habitación 2',
-                fill_color='orange'),
-            Room(
-                forced_area=800,
-                #forced_area='7%',
-                min_size=10,
-                name='Lavabo',
-                fill_color='green')
-        ]
-    )
+# test_room_2 = Room(
+#         #boundary=test_boundary_3,
+#         max_corners = 6,
+#         name='Planta',
+#         doors=[ Door() ],
+#         #doors=[ Door(), Door() ],
+#         children=[
+#             Room(
+#                 #polygon=Polygon.from_corners(test_polygon_6),
+#                 target_area=3600,
+#                 #target_area='37.5%',
+#                 min_size=15,
+#                 name='Comedor',
+#                 fill_color='blue'),
+#             Room(
+#                 target_area=1600,
+#                 #target_area='18%',
+#                 min_size=15,
+#                 name='Cocina',
+#                 fill_color='yellow'),
+#             Room(
+#                 target_area=1800,
+#                 #target_area='21%',
+#                 min_size=15,
+#                 name='Habitación 1',
+#                 fill_color='red',
+#                 children=[
+#                     Room(
+#                         target_area='25%',
+#                         min_size=10,
+#                         name='Lavabo de habitación',
+#                         fill_color='purple',
+#                     )
+#                 ]),
+#             Room(
+#                 target_area=1800,
+#                 #target_area='16.50%',
+#                 min_size=15,
+#                 name='Habitación 2',
+#                 fill_color='orange'),
+#             Room(
+#                 target_area=800,
+#                 #target_area='7%',
+#                 min_size=10,
+#                 name='Lavabo',
+#                 fill_color='green')
+#         ]
+#     )
 
 # Polygono exterior preestablecido
-test_room_3 = Room(
-        boundary=test_boundary_5,
-        name='Planta',
-        doors=[ Door() ],
-        children=[
-            Room(
-                forced_area='37.5%',
-                min_size=15,
-                name='Comedor',
-                fill_color='blue'),
-            Room(
-                forced_area='18%',
-                min_size=15,
-                name='Cocina',
-                fill_color='yellow'),
-            Room(
-                forced_area='21%',
-                min_size=15,
-                name='Habitación 1',
-                fill_color='red',
-                children=[
-                    Room(
-                        forced_area=200,
-                        min_size=10,
-                        name='Lavabo de habitación',
-                        fill_color='purple',
-                    )
-                ]),
-            Room(
-                forced_area='16.50%',
-                min_size=15,
-                name='Habitación 2',
-                fill_color='orange'),
-            Room(
-                forced_area='7%',
-                min_size=10,
-                name='Lavabo',
-                fill_color='green')
-        ]
-    )
+# test_room_3 = Room(
+#         boundary=test_boundary_5,
+#         name='Planta',
+#         doors=[ Door() ],
+#         children=[
+#             Room(
+#                 target_area='37.5%',
+#                 min_size=15,
+#                 name='Comedor',
+#                 fill_color='blue'),
+#             Room(
+#                 target_area='18%',
+#                 min_size=15,
+#                 name='Cocina',
+#                 fill_color='yellow'),
+#             Room(
+#                 target_area='21%',
+#                 min_size=15,
+#                 name='Habitación 1',
+#                 fill_color='red',
+#                 children=[
+#                     Room(
+#                         target_area=200,
+#                         min_size=10,
+#                         name='Lavabo de habitación',
+#                         fill_color='purple',
+#                     )
+#                 ]),
+#             Room(
+#                 target_area='16.50%',
+#                 min_size=15,
+#                 name='Habitación 2',
+#                 fill_color='orange'),
+#             Room(
+#                 target_area='7%',
+#                 min_size=10,
+#                 name='Lavabo',
+#                 fill_color='green')
+#         ]
+#     )
 
 # Familar house with 2 floors
 test_building_1 = Building(
@@ -283,13 +283,15 @@ test_building_1 = Building(
             children = [
                 Room(
                     name='Comedor',
-                    forced_area=3600,
+                    min_area=3600,
+                    max_area=3600,
                     min_size=15,
                     fill_color='blue'
                 ),
                 Room(
                     name='Cocina',
-                    forced_area=2000,
+                    min_area=2000,
+                    max_area=2000,
                     min_size=15,
                     fill_color='yellow'
                 ),
@@ -300,25 +302,29 @@ test_building_1 = Building(
             children = [
                 Room(
                     name='Habitación 1',
-                    forced_area=1800,
+                    min_area=1800,
+                    max_area=1800,
                     min_size=15,
                     fill_color='red',
                     children=[
                         Room(
                             name='Lavabo de habitación',
-                            forced_area='20%',
+                            min_area='20%',
+                            max_area='20%',
                             min_size=10,
                             fill_color='purple',
                         )
                     ]),
                 Room(
                     name='Habitación 2',
-                    forced_area=1800,
+                    min_area=1600,
+                    max_area=1800,
                     min_size=15,
                     fill_color='orange'),
                 Room(
                     name='Lavabo',
-                    forced_area=800,
+                    min_area=800,
+                    max_area=800,
                     min_size=10,
                     fill_color='green')
             ]

@@ -453,13 +453,14 @@ class Room:
     def __init__ (self,
         # A start boundary may be passed. If no boundary is passed it is assigned automatically
         boundary : Optional[Boundary] = None,
-        # The 'forced_area' argument stablishes the expected final room area. If no area is passed then the original boundary area will be used
-        # Forced area may be a number (absolute value) or a string (percent) with the format 'XX%'
-        forced_area : Optional[Union[number, str]] = None,
+        # Set the minimum and maximum area which must be accomplished at the end of the solving process
+        # Failure to set the room within this area range will result in process kill
+        # Area may be a number (absolute value) or a string (percent) with the format 'XX%'
+        # If no area is passed then the original boundary area will be used
+        min_area : Optional[Union[number, str]] = None,
+        max_area : Optional[Union[number, str]] = None,
         # Minimum size in both x and y dimensions
         min_size : Optional[number] = None,
-        # Maximum size in at least one dimension
-        max_size : Optional[number] = None,
         # Set if the room boundary may me modified
         # It is true by default when an input boundary is passed
         # It is false by default otherwise
@@ -528,25 +529,24 @@ class Room:
         # Set the children rooms
         self._children = None
         self.children = children
-        # Set the expected final area
-        self._forced_area_portion = None
-        if forced_area:
-            # If it is a number
-            if is_number(forced_area):
-                self.forced_area = forced_area
-            # If it is a percent
-            elif type(forced_area) == str and forced_area[-1] == '%':
-                self.forced_area = None
-                self._forced_area_portion = float(forced_area[0:-1]) / 100
+        # Check input minimum and maximum area formats to make sense
+        for value in [ min_area, max_area ]:
+            # A numeric value is accepted
+            # Also a None is accepted, even if there is no boundary
+            # Note that this may be the root and have a child adaptable boundary
+            if is_number(value) or value == None:
+                continue
+            # String values are allowed as long as they have a percent format (i.e. 'XX%')
+            elif type(value) == str:
+                if not value[-1] == '%':
+                    raise InputError('Area range (' + value + ') has a non-supported format in room ' + name)
             else:
-                raise InputError('Forced area has a non-supported format in room ' + name)
-        else:
-            self.forced_area = self.area
-        # Set the children area, which is calculated further
-        self.children_area = None
-        # If the forced area does not cover the minimum size it makes no sense
-        if min_size and self.forced_area and self.forced_area < min_size**2:
-            raise InputError('Forced area is not sufficient for the minimum size in room ' + name)
+                raise InputError('Area range (' + str(value) + ') has a non-supported format in room ' + name)
+        # Set the internal values for minimum and maximum areas 
+        self._min_area = min_area
+        self._max_area = max_area
+        # Set the internal value for the expected final area
+        self._target_area = None
         # Set if the boundary is rigid
         if rigid == None:
             self.rigid = bool(boundary)
@@ -564,11 +564,8 @@ class Room:
             self.min_size = min_size
         else:
             self.min_size = 0
-        # Save the input max size
-        self.input_max_size = max_size
-        # Set the maximium size as infinite by now
-        # This may be changed further
-        self.max_size = inf
+        # Set the internal max size value
+        self._max_size = None
         # Parent free limit is set by the parent while setting the child boundary
         # Parent free limit is the maximum min size of all parent children but this child
         self.parent_free_limit = None
@@ -603,32 +600,19 @@ class Room:
             # Now set some parameters in children
             for child in self.children:
                 child._post_init(self)
-            # Check areas of all children rooms to do not sum up more than the parent area
-            # In addition check if any of the children room has boundary and, if so, check the boundary is inside the parent
-            self.children_area = sum([ child.forced_area for child in self.children ])
-            if self.area and greater(self.children_area, self.area):
-                raise InputError('Children together require more area than the parent has')
+            # If a boundary was passed then check children to fit on it
+            if self.area:
+                # Check areas of all children rooms to do not sum up more than the parent area
+                # In addition check if any of the children room has boundary and, if so, check the boundary is inside the parent
+                children_minimum_area = sum([ child.min_area for child in self.children ])
+                if greater(children_minimum_area, self.area):
+                    raise InputError('Children together require more area than the parent has')
 
     # Set a function which sets other initial values once the parent has been set
     # This function is called by the parent once it has been initiated
     def _post_init (self, parent):
         # Set the child adaptable boundary as false, since this is not the root room
         self._child_adaptable_boundary = False
-        # Set the absolute forced area in case the area was set as a percent of the parent area
-        if self._forced_area_portion:
-            if not parent.forced_area:
-                raise InputError('Room "' + self.name + '" has a portion area but the parent has not area')
-            self.forced_area = parent.forced_area * self._forced_area_portion
-        # Calculate the coherent max size, which is the forced area divided by the minimum size
-        # i.e. the maximum possible size in case the boundary was the thinest rectangle
-        if self.forced_area and self.preventive_min_size:
-            self.max_size = self.forced_area / self.preventive_min_size
-        # In case there was a forced maximum size and it is smaller than the coherent max size, apply it
-        if self.input_max_size and self.input_max_size < self.max_size:
-            self.max_size = self.input_max_size
-        # If the preventive min size is bigger than the maximum size we have to adapt to it
-        if self.preventive_min_size > self.max_size:
-            self.preventive_min_size = self.max_size
         # In case the parent has a boundary, check this room may fit on it
         if parent.boundary:
             # Check this room is inside the parent boundary, if they have a predefined boundary
@@ -734,6 +718,104 @@ class Room:
     def reset_grid (self):
         self._boundary = None
         self._grid = None
+
+    # Get the minimum area
+    def get_min_area (self) -> number:
+        # Return the internal value, if any
+        if is_number(self._min_area):
+            return self._min_area
+        # If not then calculate the minimum area
+        # If no input minimum area was passed then a boundary must have been passed
+        if self._min_area == None:
+            if not self.area:
+                raise RuntimeError('Target area can not be guessed since there is no area in room '  + self.name)
+            self._min_area = self.area
+            return self._min_area
+        # If area is a string then it means it is a percent and this it must be parsed
+        if type(self._min_area) == str:
+            if not self.parent:
+                raise RuntimeError('Can not solve a percent area since parent room is not defined in room '  + self.name)
+            portion = float(self._min_area[0:-1]) / 100
+            self._min_area = portion * self.parent.area
+            return self._min_area
+        raise ValueError('Not processable minimum area ' + str(self._min_area) + ' in room ' + self.name)
+
+    # The minimum area to be reached at the end of the solving process (read only)
+    min_area = property(get_min_area, None, None, "Minimum area to be reached after the solving process")
+
+    # Get the maximum area
+    def get_max_area (self) -> number:
+        # Return the internal value, if any
+        if is_number(self._max_area):
+            return self._max_area
+        # If not then calculate the maximum area
+        # If no input maximum area was passed then a boundary must have been passed
+        if self._max_area == None:
+            if not self.area:
+                raise RuntimeError('Target area can not be guessed since there is no area in room '  + self.name)
+            self._max_area = self.area
+            return self._max_area
+        # If area is a string then it means it is a percent and this it must be parsed
+        if type(self._max_area) == str:
+            if not self.parent:
+                raise RuntimeError('Can not solve a percent area since parent room is not defined in room '  + self.name)
+            portion = float(self._max_area[0:-1]) / 100
+            self._max_area = portion * self.parent.area
+            return self._max_area
+        raise ValueError('Not processable maximum area ' + str(self._max_area) + ' in room ' + self.name)
+
+    # The maximum area to be reached at the end of the solving process (read only)
+    max_area = property(get_max_area, None, None, "maximum area to be reached after the solving process")
+
+    # Get the target area
+    def get_target_area (self) -> number:
+        # Return the internal value, if any
+        if self._target_area != None:
+            return self._target_area
+        # We must calculate target areas
+        if not self.parent:
+            raise RuntimeError('Can not calculate target area since parent room is not defined in room '  + self.name)
+        self.parent.set_children_target_areas()
+        # Before returning the target area make a fast checking
+        # If target area does not cover the minimum size then it makes no sense
+        if self.min_size and self.target_area and self.target_area < self.min_size**2:
+            raise InputError('Room area is not sufficient for the minimum size in room ' + self.name)
+        return self._target_area
+
+    # Room target area (read only)
+    target_area = property(get_target_area, None, None, "Target area to be reached after the solving process")
+
+    # Set a function to set all children target areas at once
+    def set_children_target_areas (self):
+        # First of all check al children area ranges to make sense
+        for child in self.children:
+            if lower(child.max_area, child.min_area):
+                raise InputError('Maximum area must be higher than minimum area in room ' + child.name)
+        # If the parent (self) is child adaptable then children target areas are set as their maximums
+        if self._child_adaptable_boundary:
+            for child in self.children:
+                child._target_area = child.max_area
+            return
+        # Get all minimum areas and calculate the overall minimum area needed
+        min_areas = [ child.min_area for child in self.children ]
+        overall_min_area = sum(min_areas)
+        # Check we have enough area to allocate all children
+        if greater(overall_min_area, self.area):
+            raise RuntimeError('Parent ' + self.name + ' has not enought area to allocate all its children')
+        # Get all maximum areas and calculate the overall maximum area which may be occupied
+        max_areas = [ child.max_area for child in self.children ]
+        overall_max_area = sum(max_areas)
+        # If the parent is able to allocate all children in their maximum areas then we set all target areas as the maximum
+        if lower(overall_max_area, self.area):
+            for child in self.children:
+                child._target_area = child.max_area
+            return
+        # If the parent is not able to allocate all children in their maximum areas then target areas must be calculated
+        overall_range = overall_max_area - overall_min_area
+        overall_percent = self.area - overall_min_area / overall_range
+        for child in self.children:
+            child_range = child.max_area - child.min_area
+            child._target_area = child.min_area + child_range * overall_percent
 
     # Area inside the room boundary (read only)
     def get_area(self) -> number:
@@ -841,6 +923,19 @@ class Room:
         
     # Free space grid (read only)
     corridor_grid = property(get_corridor_grid, set_corridor_grid, None, "The room corridor space grid")
+
+    # Get the maximum size (read only)
+    def get_max_size (self) -> number:
+        # If we have a stored value already then return it
+        if self._max_size:
+            return self._max_size
+        # Calculate the maximum size: the maximum possible size in case the boundary was the thinest rectangle
+        # Then save it and return it
+        if not self.preventive_min_size:
+            return inf
+        self._max_size = self.target_area / self.preventive_min_size
+        return self._max_size
+    max_size = property(get_max_size, None, None, "The room maximum space")
 
     # Get the door arguments
     def get_door_args (self) -> dict:
@@ -1204,7 +1299,7 @@ class Room:
     def build_maximum_initial_boundary (self, corner : Point, space : Rect) -> Boundary:
         x_space, y_space = space.get_size()
         # If the room area is greater than the space then return the whole space as a permeter
-        if space.area <= self.forced_area:
+        if space.area <= self.target_area:
             # If both space sizes are bigger than the maximum size we can not return the whole space
             # The size in one of both sides must be limited (the biggest size is filled)
             if x_space > self.max_size and y_space > self.max_size:
@@ -1217,7 +1312,7 @@ class Room:
         # Else, fit the room in the space
         # Try to create the most "squared" possible rectangle
         # Calculate how long would be the side of a perfect square
-        square_side_length = sqrt(self.forced_area)
+        square_side_length = sqrt(self.target_area)
         # Set how long will be the short (restricted) side of the rectangle
         # Then calculate the other side length
         # The limit may come from the square side limit, the space limit or the own room limit
@@ -1230,7 +1325,7 @@ class Room:
         # Once we have calculated the first length we can calculate the second one
         # The second length will be over the maximum space
         maximum_space = max(x_space, y_space)
-        maximum_side_length = self.forced_area / first_side_length
+        maximum_side_length = self.target_area / first_side_length
         second_side_length = min(maximum_space, maximum_side_length)
         # In case the second side length is between the limit space and the margined limit space we must fit it to the limit as well
         margined_maximum_space = maximum_space - self.parent_free_limit
@@ -1813,11 +1908,11 @@ class Room:
                         return corridor_size
                     # For the outside
                     return 0
-                elements_to_display = [ segment.get_colored_segment('green') for segment in excluded_reference_segments ]
-                self.update_display(extra=elements_to_display, title='Debug 1')
+                # elements_to_display = [ segment.get_colored_segment('green') for segment in excluded_reference_segments ]
+                # self.update_display(extra=elements_to_display, title='Debug 1')
                 extension_boundaries = generate_path_boundaries(excluded_reference_segments, all_inside)
-                elements_to_display = [ segment.get_colored_segment('purple') for segment in extension_boundaries[0].segments ]
-                self.update_display(extra=elements_to_display, title='Debug 2')
+                # elements_to_display = [ segment.get_colored_segment('purple') for segment in extension_boundaries[0].segments ]
+                # self.update_display(extra=elements_to_display, title='Debug 2')
                 # Now add the extended boundary to the corridor boundary
                 # Note that both grids will always overlap
                 for boundary in extension_boundaries:
@@ -2360,7 +2455,7 @@ class Room:
 
     # Calculate how much area we need to expand
     def get_required_area (self) -> number:
-        return resolute(self.forced_area - self.area)
+        return resolute(self.target_area - self.area)
 
     # Check if this room is already fit to its required area
     def is_fit_to_required_area (self) -> bool:
@@ -2374,7 +2469,7 @@ class Room:
         # Calculate how much area we need to expand
         required_area = self.get_required_area()
         # If the area is already satisfied then stop here
-        if abs(required_area / self.max_size) < minimum_resolution * self.max_size:
+        if self.is_fit_to_required_area():
             return True
         # Make a boundary backup of this room and all its brothers
         backup = self.parent.make_children_backup()
@@ -2388,7 +2483,7 @@ class Room:
         # DANI: Es mejor con la multiplicación que sin ella. Le da más flexibilidad a la resolución del puzle acelerando así el proceso
         # DANI: Es muy peligrosos que queden espacios libres sin reclamar (cuando no tenga que haberlos)
         # DANI: Pero una resolución pequeña no hará que no queden espacios libres, simplemente hará que esos espacios sean muy pequeños
-        while abs(required_area / self.max_size) >= minimum_resolution * self.max_size:
+        while not self.is_fit_to_required_area():
             # If the required are is positive it means we must expand our room
             if required_area > 0:
                 # Set a function to supervise if each expansion step is succesful or not
