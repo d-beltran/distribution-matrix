@@ -236,6 +236,12 @@ class Vector:
         #print(str(self) + ' (' + str(angle) + ') ' + str(Vector(x,y)))
         return Vector(x,y)
 
+    # Get the two perpendicular vectors to this vector (same length)
+    def get_perpendicular_vectors (self) -> Generator['Vector', None, None]:
+        perpendicular_vector = self.rotate(90)
+        yield perpendicular_vector
+        yield -perpendicular_vector
+
 # A line defined by a point and a directional vector
 class Line:
 
@@ -734,6 +740,20 @@ class Segment(Line):
         if is_point_in_range:
             return other
         return None
+
+    # Get a surrounding rect for the current segment given a margin
+    def get_surrounding_rect (self, margin : number) -> 'Rect':
+        if margin <= 0:
+            raise SystemExit('Margin must be greater than 0')
+        segment_min_x = min(self.a.x, self.b.x)
+        min_x = segment_min_x - margin
+        segment_max_x = max(self.a.x, self.b.x)
+        max_x = segment_max_x + margin
+        segment_min_y = min(self.a.y, self.b.y)
+        min_y = segment_min_y - margin
+        segment_max_y = max(self.a.y, self.b.y)
+        max_y = segment_max_y + margin
+        return Rect(min_x, min_y, max_x, max_y)
 
 # A corner is a point where 2 non-paralel segments are connected
 # i.e. both segments have this point ('a' or 'b') in common
@@ -3082,7 +3102,7 @@ def generate_point_boundary (point : Point, size : number) -> Boundary:
 # Given a list of segments, set a function to generate a boundary around them
 # Size is the tickness of the new boundary
 # Alternatively, the size may be a function whose input is a segments in the path and a direction
-def generate_path_boundaries (path : List['Segment'], size : Union[number, Callable]) -> List['Boundary']:
+def generate_path_boundaries (path : List['Segment'], size : Union[number, Callable], margined_ends : bool = False) -> List['Boundary']:
     # Size must be a function
     # If it is a number then convert it to a function which returns half the size number
     if not callable(size):
@@ -3149,9 +3169,14 @@ def generate_path_boundaries (path : List['Segment'], size : Union[number, Calla
             # Calculate the size required
             # DANI: Notese que hay una situación (aunque rebuscada)en que se añade espacio extra cuando no se debería
             # DANI: Vease figura 6
-            size_difference = size(segment, segment.direction) - segment.length
+            current_size = size(segment, segment.direction)
+            size_difference = current_size - segment.length
             # Push the segment point in case the segment is to short to fill the size
-            if size_difference > 0:
+            if margined_ends:
+                push_direction = -segment.direction if is_segment_pointing_outside else segment.direction
+                pushed_point = point + push_direction * current_size
+                perpendicular_line = Line(pushed_point, perpendicular_vector)
+            elif size_difference > 0:
                 push_direction = -segment.direction if is_segment_pointing_outside else segment.direction
                 pushed_point = point + push_direction * size_difference
                 perpendicular_line = Line(pushed_point, perpendicular_vector)
@@ -3304,3 +3329,143 @@ def get_polygon_zigzags (polygon : Polygon) -> List[dict]:
         return zigzag['middle_segment'].length
     zigzags.sort(key=get_zigzag_length)
     return zigzags
+
+# Generate a random polygon given a set of parameters
+# This logic only support rectangular polygons (i.e. without diagonal segments)
+def generate_random_polygon (
+    # Target area
+    total_area : number = 1,
+    # Set the width in proportion to the length (between 0 and 1)
+    # Note that setting this value as 1 will always result in a square
+    width_length_proportion : number = 0.6,
+    # Set the minimum and maximum possible corners
+    min_corners : int = 4,
+    max_corners : int = 8,
+    # Set the minimum length of each bone in proportion to the total backbone length
+    min_bone_length_proportion : number = 0.1,
+    # Set the chance of a branch to get attached to the main bone, and not to another branch (from 0 to 1)
+    # Note that higher values here will result in more 'E' shapes
+    # Note that lower values here will result in mire 'W' shapes
+    main_bone_branch_chance : number = 0.5,
+    # Optional minimum size to be respected in the shape
+    # It will prevent width to get too short in case area is not enought
+    min_size : Optional[number] = None
+):
+    # Make sure the area is a positive number
+    if total_area <= 0:
+        raise SystemExit('Area must be positive')
+    # Make sure the width / length proportion is a number between 0 and 1
+    if width_length_proportion <= 0 or width_length_proportion >= 1:
+        raise SystemExit('Width / Length proportion must be a number between 0 and 1')
+    # Set the dimension sizes
+    length = sqrt(total_area / width_length_proportion)
+    width = length * width_length_proportion
+    # In case a minimum size was passed we must check it is respected
+    if min_size != None:
+        # First of all check it is possible to respect the minimum size given the area
+        affordable_min_size = sqrt(total_area)
+        if affordable_min_size < min_size:
+            raise SystemExit('It is not possible to respect the minimum size (' + str(min_size) + ') given the area (' + str(total_area) + ')')
+        # In case width is not respecting the minimum size we must recalculate
+        if width < min_size:
+            width = min_size
+            length = width / width_length_proportion
+    # Check the input number of corners to be pairs
+    # Note tha in a rectangular polygon the final number of pairs will always be pair
+    if min_corners % 2 == 1 or max_corners % 2 == 1:
+        raise SystemExit('Number of corners must be pair')
+    # Check the maximum number of corners to be greater than the minimum
+    if max_corners < min_corners:
+        raise SystemExit('Maximum number of corners must be greater or equal to minimum number of corners')
+    # Set the number of corners
+    corners = random.choice(list(range(min_corners, max_corners + 1, 2)))
+    if corners < 4:
+        raise SystemExit('At least 4 corners are required')
+    # Based in the number of corners, set the number of branches
+    # Branches are extensions of the starting base shape (i.e. a single rectangle)
+    # The base shape requires 4 corners while each extra branch requires 2 corners
+    branches = round((corners - 4) / 2)
+    print(branches)
+    # Now set the backbone of the shape (i.e. segments which will be used to build a boundary around)
+    # Note that the backbone is slightly shorter since its length will grown when the boundary is build
+    backbone_length = length - width
+    # Distribute length along the bones (i.e. the main bone and the branches)
+    # First of all check the minimum branch length proportion can be respected
+    bones_count = 1 + branches
+    if bones_count * min_bone_length_proportion > 1:
+        raise SystemExit('The minimum bone length proportion can not be respected. Reduce the number of bones (i.e. the number of corners) or the minimum bone length proportion')
+    min_bone_length = backbone_length * min_bone_length_proportion
+    # Get haf the width
+    half_width = width / 2
+    # Now start building the backbone
+    # Split the total length among the differen bones
+    # Length is randomly set bone by bone according to the still available length
+    # Thus first bones have a greater chance to be longer than last bones
+    backbone_length_buffer = backbone_length
+    bones = []
+    for bone_number in range(bones_count):
+        # Set the bone length and substract it from the length buffer
+        lasting_bones = bones_count - bone_number
+        max_bone_length = backbone_length_buffer - (lasting_bones * min_bone_length)
+        bone_length = random.uniform(min_bone_length, max_bone_length)
+        backbone_length_buffer -= bone_length
+        # Place the bone
+        # If this is the first bone (i.e. the main bone) then place the first point in the (0,0)
+        # Then the next point is placed along the x axis, in the positive side
+        if bone_number == 0:
+            bone = Segment( Point(0, 0), Point(0, bone_length) )
+            bones.append(bone)
+            continue
+        # If this is not the first bone (i.e. a branch) then find a spot in the current backbone to place it
+        # First, find the bone where the new branch will be atached
+        if len(bones) == 1 or random.random() < main_bone_branch_chance:
+            target_bone = bones[0]
+        else:
+            target_bone = random.choice(bones[1:])
+        # Get the target bone grid to further calculate conflicts
+        target_bone_grid = Grid([target_bone.get_surrounding_rect(margin=half_width)])
+        # Get other bones which are not the target bone and calculate their grid as well
+        other_bones_grid = Grid.non_canonical([ b.get_surrounding_rect(margin=half_width) for b in bones if b != target_bone ])
+        # Now find a random spot in the branch
+        def find_suitable_bone () -> Optional[Segment]:
+            # Try every segment pole and direction
+            for point in target_bone.points:
+                for direction in target_bone.direction.get_perpendicular_vectors():
+                    # Set the theoretical bone
+                    bone = Segment(point, point + direction * bone_length)
+                    # Check this point and direction to be suitable
+                    # Get the contribution of this bone to the whole grid (i.e. bone grid - target bone grid)
+                    bone_grid = Grid([bone.get_surrounding_rect(margin=half_width)])
+                    contribution_grid = bone_grid - target_bone_grid
+                    # Find conflicts between other bones and the contribution grid
+                    if contribution_grid.get_overlap_grid(other_bones_grid):
+                        continue
+                    # Otherwise the bone is suitable
+                    return bone
+            return None
+        suitable_bone = find_suitable_bone()
+        if not suitable_bone:
+            raise RuntimeError('There was no suitable spot for the next bone')
+        bones.append(suitable_bone)
+    add_frame(bones, title='Random polygon generator: backbone')
+    # Now that we have the backbone we can generate the bondary around it
+    boundaries = generate_path_boundaries(bones, size=width, margined_ends=True)
+    # Since bones are all connected there should be only one boundary
+    if len(boundaries) > 1:
+        raise ValueError('There is more than 1 boundary')
+    boundary = boundaries[0]
+    # Since bones should never cycle there should be no interior polygons in the only boundary either
+    if len(boundary.interior_polygons) > 0:
+        raise ValueError('The boundary contains interior polygons')
+    # Get the final polygon
+    polygon = boundary.exterior_polygon
+    add_frame(polygon.segments, title='Random polygon generator: outcome')
+    # Check the polygon is respecting the restrictions
+    polygon_area = polygon.area
+    if not equal(polygon_area, total_area):
+        raise ValueError('The final polygon area (' + str(polygon_area) + ') is not respecting the input area (' + str(total_area) + ')')
+    polygon_corners = len(polygon_corners)
+    if polygon_corners != corners:
+        raise ValueError('The final polygon corners (' + str(polygon_corners) + ') does not match the input corners (' + str(corners) + ')')
+    # Return the final polygon
+    return polygon
