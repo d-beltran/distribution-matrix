@@ -3385,7 +3385,6 @@ def generate_random_polygon (
     # Branches are extensions of the starting base shape (i.e. a single rectangle)
     # The base shape requires 4 corners while each extra branch requires 2 corners
     branches = round((corners - 4) / 2)
-    print(branches)
     # Now set the backbone of the shape (i.e. segments which will be used to build a boundary around)
     # Note that the backbone is slightly shorter since its length will grown when the boundary is build
     backbone_length = length - width
@@ -3405,9 +3404,13 @@ def generate_random_polygon (
     bones = []
     for bone_number in range(bones_count):
         # Set the bone length and substract it from the length buffer
-        lasting_bones = bones_count - bone_number
+        lasting_bones = bones_count - bone_number -1
         max_bone_length = backbone_length_buffer - (lasting_bones * min_bone_length)
-        bone_length = random.uniform(min_bone_length, max_bone_length)
+        # If this is the last bone then get all remaining length
+        if lasting_bones == 0:
+            bone_length = max_bone_length
+        else:
+            bone_length = random.uniform(min_bone_length, max_bone_length)
         backbone_length_buffer -= bone_length
         # Place the bone
         # If this is the first bone (i.e. the main bone) then place the first point in the (0,0)
@@ -3464,7 +3467,7 @@ def generate_random_polygon (
     polygon_area = polygon.area
     if not equal(polygon_area, total_area):
         raise ValueError('The final polygon area (' + str(polygon_area) + ') is not respecting the input area (' + str(total_area) + ')')
-    polygon_corners = len(polygon_corners)
+    polygon_corners = len(polygon.corners)
     if polygon_corners != corners:
         raise ValueError('The final polygon corners (' + str(polygon_corners) + ') does not match the input corners (' + str(corners) + ')')
     # Return the final polygon
