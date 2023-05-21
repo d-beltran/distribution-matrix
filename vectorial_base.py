@@ -2472,21 +2472,24 @@ class Grid:
 
     # Check the grid to respect minimum size in both x and y dimensions
     def check_minimum (self, minimum : number) -> bool:
+        # Save for each minimum rectangle the maximum size of maximum rectangles
+        rect_max_sizes = { rect: [0,0] for rect in self.rects }
         # Check all maximum rectangles
-        for max_rect in self.max_rects:
-            rect = max_rect[0]
-            x_size, y_size = rect.get_size()
+        for max_rect, contained_rects in self.max_rects:
+            x_size, y_size = max_rect.get_size()
             # If there is at least one maximum rectangle which does not respect minimum size in both x and y dimensions then it is wrong
             if lower(x_size, minimum) and lower(y_size, minimum):
                 return False
-            # Ignore rectangles which respect size only in one dimension
-            if lower(x_size, minimum) or lower(y_size, minimum):
-                continue
+            # Update the the rects maximum sizes
+            for rect in contained_rects:
+                max_sizes = rect_max_sizes[rect]
+                max_sizes[0] = max(max_sizes[0], x_size)
+                max_sizes[1] = max(max_sizes[1], y_size)
             # For all rectangles which respect size in both dimensions,
             # Find their free borders: border regions which are not overlapping with the grid boundaries
             limits = [ segment for boundary in self.boundaries for segment in boundary.segments ]
             free_borders = []
-            for segment in rect.segments:
+            for segment in max_rect.segments:
                 free_borders += segment.substract_segments(limits)            
             # Check free borders to respect the minimum size
             for segment, other_segments in otherwise(free_borders):
@@ -2503,11 +2506,16 @@ class Grid:
                         continue
                 # Otherwise, we are not respecting the minimum size
                 return False
+        # Now that we have the maximum size of all minimum rects we must check all of them fulfill the minimum
+        for sizes in rect_max_sizes.values():
+            for size in sizes:
+                if size < minimum:
+                    return False
         return True
 
     # This function is used to generate a new grid without all regions which do not respect a minimum size
     def keep_minimum (self, minimum : number) -> Optional['Grid']:
-        # For each maximum rect in the grid whcih respects both dimesions, keep all its contained rects
+        # For each maximum rect in the grid which respects both dimesions, keep all its contained rects
         respecting_rects = []
         for max_rect, contained_rects in self.max_rects:
             # If any of the sizes is not enough to cover the size then this maximum rectangle is not respecting the limits
@@ -3333,8 +3341,9 @@ def get_polygon_zigzags (polygon : Polygon) -> List[dict]:
 # Generate a random polygon given a set of parameters
 # This logic only support rectangular polygons (i.e. without diagonal segments)
 def generate_random_polygon (
-    # Target area
-    total_area : number = 1,
+    # Area ranges
+    min_area : number = 1,
+    max_area : number = 2,
     # Set the width in proportion to the length (between 0 and 1)
     # Note that setting this value as 1 will always result in a square
     width_length_proportion : number = 0.6,
@@ -3352,20 +3361,22 @@ def generate_random_polygon (
     min_size : Optional[number] = None
 ):
     # Make sure the area is a positive number
-    if total_area <= 0:
-        raise SystemExit('Area must be positive')
+    if min_area <= 0 or max_area <= 0:
+        raise SystemExit('Area range must be positive')
+    # Choose a random area
+    area = random.uniform(min_area, max_area)
     # Make sure the width / length proportion is a number between 0 and 1
     if width_length_proportion <= 0 or width_length_proportion >= 1:
         raise SystemExit('Width / Length proportion must be a number between 0 and 1')
     # Set the dimension sizes
-    length = sqrt(total_area / width_length_proportion)
+    length = sqrt(area / width_length_proportion)
     width = length * width_length_proportion
     # In case a minimum size was passed we must check it is respected
     if min_size != None:
         # First of all check it is possible to respect the minimum size given the area
-        affordable_min_size = sqrt(total_area)
+        affordable_min_size = sqrt(area)
         if affordable_min_size < min_size:
-            raise SystemExit('It is not possible to respect the minimum size (' + str(min_size) + ') given the area (' + str(total_area) + ')')
+            raise SystemExit('It is not possible to respect the minimum size (' + str(min_size) + ') given the area (' + str(area) + ')')
         # In case width is not respecting the minimum size we must recalculate
         if width < min_size:
             width = min_size
@@ -3450,7 +3461,8 @@ def generate_random_polygon (
         if not suitable_bone:
             raise RuntimeError('There was no suitable spot for the next bone')
         bones.append(suitable_bone)
-    add_frame(bones, title='Random polygon generator: backbone')
+    # Use this to see the backbone
+    # add_frame(bones, title='Random polygon generator: backbone')
     # Now that we have the backbone we can generate the bondary around it
     boundaries = generate_path_boundaries(bones, size=width, margined_ends=True)
     # Since bones are all connected there should be only one boundary
@@ -3462,11 +3474,12 @@ def generate_random_polygon (
         raise ValueError('The boundary contains interior polygons')
     # Get the final polygon
     polygon = boundary.exterior_polygon
-    add_frame(polygon.segments, title='Random polygon generator: outcome')
+    # Use this to see the boundary
+    # add_frame(polygon.segments, title='Random polygon generator: outcome')
     # Check the polygon is respecting the restrictions
     polygon_area = polygon.area
-    if not equal(polygon_area, total_area):
-        raise ValueError('The final polygon area (' + str(polygon_area) + ') is not respecting the input area (' + str(total_area) + ')')
+    if not equal(polygon_area, area):
+        raise ValueError('The final polygon area (' + str(polygon_area) + ') is not respecting the input area (' + str(area) + ')')
     polygon_corners = len(polygon.corners)
     if polygon_corners != corners:
         raise ValueError('The final polygon corners (' + str(polygon_corners) + ') does not match the input corners (' + str(corners) + ')')

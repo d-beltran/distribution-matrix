@@ -27,13 +27,13 @@ if __name__ == '__main__':
     # Record the current time so we can then calculate how much time it took to run all the process
     start_time = time()
 
-    test = generate_random_polygon()
+    #test = generate_random_polygon()
 
     # Start the solving process
-    # try:
-    #     test.solve(display=display)
-    # except Exception as e:
-    #     print_exc()
+    try:
+        test.solve(display=display)
+    except Exception as e:
+        print_exc()
 
     # Calculate how much it took to run the whole process and output the result
     end_time = time()

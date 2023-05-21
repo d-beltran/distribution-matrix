@@ -525,7 +525,7 @@ class Room:
         # This is set True when the root room has not a prestablished boundary
         # This variable may be true only in the root room (if this is not the root then it will become False further)
         # Note that all the logic changes drastically whether the root room has or not a predefined boundary
-        self._child_adaptable_boundary = boundary == None
+        self._child_adaptable_boundary = boundary == None and min_area == None and max_area == None
         # Set the children rooms
         self._children = None
         self.children = children
@@ -765,7 +765,7 @@ class Room:
         raise ValueError('Not processable maximum area ' + str(self._max_area) + ' in room ' + self.name)
 
     # The maximum area to be reached at the end of the solving process (read only)
-    max_area = property(get_max_area, None, None, "maximum area to be reached after the solving process")
+    max_area = property(get_max_area, None, None, "Maximum area to be reached after the solving process")
 
     # Get the target area
     def get_target_area (self) -> number:
@@ -812,7 +812,7 @@ class Room:
             return
         # If the parent is not able to allocate all children in their maximum areas then target areas must be calculated
         overall_range = overall_max_area - overall_min_area
-        overall_percent = self.area - overall_min_area / overall_range
+        overall_percent = (self.area - overall_min_area) / overall_range
         for child in self.children:
             child_range = child.max_area - child.min_area
             child._target_area = child.min_area + child_range * overall_percent
@@ -1230,36 +1230,31 @@ class Room:
                     # If we can, should check parent doors are not gettin occupied
                     if not self.check_doors_side(initial_boundary.grid, inside=True):
                         continue
-
-                # Set the child first boundary, which automatically will reset self room free grid
-                # In case it was forced, we must check that the overlapped children rooms are fine with the invasion
-                if forced:
-                    if not self.invade_children(room, initial_boundary.grid):
-                        room.boundary = None
-                        continue
-                # Otherwise just claim the boundary
-                else:
-                    room.boundary = initial_boundary
-                # If the child room has no initial boundary at this point there must be something wrong
-                if not room.boundary:
-                    raise RuntimeError('Failed to set an initial boundary for room "' + room.name + '"')
                 # At this point, check if the boundary is equal to a previous tried (and failed) boundary
                 # This may happend with the 4 corners of the same rect
-                if previous_initial_boundary == room.boundary:
+                if previous_initial_boundary == initial_boundary:
                     continue
-                previous_initial_boundary = room.boundary
-                # If the new boundary is not respecting minimum size in the paren free grid we must skip to the next corner
-                truncated_parent_limited_free_grid = parent_limited_free_grid - room.grid
+                # Save the current boundary to skip it in further iterations in case it fails
+                previous_initial_boundary = initial_boundary
+                # If the new boundary is not respecting minimum size in the parent free grid we must skip to the next corner
+                truncated_parent_limited_free_grid = parent_limited_free_grid - initial_boundary.grid
                 if not truncated_parent_limited_free_grid.check_minimum(room.parent_free_limit):
                     print('WARNING: Not respecting minimum size (' + str(room.parent_free_limit) + ') in parent free space')
                     continue
+                # Set the child first boundary, which automatically will reset self room free grid
+                room.boundary = initial_boundary
+                # In case it was forced, we must check that the overlapped children rooms are fine with the invasion
+                if forced and not self.invade_children(room, room.boundary.grid):
+                    room.boundary = None
+                    continue
                 # Proceed with the expansion of this child room until it reaches its forced area
-                if room.fit_to_required_area():
-                    return True
-                # If the expansion failed then clean the boundary (i.e. the initial boundary)
-                room.boundary = None
-                if forced:
-                    self.restore_children_backup(backup)
+                if not room.fit_to_required_area():
+                    # If the expansion failed then clean the boundary (i.e. the initial boundary)
+                    room.boundary = None
+                    if forced:
+                        self.restore_children_backup(backup)
+                    continue
+                return True
             # If at this point we still have no boundary it means there is no available place to set the perimeter
             return False
 
@@ -2460,7 +2455,7 @@ class Room:
     # Check if this room is already fit to its required area
     def is_fit_to_required_area (self) -> bool:
         required_area = self.get_required_area()
-        return abs(required_area / self.max_size) < minimum_resolution * self.max_size
+        return abs(required_area) < minimum_resolution * self.max_area
 
     # Expand or contract this room until it reaches the forced area
     # In case it is not able to fit at some point recover the original situation
@@ -2838,6 +2833,10 @@ class Room:
                 return False
         # In case all substractions and relocations were successfull we can now set the new boundary as the current one
         self.boundary = new_boundary
+        # Check the minimum size in the parent free grid to be respected
+        if self.parent.free_grid.check_minimum(self.parent_free_limit):
+            self.restore_backup(backup)
+            return False
         return True
 
     # Try to expand a specific room frontier
@@ -3009,12 +3008,12 @@ class Room:
             # Substract the new rectangle segment regions which overlap with current boundary segments
             # e.g. the pushed segment will always be an overlapped region
             new_segments = new_rect.segments
-            current_segments = self.boundary.exterior_polygon.segments
+            current_segments = self.boundary.segments
             added_segments = [ seg for segment in new_segments for seg in segment.substract_segments(current_segments) ]
             remaining_segments = [ seg for segment in current_segments for seg in segment.substract_segments(new_segments) ]
-            # Join all previous segments to make the new polygon
-            new_exterior_polygon = Polygon.non_canonical([ *added_segments, *remaining_segments ])
-            new_boundary = Boundary(new_exterior_polygon, self.boundary.interior_polygons)
+            # Join all previous segments to make new polygons
+            new_polygons = list(connect_segments([ *added_segments, *remaining_segments ]))
+            new_boundary = connect_polygons(new_polygons)[0] # There should be always 1 and only 1 boundary
             # Check doors would be respected with the new boundary
             if parent_room in rooms and parent_room._child_adaptable_boundary and not parent_room.check_doors_side(new_boundary.grid, inside=False):
                 return False
@@ -3383,7 +3382,7 @@ class Room:
             truncated_grid = truncated_grid.keep_minimum(self.min_size)
         # If the grid has been fully consumed then give up
         if not truncated_grid:
-            raise RuntimeError('We fully removed a whole room by force-truncaing')
+            raise RuntimeError('We fully removed a whole room by force-truncating')
         # Check the truncated grid to still respecting the minimum size
         elif not truncated_grid.check_minimum(self.preventive_min_size):
             print('WARNING: The room is not respecting the minimum size -> Go back')
@@ -3404,6 +3403,13 @@ class Room:
         if not force and len(truncated_boundaries) == 0:
             print('WARNING: The invaded room has been fully consumed -> Go back')
             return False
+        # Check the new parent free grid to be respecting the minimum size
+        # It may happen that we pull slightly a frontier which was in contact to a parent/brother frontier and create a small space
+        if not force:
+            new_free_grid = self.parent.free_grid + region
+            if not new_free_grid.check_minimum(self.parent_free_limit):
+                print('WARNING: Minimum size is not respected in parent free space')
+                return False
         # Modify the room boundary
         self.set_boundary(truncated_boundaries[0], skip_update_display=skip_update_display)
         return True
@@ -3990,6 +3996,7 @@ class Building:
         sorted_floor_indices = list(range(self.highest_floor_index +1)) + list(range(self.lowest_floor_index, 0))
         for floor_index in sorted_floor_indices:
             floor = self.floors[floor_index]
+            stairs = self.stairs[floor_index]
             # Get the lower floor, it may be useful to aset a few parameter of the current one
             lower_floor_index = floor_index - 1
             # Get the upper floor, it may be useful to aset a few parameter of the current one
@@ -4010,16 +4017,26 @@ class Building:
                     floor._child_adaptable_boundary = False
                 # Base floor
                 else:
-                    # We may need to set a bit of extra free space next to the stairs
-                    # This is for the perimeter in the floor above to have space for the corridor to reach the stairs door
-                    # Note that this has to be done now that the stair rooms are children of the floor
-                    # Otherwise the door is not able to find its arguments (width and margin) at this point since it has not root
-                    current_floor_stairs = self.stairs[floor_index]
-                    if floor_index == 0 and current_floor_stairs:
-                        # Now calculate the space required by the door
-                        for stair in current_floor_stairs:
-                            extra_space = Grid([ stair.upstairs_room.doors[0].generate_rect(inside=False) ])
-                            floor.forced_grid += extra_space
+                    # If we have an area range in the inputs then generate a random shape
+                    if floor.min_area != None and floor.max_area != None:
+                        # Generate a random shape and set it as the floor boundary
+                        random_polygon = generate_random_polygon(
+                            min_area=floor.min_area,
+                            max_area=floor.max_area,
+                            min_size=floor.min_size
+                        )
+                        floor.boundary = Boundary(random_polygon)
+                    # Otherwise, we have a child adaptable boundary scenario
+                    else:
+                        # We may need to set a bit of extra free space next to the stairs
+                        # This is for the perimeter in the floor above to have space for the corridor to reach the stairs door
+                        # Note that this has to be done now that the stair rooms are children of the floor
+                        # Otherwise the door is not able to find its arguments (width and margin) at this point since it has not root
+                        if stairs:
+                            # Now calculate the space required by the door
+                            for stair in stairs:
+                                extra_space = Grid([ stair.upstairs_room.doors[0].generate_rect(inside=False) ])
+                                floor.forced_grid += extra_space
             # In case this floor has not forced doors there will be not doors incase it is not the base
             if floor.input_doors == None and floor_index != 0:
                 floor.doors = []
