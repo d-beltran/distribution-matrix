@@ -9,8 +9,8 @@ from math import sqrt, inf, tan, atan, degrees, radians
 
 # Set the seed and print it
 seed = None
-#seed = 518578 # Puerta fuera de sitio
-seed = 908524
+#seed = 908524
+seed = 149067
 
 if not seed:
     seed = round(random.random() * 999999)
@@ -410,7 +410,10 @@ class Door:
             return False
         parent_room = self.room.parent
         # If there is no parent (i.e. room is the root) then the parent corridor is not a restriction
-        parent_corridor_boundaries = parent_room.corridor_grid.boundaries if parent_room else []
+        parent_corridor = parent_room.corridor_grid
+        if not parent_corridor:
+            return False
+        parent_corridor_boundaries = parent_corridor.boundaries if parent_room else []
         parent_corridor_segments = sum([ boundary.segments for boundary in parent_corridor_boundaries ],[])
         # Get the available segments to place the door
         # Regions where the exterior polygon of the door room and any parent corridor converges
@@ -1081,16 +1084,16 @@ class Room:
         return False
 
     # Search all maximum rects where the specified room minimum rectangle would fit
-    # Search in free space by default and all space if the argument 'force' is passed
-    def get_room_fitting_rects (self, room : 'Room', force : bool = False) -> List[Rect]:
+    # Search in free space by default and all space if the argument 'forced' is passed
+    def get_room_fitting_rects (self, room : 'Room', forced : bool = False) -> List[Rect]:
         size = room.min_size
         # Get all fitting rects
-        grid = self.grid if force else self.free_grid
+        grid = self.grid if forced else self.free_grid
         fitting_rects = grid.get_fitting_space(size, size)
         return list(fitting_rects)
 
     # Set up a child room boundary
-    def set_child_room_boundary (self, room) -> bool:
+    def set_child_room_boundary (self, room : 'Room', forced : bool = False) -> bool:
         # If self is a child adaptable room
         if self._child_adaptable_boundary:
             # There are no boundary restrictions
@@ -1173,18 +1176,19 @@ class Room:
         else:
             # Find a suitable maximum free rectangle to deploy a starting base boundary
             # The minimum base boundary is a square with both sides as long as the room minimum size
-            suitable_rects = self.get_room_fitting_rects(room)
             # If there are no suitable rects it means this child fits nowhere in the free space
             # This may happen with the last childs, when previous childs have take almost all space
             # In this case we take as availbale space all the room space and then we invade overlapped children
-            forced = False
-            if len(suitable_rects) == 0:
-                print('WARNING: The room ' + room.name + ' fits nowhere in the free space')
-                suitable_rects = self.get_room_fitting_rects(room, force=True)
-                forced = True
+            if forced:
+                suitable_rects = self.get_room_fitting_rects(room, forced=True)
                 if len(suitable_rects) == 0:
                     # DANI: Esto no debería pasar nunca. Debería preveerse de antes
                     raise RuntimeError('The room ' + room.name + ' fits nowhere')
+            else:
+                suitable_rects = self.get_room_fitting_rects(room)
+                if len(suitable_rects) == 0:
+                    print('WARNING: The room ' + room.name + ' fits nowhere in the free space')
+                    return self.set_child_room_boundary(room, forced=True)
             # Shuffle the suitable rects
             random.shuffle(suitable_rects)
             # Sort the suitable rects by minimum size
@@ -1208,7 +1212,7 @@ class Room:
             # Note that this minimum size may not be respected already independently of the position of the initial room boundary
             parent_limited_free_grid = self.free_grid.keep_minimum(room.parent_free_limit)
             for corner, rect in sites:
-                # In case we forced the base boundary we must check which children were invaded
+                # In case we force the base boundary we must check which children were invaded
                 # In addition, the base boundary must be as small as possible
                 if forced:
                     initial_boundary = room.build_minimum_initial_boundary(corner, rect)
@@ -1256,6 +1260,9 @@ class Room:
                     continue
                 return True
             # If at this point we still have no boundary it means there is no available place to set the perimeter
+            # If this was not forced then retry forcing
+            if not forced:
+                return self.set_child_room_boundary(room, forced=True)
             return False
 
     # Build a provisional grid from the children room grids
@@ -1433,6 +1440,9 @@ class Room:
             node_data['is_redundant'] = len(node_data['connected_segments']) == 2 and not node_data['is_door']
         # Save non-redundant nodes apart
         non_redundant_nodes = { k:v for k, v in nodes.items() if v['is_redundant'] == False }
+        # If ther is only one non redundant node then it makes not sense trying to set a corridor. See figure 03
+        if len(non_redundant_nodes) < 2:
+            return None
         # Then a path between non-redundant nodes is a list of segments, which are connected by redundant nodes
         for node_point, node_data in non_redundant_nodes.items():
             # Find all current node paths to other non-redundant nodes
@@ -1460,7 +1470,6 @@ class Room:
                     last_node = nodes[last_point]
                     path.append(last_segment)
                     if last_point == node_point:
-                        print(self.name)
                         raise ValueError('This should never happen. Do we have one room only?')
                 # Once we have the reached a non-redundant node save the accumulated path and the node itself
                 # In case the point is already in the list it means we have two paths for the same node
@@ -2461,6 +2470,7 @@ class Room:
     # In case it is not able to fit at some point recover the original situation
     # Restricted segments are segments which must remain as are
     def fit_to_required_area (self, restricted_segments : list = []) -> bool:
+        print('Fit to required area ' + self.name)
         # Calculate how much area we need to expand
         required_area = self.get_required_area()
         # If the area is already satisfied then stop here
@@ -2815,7 +2825,7 @@ class Room:
         for child in self.children:
             # Save a backup of the current child in case we have to recover its boundary later
             child_boundary_backup = child.boundary
-            if not child.truncate(removed_region, force=force_child_truncation):
+            if not child.truncate(removed_region, force=force_child_truncation, check_parent=True):
                 # If the truncate process failed then restore backups and return True
                 self.restore_backup(backup)
                 return False
@@ -3216,7 +3226,7 @@ class Room:
             new_rect = Rect.from_segments([pushed_segment, new_side])
             removed_region = Grid([new_rect])
             # We must substract the new rect from this room and check everything is fine after
-            if not self.truncate(removed_region):
+            if not self.truncate(removed_region, check_parent=True):
                 # If the contraction fails then try it again with the next protocol
                 # If we are in the last protocol then return False
                 if protocol != 2:
@@ -3364,7 +3374,7 @@ class Room:
     # Use the force argument to skip all checkings and simply truncate the boundary
     # Use the skip_update_display to avoid this truncate to generate a display frame
     # This is useful when truncating several rooms at the same time, so we do not have to recalculate the parent free grid every time
-    def truncate (self, region : Grid, force : bool = False, skip_update_display : bool = False) -> bool:
+    def truncate (self, region : Grid, force : bool = False, check_parent : bool = False, skip_update_display : bool = False) -> bool:
         grid = self.grid
         # In case the room has not grid there is no problem at all in the truncation
         if not grid:
@@ -3403,12 +3413,13 @@ class Room:
         if not force and len(truncated_boundaries) == 0:
             print('WARNING: The invaded room has been fully consumed -> Go back')
             return False
-        # Check the new parent free grid to be respecting the minimum size
+        # Check the new parent free grid to be respecting the minimum size in case it is requested
         # It may happen that we pull slightly a frontier which was in contact to a parent/brother frontier and create a small space
-        if not force:
+        # Note that parent grid is not checked in situtations where the truncated region is to be claimed by other room rigth away
+        if check_parent:
             new_free_grid = self.parent.free_grid + region
             if not new_free_grid.check_minimum(self.parent_free_limit):
-                print('WARNING: Minimum size is not respected in parent free space')
+                print('WARNING: Minimum size (' + str(self.parent_free_limit) + ') is not respected in parent free space')
                 return False
         # Modify the room boundary
         self.set_boundary(truncated_boundaries[0], skip_update_display=skip_update_display)
@@ -3419,7 +3430,7 @@ class Room:
     def invade (self, region : Grid, force : bool = False, skip_update_display : bool = False) -> bool:
         # Truncate the room boundary but save a backup in case we have to go back further
         backup_boundary = self.boundary
-        if not self.truncate(region, force, skip_update_display):
+        if not self.truncate(region, force, skip_update_display=skip_update_display):
             print('WARNING: The invaded region can not be truncated -> Go back')
             self.boundary = backup_boundary
             return False
@@ -3441,7 +3452,8 @@ class Room:
         # Claim the invaded region for the invasor room
         invasor.merge_grid(region)
         # Now find which children are overlaped by the invade region and then truncate them
-        children = [ child for child in self.children if child != invasor ]
+        # Get only children already set (i.e. with a grid)
+        children = [ child for child in self.children if child != invasor and child.grid ]
         for child in children:
             # Get the overlap regions between the invaded region and this child
             overlap_grid = child.grid.get_overlap_grid(region)
@@ -3483,8 +3495,8 @@ class Room:
 
     # Get all overlapped segments between the current room and other
     def get_frontiers_with_room (self, other : 'Room') -> list:
-        self_segments = self.boundary.exterior_polygon.segments
-        other_segments = other.boundary.exterior_polygon.segments
+        self_segments = self.boundary.segments
+        other_segments = other.boundary.segments
         overlap_segments = []
         for self_segment in self_segments:
             for other_segment in other_segments:

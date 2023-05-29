@@ -385,7 +385,7 @@ test_building_2 = Building(
                             min_area='10%',
                             max_area='18%',
                             min_size=15,
-                            fill_color='orange'),
+                            fill_color='pink'),
                         Room(
                             name='Lavabo',
                             min_area='08%',
