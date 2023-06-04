@@ -1951,6 +1951,13 @@ class Boundary:
         return self.grid.area
     area = property(get_area, None, None, "The area inside the boundary")
 
+    # Get a corner from its point
+    def get_corner (self, point : 'Point') -> Optional['Corner']:
+        corner = next((corner for corner in self.corners if corner == point), None)
+        if not corner:
+            return None
+        return corner
+
     # Get the inside corners
     def get_inside_corners (self) -> List['Corner']:
         # If the values has been previously calculated then return the saved value
@@ -2061,6 +2068,54 @@ class Boundary:
             if self.exterior_polygon.is_colliding_with(other.exterior_polygon):
                 return True
         return False
+
+    # Get a specific polygon corner or segment by specifying a point that matches this element
+    def get_border_element (self, point : Point) -> Optional[Union[Point, Segment]]:
+        for corner in self.corners:
+            if point == corner:
+                return corner
+        for segment in self.segments:
+            if point in segment:
+                return segment
+        return None
+
+    # Get a specific boundary segment by specifying a segment that overlaps partial or totally this segment
+    def get_segment_from_segment (self, segment : Segment) -> Optional[Segment]:
+        for boundary_segment in self.segments:
+            overlap = boundary_segment.get_overlap_segment(segment)
+            if overlap:
+                return boundary_segment
+        return None
+
+    # Find overlap segments between self polygon segments and other segment
+    # If the other segment is inside the area of the polygon it will not be considered
+    def get_segment_overlap_segments (self, other : 'Segment') -> Generator[Segment, None, None]:
+        for segment in self.segments:
+            overlap_segment = segment.get_overlap_segment(other)
+            if overlap_segment:
+                yield overlap_segment
+
+    # Given a group of segments, find overlaps with the boundary segments
+    def get_segments_overlap_segments (self, segments : List[Segment]) -> List[Segment]:
+        overall_overlap_segments = []
+        for segment in self.segments:
+            for other_segment in segments:
+                overlap_segments = list(self.get_segment_overlap_segments(other_segment))
+                overall_overlap_segments += overlap_segments
+        return list(set(overall_overlap_segments))
+
+    # Given a segment which overlaps the polygon, get a vector which is perpendicular to this segment and points into de inside of the polygon
+    def get_border_inside (self, segment : Segment) -> Vector:
+        boundary_segment = self.get_segment_from_segment(segment)
+        if not boundary_segment:
+            raise ValueError('The segment is not in the boundary')
+        boundary_polygon = next(polygon for polygon in self.polygons if boundary_segment in polygon.segments)
+        is_exterior = boundary_polygon == self.exterior_polygon
+        if is_exterior:
+            angle = 90 if boundary_polygon.clockwise else -90
+        else:
+            angle = -90 if boundary_polygon.clockwise else 90
+        return boundary_segment.direction.rotate(angle)
 
 # A grid is a group or groups of rectangles connected according to a standard:
 # Two connected rectangles have the whole segment connected

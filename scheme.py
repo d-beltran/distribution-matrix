@@ -38,7 +38,7 @@ display_solving_process = False
 #     This should respect minimum size even in the worst possible scenario
 preventive_min_size_protocol = 0
 
-# A door is a segment in a polygon
+# A door is a segment in a boundary
 # When boundaries are transformed to walls with tickness, doors become holes in the wall
 class Door:
     def __init__ (self,
@@ -56,6 +56,8 @@ class Door:
         # Set if the door is rigid
         # i.e. its point may not change as a result of the solving process
         rigid : bool = False,
+        # Set if the doors direction points outside the room instead of inside
+        reverse : bool = False,
         # Set the parent room
         room : Optional['Room'] = None
     ):  
@@ -70,6 +72,7 @@ class Door:
         self._direction = direction
         self._pivot = pivot
         self.rigid = rigid
+        self.reverse = reverse
         # The room this door belongs to
         self.room = room
 
@@ -175,7 +178,7 @@ class Door:
 
     # Given a segment width, generate a new
     # The new segment will be centered in the door point
-    # The new segment will be overlaped with the polygon segment where the door point is
+    # The new segment will be overlaped with the boundary segment where the door point is
     def generate_segment (self, width : number) -> Segment:
         # If width is 0 then the segment can not exist
         if width == 0:
@@ -183,20 +186,20 @@ class Door:
         # If the door point is not assigned then we can not generate the segment
         if not self.point:
             return None
-        # If we can not retrieve the polygon then we can not generate the segment
-        room_polygon = self.get_room_polygon()
-        if not room_polygon:
+        # If we can not retrieve the boundary then we can not generate the segment
+        room_boundary = self.get_room_boundary()
+        if not room_boundary:
             return None
         # Otheriwse, generate the margined segment
-        polygon_segment = next(( segment for segment in room_polygon.segments if self.point in segment ), None)
-        if not polygon_segment:
-            raise ValueError('The door point ' + str(self.point) + ' is not over its room polygon (' + self.room.name + ')')
-        direction = polygon_segment.direction
+        boundary_segment = next(( segment for segment in room_boundary.segments if self.point in segment ), None)
+        if not boundary_segment:
+            raise ValueError('The door point ' + str(self.point) + ' is not over its room boundary (' + self.room.name + ')')
+        direction = boundary_segment.direction
         half_width = width / 2
         a = self.point - direction * half_width
         b = self.point + direction * half_width
-        if a not in polygon_segment or b not in polygon_segment:
-            raise ValueError('The door segment (' + str(Segment(a,b)) + ') does not fit in its room polygon (' + self.room.name + ')')
+        if a not in boundary_segment or b not in boundary_segment:
+            raise ValueError('The door segment (' + str(Segment(a,b)) + ') does not fit in its room boundary (' + self.room.name + ')')
         return Segment(a,b)
 
     # Make a backup of the current door
@@ -224,7 +227,7 @@ class Door:
         margined_segment = self.margined_segment
         if not margined_segment:
             return None
-        if margined_segment not in self.room.boundary.exterior_polygon:
+        if margined_segment not in self.room.boundary:
             return None
         inside_direction = self.get_inside_direction()
         direction = inside_direction if inside else -inside_direction
@@ -232,24 +235,26 @@ class Door:
         return Rect.from_segments([margined_segment, second_segment])
 
     # Get the door inside direction
-    # i.e. the direction towards the door polygon inside side
+    # i.e. the direction towards the door boundary inside side
     def get_inside_direction (self) -> Optional[Vector]:
         if not self.segment:
             return None
-        room_polygon = self.get_room_polygon()
-        if not room_polygon:
+        room_boundary = self.get_room_boundary()
+        if not room_boundary:
             return None
-        inside_direction = room_polygon.get_border_inside(self.segment)
+        inside_direction = room_boundary.get_border_inside(self.segment)
         return inside_direction
 
     # Get the door direction
     # i.e. the direction the door is open thorugh
-    # By default the direction points to the door polygon inside side
+    # By default the direction points to the door boundary inside side
     def get_direction (self) -> Optional[Vector]:
         # Return internal value if it exists
         if self._direction:
             return self._direction
-        self._direction = self.get_inside_direction()
+        # Otherwise, find the direction
+        inside_direction = self.get_inside_direction()
+        self._direction = -inside_direction if self.reverse else inside_direction
         return self._direction
     # The direction crosses the door segment perpendicularly
     # It is a normalized vector
@@ -262,15 +267,15 @@ class Door:
         # Return internal value if it exists
         if self._pivot:
             return self._pivot
-        if not self.segment:
+        if not self.segment or not self.room:
             return None
-        room_polygon = self.get_room_polygon()
-        if not room_polygon:
+        room_boundary = self.get_room_boundary()
+        if not room_boundary:
             return None
         door_points = self.segment.points
-        polygon_segment = next( segment for segment in room_polygon.segments if self.point in segment )
-        polygon_segment_points = polygon_segment.points
-        outside_corners = [ corner for corner in room_polygon.corners if corner in polygon_segment_points and not corner.inside ]
+        boundary_segment = next( segment for segment in room_boundary.segments if self.point in segment )
+        boundary_segment_points = boundary_segment.points
+        outside_corners = [ corner for corner in room_boundary.corners if corner in boundary_segment_points and not corner.inside ]
         # If both segment corners are inside corners then just set the first segment point as the pivot
         if len(outside_corners) == 0:
             self._pivot = door_points[0]
@@ -288,15 +293,15 @@ class Door:
     # The door pivot
     pivot = property(get_pivot, None, None, "The door pivot")
 
-    # Get the polygon where the door is meant to be
-    def get_room_polygon (self) -> Optional[Polygon]:
+    # Get the boundary where the door is meant to be
+    def get_room_boundary (self) -> Optional[Boundary]:
         room = self.room
         if not room:
             return None
         boundary = room.boundary
         if not boundary:
             return None
-        return boundary.exterior_polygon
+        return boundary
 
     # Generate a new segment which represents the door open
     # Note that this function is used for display pourposes only
@@ -317,14 +322,14 @@ class Door:
     def find_suitable_regions (self, available_segments : Optional[List[Segment]] = None) -> Tuple[ List['Segment'], List['Point'] ]:
         # Set the minimum length a segment must have in order to fit the door and its margins
         minimum_segment_length = self.margined_width
-        # If not available segments are passed then we use the room exterior polygon segments after substracting other doors
+        # If not available segments are passed then we use the room boundary segments after substracting other doors
         if available_segments == None:
-            # The door must have a polygon
-            room_polygon = self.get_room_polygon()
-            if not room_polygon:
-                raise ValueError('Cannot find a suitable region for a door without polygon')
-            # Get segments in its polygon which are wide enought for the door
-            candidate_segments = [ segment for segment in room_polygon.segments if segment.length >= minimum_segment_length ]
+            # The door must have a boundary
+            room_boundary = self.get_room_boundary()
+            if not room_boundary:
+                raise ValueError('Cannot find a suitable region for a room without boundary')
+            # Get segments in its boundary which are wide enought for the door
+            candidate_segments = [ segment for segment in room_boundary.segments if segment.length >= minimum_segment_length ]
             # Set the doors which must be substracted from the suitable segments (i.e. other doors already set)
             already_set_door_segments = [ door.segment for door in self.room.doors if door != self and door.point ]
             # Substract the neighbour doors from the available segments
@@ -366,11 +371,11 @@ class Door:
         suitable_points += sum([ list(segment.points) for segment in suitable_segments ], [])
         return suitable_points
 
-    # Check if a point in a polygon is siutable for placing this door
+    # Check if a point in a boundary is siutable for placing this door
     # If no point is provided then self point is used by default
-    # If no polygon is provided then self room polygon is used by default
+    # If no boundary is provided then self room boundary is used by default
     # i.e. check if the point is in the door room boundary and there is space enough around for its margined width
-    def is_point_suitable (self, point : Optional[Point] = None, polygon : Optional[Polygon] = None) -> bool:
+    def is_point_suitable (self, point : Optional[Point] = None, boundary : Optional[Boundary] = None) -> bool:
         # If input point is missing set self point
         if point == None:
             # If there is no self point either then we have nothing to do
@@ -380,28 +385,28 @@ class Door:
         # If width is 0 then the segment can not exist
         if self.width == 0:
             raise ValueError('Cannot generate a segment for a door of width 0')
-        # If polygon is not assigned we use the room polygon
-        if not polygon:
-            polygon = self.get_room_polygon()
-            # If there is not room polygon either then we have nothing to do
-            if not polygon:
-                raise ValueError('No polygon was provided and there is no room polygon to place the door')
+        # If boundary is not assigned we use the room boundary
+        if not boundary:
+            boundary = self.get_room_boundary()
+            # If there is not room boundary either then we have nothing to do
+            if not boundary:
+                raise ValueError('No boundary was provided and there is no room boundary to place the door')
         # Otheriwse, generate the margined segment
-        polygon_segment = next(( segment for segment in polygon.segments if self.point in segment ), None)
-        if not polygon_segment:
+        boundary_segment = next(( segment for segment in boundary.segments if self.point in segment ), None)
+        if not boundary_segment:
             return False
-        direction = polygon_segment.direction
+        direction = boundary_segment.direction
         half_width = self.width / 2
         a = self.point - direction * half_width
         b = self.point + direction * half_width
-        if a not in polygon_segment or b not in polygon_segment:
+        if a not in boundary_segment or b not in boundary_segment:
             return False
         return True
 
     # Relocate self door in a suitable region in contact with the parent corridor
     # Find suitable regions in the room boundaries which contact the corridor
-    # The polygon to place the door is the room polygon by default, but a custom polygon may be passed
-    def relocate (self, polygon : Optional[Polygon] = None) -> bool:
+    # The boundary to place the door is the room boundary by default, but a custom boundary may be passed
+    def relocate (self, boundary : Optional[Boundary] = None) -> bool:
         # If the door has not room or width then it makes not sense to relocate the door
         if not self.room or not self.width:
             return False
@@ -416,9 +421,9 @@ class Door:
         parent_corridor_boundaries = parent_corridor.boundaries if parent_room else []
         parent_corridor_segments = sum([ boundary.segments for boundary in parent_corridor_boundaries ],[])
         # Get the available segments to place the door
-        # Regions where the exterior polygon of the door room and any parent corridor converges
-        available_polygon = polygon if polygon else self.room.boundary.exterior_polygon
-        available_segments = available_polygon.get_segments_overlap_segments(parent_corridor_segments)
+        # Regions where the exterior boundary of the door room and any parent corridor converges
+        available_boundary = boundary if boundary else self.room.boundary
+        available_segments = available_boundary.get_segments_overlap_segments(parent_corridor_segments)
         # If there are not available segments at this point then we can not relocate the door
         if len(available_segments) == 0:
             return False
@@ -431,8 +436,8 @@ class Door:
         # Now priorize those suitable regions which are a better placement for the door
         # The ideal place is which makes the open door to stay next to a wall
         def sort_by_distance_to_wall (point : Point) -> number:
-            polygon_segment = available_polygon.get_border_element(point)
-            corners = [ available_polygon.get_corner(p) for p in polygon_segment.points ]
+            boundary_segment = available_boundary.get_border_element(point)
+            corners = [ available_boundary.get_corner(p) for p in boundary_segment.points ]
             outside_corners = [ corner for corner in corners if not corner.inside ]
             if len(outside_corners) == 0:
                 return inf
@@ -446,10 +451,10 @@ class Door:
 
     # Check if the door is placed in a suitable point already and, if not, try to relocate it
     # Return Ture both if it was fine already or it could be relocated
-    def check_and_relocate (self, polygon : Optional[Polygon] = None) -> bool:
-        if self.is_point_suitable(polygon=polygon):
+    def check_and_relocate (self, boundary : Optional[Boundary] = None) -> bool:
+        if self.is_point_suitable(boundary=boundary):
             return True
-        return self.relocate(polygon=polygon)
+        return self.relocate(boundary=boundary)
         
 # A room is a smart boundary that may contain other boundaries with conservative areas and size restrictions
 class Room:
@@ -1369,14 +1374,19 @@ class Room:
         available_segments = []
         # Keep al already stablished door points, both from self and children
         door_points = []
+        # Save the rooms of door nodes since there is no need to include them in the required rooms list
+        # Since they have mandatory door nodes they will be included anyway
+        already_doored_rooms = set()
         # Split self and children boundaries at the doors
         for room in [ self, *self.children ]:
             if not room.boundary:
                 continue
-            current_door_points = [ door.point for door in room.doors ]
+            current_door_points = [ door.point for door in room.doors if door.point ]
             for room_segment in room.boundary.segments:
                 available_segments += room_segment.split_at_points(current_door_points)
             door_points += current_door_points
+            if len(current_door_points) > 0:
+                already_doored_rooms.add(room)
         # Split and merge available segments according to overlaps
         splitted_segments = []
         for available_segment, other_segments in otherwise(available_segments):
@@ -1440,8 +1450,32 @@ class Room:
             node_data['is_redundant'] = len(node_data['connected_segments']) == 2 and not node_data['is_door']
         # Save non-redundant nodes apart
         non_redundant_nodes = { k:v for k, v in nodes.items() if v['is_redundant'] == False }
-        # If ther is only one non redundant node then it makes not sense trying to set a corridor. See figure 03
-        if len(non_redundant_nodes) < 2:
+        # If there is no redundant nodes then it makes not sense trying to set a corridor at all
+        # DANI: No se si esto es posible, pero just in case
+        if len(non_redundant_nodes) == 0:
+            return None
+        # If there is only one non redundant node then it makes not sense trying to set a corridor. See figure 03
+        # However this node is to be set as a door for implicated rooms
+        # Fix this very specific situtation by making the only door to be the door of all rooms
+        if len(non_redundant_nodes) == 1:
+            rooms = [ self, *self.children ]
+            doors = sum([ room.doors for room in rooms ], [])
+            doors = [ door for door in doors if door.point ]
+            if len(doors) != 1:
+                raise RuntimeError('Vete tu a saber. Si no se parece a la figura 3 hay que replantearse esto')
+            only_door = doors[0]
+            for room in rooms:
+                if len(room.doors) == 0:
+                    continue
+                if len(room.doors) > 1:
+                    raise RuntimeError('No podemos dar soporte a este escenario. Igual hay que restringirlo todo a una puerta por habitación')
+                room.doors[0] = only_door
+            # DANI: Esto de aquí abajo en lugar de asignar la misma puerta hace que la puerta ya existente tenga el mismo punto
+            # only_node = list(non_redundant_nodes.keys())[0]
+            # for room in self.children:
+            #     main_door = room.doors[0]
+            #     if not main_door.point:
+            #         main_door.point = only_node
             return None
         # Then a path between non-redundant nodes is a list of segments, which are connected by redundant nodes
         for node_point, node_data in non_redundant_nodes.items():
@@ -1490,8 +1524,8 @@ class Room:
 
         # Now find all possible path combinations until we cover all doors and rooms
         # Set the rooms which must be reached by the corridor
-        required_children_rooms = [ child for child in self.children if child.boundary and len(child.doors) > 0 ]
-        required_rooms = ([ self ] if len(self.doors) > 0 else []) + required_children_rooms
+        required_children_rooms = [ child for child in self.children if child.boundary and len(child.doors) > 0 and child not in already_doored_rooms ]
+        required_rooms = ([ self ] if len(self.doors) > 0 and self not in already_doored_rooms else []) + required_children_rooms
         # If there are less than 2 required rooms then it makes not sense finding a corridor
         if len(required_rooms) < 2:
             raise ValueError('Trying to find a corridor between less than 2 rooms')
@@ -2139,12 +2173,12 @@ class Room:
                         self.update_display(title='Displaying expanded corridor')
                         break
                     else:
-                        raise RuntimeError('No available segment was expanded successfully for room ' + door.room.name)
+                        raise RuntimeError('Failed to expand corridor for reaching room ' + door.room.name)
                 # If there is no segment overlap between corridor and door room then we must rely in a point overlap
                 # This point will be a corner for both the corridor and the door room and it must always be there
                 overlap_point = next((corner for corner in corridor_outside_corners if corner in door_polygon.corners), None)
                 if not overlap_point:
-                    raise RuntimeError('There is no overlap point between the corridor and the door room. This should never happen.')
+                    raise RuntimeError('There is no overlap point between the corridor and the ' + door.room.name + ' door. This should never happen.')
                 # Now find the two segments in the corridor boundary which include the overlap corner
                 reference_segments = [ segment for segment in corridor_boundary_segments if overlap_point in segment ]
                 # Set the expansion size as the whole door margined width
@@ -3416,11 +3450,14 @@ class Room:
         # Check the new parent free grid to be respecting the minimum size in case it is requested
         # It may happen that we pull slightly a frontier which was in contact to a parent/brother frontier and create a small space
         # Note that parent grid is not checked in situtations where the truncated region is to be claimed by other room rigth away
-        if check_parent:
-            new_free_grid = self.parent.free_grid + region
-            if not new_free_grid.check_minimum(self.parent_free_limit):
-                print('WARNING: Minimum size (' + str(self.parent_free_limit) + ') is not respected in parent free space')
-                return False
+        # DANI: Esto tiene un problema y es resolver un pull cuando ya está toda el area consumida -> se hace eterno
+        # DANI: No se me ocurre solución sencilla así que de momento lo quito y ya
+        # if check_parent:
+        #     new_free_grid = self.parent.free_grid + region
+        #     if not new_free_grid.check_minimum(self.parent_free_limit):
+        #         print('WARNING: Minimum size (' + str(self.parent_free_limit) + ') is not respected in parent free space')
+        #         add_frame(new_free_grid.rects, title='Debug -> ' + self.parent.name)
+        #         return False
         # Modify the room boundary
         self.set_boundary(truncated_boundaries[0], skip_update_display=skip_update_display)
         return True
@@ -3852,7 +3889,7 @@ class Stairs:
             shape = Polygon.from_rect(rect)
             doors_point = Point(self.width / 2, 0)
             downstairs_door = Door(point=doors_point, rigid=True)
-            upstairs_door = Door(point=doors_point, rigid=True)
+            upstairs_door = Door(point=doors_point, rigid=True, reverse=True)
             return shape, downstairs_door, upstairs_door
         # Rectangle with a door on each extreme
         if self.configuration == 1:
@@ -3861,7 +3898,7 @@ class Stairs:
             downstairs_door_point = Point(self.width / 2, 0)
             downstairs_door = Door(point=downstairs_door_point, rigid=True)
             upstairs_door_point = Point(self.width / 2, self.length)
-            upstairs_door = Door(point=upstairs_door_point, rigid=True)
+            upstairs_door = Door(point=upstairs_door_point, rigid=True, reverse=True)
             return shape, downstairs_door, upstairs_door
         raise SystemExit('Configuration ' + str(self.configuration) + ' is not defined')
 
