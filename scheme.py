@@ -1927,9 +1927,14 @@ class Room:
             # And now we must expand the corridor regions where we substracted the excluding regions
             # Otherwise the corridor would have regions which do not respect the minimum size
             for excluding_region_boundary in excluding_regions.boundaries:
-                # The region to be expanded is deducted from the segments in the excluding region boundary which overlap the corridor
                 corridor_boundary = corridor_grid.boundaries[0]
-                excluded_reference_segments = excluding_region_boundary.get_boundary_overlap_segments(corridor_boundary)
+                # DEPRECATED
+                # The region to be expanded is deducted from the segments in the excluding region boundary which overlap the already corridor boundary
+                # excluded_reference_segments = excluding_region_boundary.get_boundary_overlap_segments(corridor_boundary)
+                # IMPORTANT: Use the overlap with the path segments instead of the excluding region boundary segments
+                # IMPORTANT: Otherwise, we may expand the corridor over unnecessary space. See figure 7
+                # The region to be expanded is deducted from the segments in the path which overlap the already truncated corridor boundary
+                excluded_reference_segments = corridor_boundary.get_segments_overlap_segments(current_corridor)
 
                 # Get the corridor exterior polygon
                 corridor_polygon = corridor_boundary.exterior_polygon
@@ -1940,7 +1945,7 @@ class Room:
                     # For the dead ends
                     # Note that for dead ends direction will always be equal to segment.direction, and not -segment.direction
                     if direction == segment.direction:
-                        return corridor_size
+                        return 0
                     # For the inside
                     if direction == corridor_polygon.get_border_inside(segment):
                         return corridor_size
@@ -1949,12 +1954,19 @@ class Room:
                 # elements_to_display = [ segment.get_colored_segment('green') for segment in excluded_reference_segments ]
                 # self.update_display(extra=elements_to_display, title='Debug 1')
                 extension_boundaries = generate_path_boundaries(excluded_reference_segments, all_inside)
+                the_segments = sum([boundary.segments for boundary in extension_boundaries], [])
+                # elements_to_display = [ segment.get_colored_segment('green') for segment in the_segments ]
+                # self.update_display(extra=elements_to_display, title='Debug 1')
                 # elements_to_display = [ segment.get_colored_segment('purple') for segment in extension_boundaries[0].segments ]
                 # self.update_display(extra=elements_to_display, title='Debug 2')
                 # Now add the extended boundary to the corridor boundary
                 # Note that both grids will always overlap
                 for boundary in extension_boundaries:
                     corridor_grid += boundary.grid
+
+            # Remove regions from the corridor grid which are not respecting the minimum size
+            # This may happen in some scenarios but there should be no problem in removing them. See figure 8
+            corridor_grid = corridor_grid.keep_minimum(self.corridor_size)
 
             # Now set the corridor grid officially
             self.corridor_grid = corridor_grid
@@ -2321,14 +2333,13 @@ class Room:
                 return room_scores[room]
             return sorted(scored_rooms, key=by_score)
 
-        # Now, if the parent has an adaptable boundary, we expand child rooms to compensate for their area loss
-        if self._child_adaptable_boundary:
-            for child in sort_by_free_space_availability(self.children):
-                if not child.fit_to_required_area():
-                    raise ValueError(child.name + ' failed to fit to required area after corridor area truncation')
+        # Now, relocate and reshape children rooms 
+        for child in sort_by_free_space_availability(self.children):
+            if not child.fit_to_required_area():
+                raise ValueError(child.name + ' failed to fit to required area after corridor area truncation')
 
-            # Show redistribution after reshaping child rooms
-            self.update_display(title='Displaying redistributed rooms')
+        # Show redistribution after reshaping child rooms
+        self.update_display(title='Displaying redistributed rooms')
 
     # Reduce the number of corners in this room exterior polygon by reshaping self and children boundaries
     # This function is meant to run in the root room only
@@ -3923,6 +3934,7 @@ class Stairs:
         if not self.parent:
             raise ValueError('You are requesting the width of stairs with no parent when this values was not passed')
         width = self.parent.corridor_size
+        print('WIDTH: ' + str(width))
         if width == None:
             raise ValueError('Parent room has no corridor size')
         return width
@@ -4071,7 +4083,7 @@ class Building:
         # This avoids the inherited corridor regions between rigid boundaries to be filled by a room
         # This is not a "problem", but depending on the configuration the result may be "not elegant"
         if room_args.get('corridor_size', None) == None:
-            room_args['corridor_size'] = overall_min_size * 0.9
+            room_args['corridor_size'] = overall_min_size * 0.9 # DANI: No me, lo suyo es que mida lo mismo el pasillo
         # If the door args are missing guess resonable values from the corridor size
         if room_args.get('door_args', None) == None:
             # Make the margined width of all doors equal to the corridor size

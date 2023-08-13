@@ -3230,7 +3230,7 @@ def generate_path_boundaries (path : List['Segment'], size : Union[number, Calla
             counterclockwise_line = lines['counterclockwise'] if is_segment_pointing_outside else lines['clockwise']
             perpendicular_vector = clockwise_line.vector.rotate(90)
             # Calculate the size required
-            # DANI: Notese que hay una situación (aunque rebuscada)en que se añade espacio extra cuando no se debería
+            # DANI: Hay una situación (aunque rebuscada) en que se añade espacio extra cuando no se debería
             # DANI: Vease figura 6
             current_size = size(segment, segment.direction)
             size_difference = current_size - segment.length
