@@ -22,6 +22,10 @@ random.seed(seed)
 # Set if the solving process must be displayed
 display_solving_process = False
 
+# Set the number of frames to be displayed before stopping the process
+# This is useful for debugging
+display_frames_limit = 100
+
 # Sets how much greater is the effective minimum size in the steps previous to corridor and wall tickness build
 # The most preventive margin we have, the most respect for the minimum size but the less flexibility when solving the puzzle
 # This means a strict protocol may have not solution
@@ -140,6 +144,8 @@ class Door:
 
     # If the door point is set then reset its segment and margined segment
     def set_point (self, point : Optional[Point]):
+        if self.rigid:
+            raise RuntimeError('Can not change rigid door point in door ' + str(self))
         self._point = point
         self._segment = None
         self._margined_segment = None
@@ -1372,19 +1378,27 @@ class Room:
         
         # Use both self boundary and all children room boundary segments
         available_segments = []
-        # Keep al already stablished door points, both from self and children
-        door_points = []
-        # Save the rooms of door nodes since there is no need to include them in the required rooms list
-        # Since they have mandatory door nodes they will be included anyway
+        # Set the doors which must be reached by the corridor, both from self and children
+        # Doors may have a point (i.e. they are already set) or not
+        # Doors which have a point must be reached by the corridor
+        # Doors which do not have a point must be set after the corridor and then the corridor may be expanded to reach them
+        # Save already stablished door points in a set for nodes to further know if they are doors or not
+        already_set_door_points = set()
+        # Save rooms which have door nodes since there is no need to include them in the required rooms list
+        # Door nodes are mandatory so these rooms will be included anyway
         already_doored_rooms = set()
         # Split self and children boundaries at the doors
         for room in [ self, *self.children ]:
             if not room.boundary:
                 continue
+            # Get points from already set doors
             current_door_points = [ door.point for door in room.doors if door.point ]
+            # Split each of the room segments at the door points
             for room_segment in room.boundary.segments:
                 available_segments += room_segment.split_at_points(current_door_points)
-            door_points += current_door_points
+            # Update the set with all already set door points
+            already_set_door_points.update(current_door_points)
+            # Add the current room to the set of already doored rooms
             if len(current_door_points) > 0:
                 already_doored_rooms.add(room)
         # Split and merge available segments according to overlaps
@@ -1433,7 +1447,7 @@ class Room:
                 rooms.append(self)
             node_data['rooms'] = rooms
             # Now find out if it is a door
-            is_door = node_point in door_points
+            is_door = node_point in already_set_door_points
             node_data['is_door'] = is_door
             # Note that a door node should always have 2 rooms
             # The exception is an scenario where the corridor is set while there is parent free space available yet
@@ -1529,18 +1543,6 @@ class Room:
         # If there are less than 2 required rooms then it makes not sense finding a corridor
         if len(required_rooms) < 2:
             raise ValueError('Trying to find a corridor between less than 2 rooms')
-        # Set the doors which must be reached by the corridor
-        # Doors may have a point (i.e. they are already set) or not
-        # Doors which have a point must be reached by the corridor
-        # Doors which do not have a point must be set after the corridor and then the corridor must be expanded to cover them
-        doors = sum([ room.doors for room in required_rooms ], [])
-        already_set_doors = []
-        unset_doors = []
-        for door in doors:
-            if door.point:
-                already_set_doors.append(door)
-            else:
-                unset_doors.append(door)
         # Set the variables to store the current corridor
         current_corridor = []
         current_corridor_nodes = []
@@ -1601,7 +1603,7 @@ class Room:
             if not contains_all_rooms:
                 return False
             # Check all required doors are in the corridor
-            contains_all_doors = all(door.point in corridor_nodes for door in already_set_doors)
+            contains_all_doors = all(door_point in corridor_nodes for door_point in already_set_door_points)
             if not contains_all_doors:
                 return False
             return True
@@ -1706,10 +1708,10 @@ class Room:
         # Check if we already have any corridor
         # If not, try to find a starting point (e.g. an already set door)
         if len(current_corridor_nodes) == 0:
-            if len(already_set_doors) > 0:
-                # Get the first set door in case we have doors and append it to the list of nodes
-                first_set_door = already_set_doors[0]
-                current_corridor_nodes.append(first_set_door.point)
+            if len(already_set_door_points) > 0:
+                # Get a sample set door in case we have doors and append it to the list of nodes
+                sample_set_door_point = next(iter(already_set_door_points))
+                current_corridor_nodes.append(sample_set_door_point)
         # In case we already have a node to start, we can solve the rest of the corridor from it
         if len(current_corridor_nodes) > 0:
             start_path = current_corridor # It may contain segments already, from the free space
@@ -1986,19 +1988,15 @@ class Room:
 
         # Set a function to substract the corridor region from the rest of child rooms
         # Note that, at this point, other rooms do not expand to compensate the lost area yet
-        def truncate_children_corridor_region ():
-            for child in self.children:
-                if not child.truncate(self.corridor_grid, force=True, skip_update_display=True):
-                    raise ValueError('The space required by the corridor cannot be claimed from ' + child.name)
-
-        # Call the function right now
-        truncate_children_corridor_region()
+        for child in self.children:
+            if not child.truncate(self.corridor_grid, force=True, skip_update_display=True):
+                raise ValueError('The space required by the corridor cannot be claimed from ' + child.name)
 
         # At this point there should be no free space
         # However, it may happen that truncating rooms to place the corridor may generate free spaces
         # We must try to save those spaces which may be reclaimed by other rooms
         # DANI: Esto es bastante trabajo, de momento lo descarto todo y palante
-        # However, there are places surrounded by the corridor and the exterior perimeter which may be not saved
+        # However, there are places surrounded by the corridor and the exterior perimeter which may not be saved
         # We must indetify and "flag" these regions to discard them as "free space"
         if self.free_grid:
             #problematic_rects = [ rect.get_colored_rect('red') for rect in self.free_grid.rects ]
@@ -2010,10 +2008,9 @@ class Room:
         # Show the relocated doors
         self.update_display(title='Displaying corridor')
 
-        # Get the corridor boundary segments to be used further
-        corridor_boundary_segments = sum([ boundary.segments for boundary in self.corridor_grid.boundaries ], [])
-        # Get the outside corners in the corridor boundaries to be used further
-        corridor_outside_corners = sum([ boundary.outside_corners for boundary in self.corridor_grid.boundaries ], [])
+        # Get all doors, both the already stablished and the not stablished ones
+        door_rooms = [ self ] + required_children_rooms
+        doors = sum([ room.doors for room in door_rooms ], [])
         
         # Now expand the corridor as much as we need to make space for doors between the corridor and each connected room
         while True:
@@ -2026,106 +2023,12 @@ class Room:
             for door in doors:
                 # Get the polygon where the door must be placed
                 door_polygon = door.room.boundary.exterior_polygon
-                # If the door was placed already check it is still in a right place
-                if door.point:
-                    # If the door is already in both the corridor and its room boundaries then we do not need to relocate
-                    door_in_room = door.margined_segment in door_polygon
-                    door_in_corridor = any(door.margined_segment in boundary for boundary in self.corridor_grid.boundaries)
-                    if door_in_room and door_in_corridor:
-                        continue
-                # If the door has not been located yet or it needs to be relocated then we find the available space
-                available_segments = door_polygon.get_segments_overlap_segments(corridor_boundary_segments)
-                if len(available_segments) > 0:
-                    # Then find suitable space among the available space
-                    suitable_points = door.find_suitable_points(available_segments)
-                    if len(suitable_points) > 0:
-                        door.point = random.choice(suitable_points)
-                        continue
                 # Set a couple of useful values
                 corridor_polygon = self.corridor_grid.boundaries[0].exterior_polygon
-                # Before trying to expand the corridor, try to expand the room if it is not rigid
-                # Corridor space is never returned while room space may be compensated further
-                def expand_room (expansion_segment : Segment) -> bool:
-                    # Get the whole corridor segment where the available segment belongs
-                    corridor_reference_segment = None
-                    for segment in corridor_polygon.segments:
-                        overlap = segment.get_overlap_segment(expansion_segment)
-                        if overlap:
-                            corridor_reference_segment = segment
-                            break
-                    if not corridor_reference_segment:
-                        raise ValueError('Can not find the reference segment')
-                    if corridor_reference_segment.length < door.margined_width:
-                        return False
-                    # Now find in which direction we must expand this segment to do not get outside the corridor
-                    # There should be always a point in common with the reference segment
-                    common_point = next((point for point in available_segment.points if point in corridor_reference_segment.points), None)
-                    if common_point == None:
-                        raise ValueError('There is no common point and there should be one')
-                    other_point = next(point for point in available_segment.points if point != common_point)
-                    # Now find the segment over the corridor which must be covered by the room expansion to fit the door
-                    expansion_direction = (common_point + other_point).normalized()
-                    expansion_length = door.margined_width - available_segment.length
-                    expansion_segment = Segment(other_point, other_point + expansion_direction * expansion_length)
-                    # Now find the whole region to be expanded 
-                    corridor_inside_direction = corridor_polygon.get_border_inside(corridor_reference_segment)
-                    perpendicular_point = other_point - corridor_inside_direction * door.room.min_size
-                    perpendicular_segment = Segment(other_point, perpendicular_point)
-                    expansion_rect = Rect.from_segments([expansion_segment, perpendicular_segment])
-                    expansion_grid = Grid([expansion_rect])
-                    # If the expansion grid is colliding with the rigid grid we must stop
-                    if rigid_grid and rigid_grid.get_overlap_grid(expansion_grid):
-                        return False
-                    door.room.expand_grid(expansion_grid)
-                    door.point = common_point + expansion_direction * (door.margined_width / 2)
-                    return True
-                # Try to expand the door room if its is not rigid
-                if not door.room.rigid:
-                    room_expanded = False
-                    # Check the available segments
-                    if len(available_segments) > 0:
-                        for available_segment in available_segments:
-                            if expand_room(available_segment):
-                                room_expanded = True
-                                break
-                    # If there is no segment overlap between corridor and door room then we must rely in a point overlap
-                    # This point will be a corner for both the corridor and the door room and it must always be there
-                    # DANI: No se ha provado
-                    else:
-                        # If there is no segment overlap between corridor and door room then we must rely in a point overlap
-                        # This point will be a corner for both the corridor and the door room and it must always be there
-                        overlap_point = next((corner for corner in corridor_outside_corners if corner in door_polygon.corners), None)
-                        if not overlap_point:
-                            raise RuntimeError('There is no overlap point between the corridor and the ' + door.room.name + ' door. This should never happen.')
-                        # Now find the two segments in the corridor boundary which include the overlap corner
-                        reference_segments = [ segment for segment in corridor_polygon.segments if overlap_point in segment ]
-                        # Set the expansion size as the whole door margined width
-                        expansion_size = door.margined_width
-                        for reference_segment in reference_segments:
-                            # Get the other point (i.e. the point in the reference segment which is not overlapping with the door room)
-                            other_point = next(point for point in reference_segment.points if point != overlap_point)
-                            # Set the segment which covers the region that the corridor must cover
-                            # Note that the expansion segment includes also the whole original corridor segment
-                            # Most of the new space may overlap with already existing space
-                            # However, in a diagonal supported scenario it may be critical to fill required space
-                            expansion_direction = (other_point + overlap_point).normalized()
-                            expansion_point = overlap_point + expansion_direction * expansion_size
-                            expansion_segment = Segment(other_point, expansion_point)
-                            # Now we have all we need to set the expansion using the previous function
-                            if expand_room(expansion_segment):
-                                # If we expanded successfully then skip checking other reference segments and proceed
-                                room_expanded = True
-                                break
-                    # If there was a room expansion then we have to restart the process and check every door again
-                    # If there was no expansion then we let the logic try to expand the corridor instead of the room
-                    if room_expanded:
-                        continue
-                # If there is not suitable space then we have to expand a bit the corridor
-                # Set a function to do so
-                # The reference segment is a segment in the corridor (the whole segment)
-                # The towards point is the point towards we expand and it must be one of the extrems of the reference segment
-                # The expansion size is the length of the new region
+                # Set a function to do expand the corridor in reference to a given segment
+                # The expansion segment is a segment in contact with the corridor
                 def expand_corridor (expansion_segment : Segment) -> bool:
+                    #print('EXPANDING CORRIDOR FOR ' + door.room.name)
                     nonlocal door_polygon
                     # Get a perpendicular segment as long as the corridor size and pointing inside the corridor (outside the door room)
                     # Do not rely on the other corner segment. In a diagonal supported scenario it may not be perpendicular
@@ -2154,21 +2057,154 @@ class Room:
                         return False
                     # Now merge the expansion grid with the current corridor grid
                     self.corridor_grid += expansion_grid
-                    truncate_children_corridor_region()
+                    # Substract the new corridor region from the children rooms
+                    for child in self.children:
+                        if not child.truncate(expansion_grid, force=True, skip_update_display=True):
+                            raise ValueError('The space required by the corridor cannot be claimed from ' + child.name)
                     # Update the corridor boundary segments and corners now that the corridor has been modified
                     corridor_boundary_segments = sum([ boundary.segments for boundary in self.corridor_grid.boundaries ], [])
-                    corridor_outside_corners = sum([ boundary.outside_corners for boundary in self.corridor_grid.boundaries ], [])
                     # Also update the door polygon now that the door room may have been truncated
                     door_polygon = door.room.boundary.exterior_polygon
                     # Now that we expanded the grid there should be suitable space for the door to be located
                     available_segments = door_polygon.get_segments_overlap_segments(corridor_boundary_segments)
                     suitable_points = door.find_suitable_points(available_segments)
-                    if len(suitable_points) > 0:
-                        door.point = random.choice(suitable_points)
-                    else:
+                    if len(suitable_points) == 0:
                         self.update_display(title='Debug')
                         raise RuntimeError('No suitable door space for room ' + door.room.name + ' after corridor expansion')
+                    # Place the door in a suitable position if not already
+                    # It should be already in a rigid door scenario
+                    if not door.point or not door.is_point_suitable():
+                        door.point = random.choice(suitable_points)
                     return True
+                # If the door was placed already check it is still in a right place
+                if door.point:
+                    # If the door is already in both the corridor and its room boundaries then we do not need to relocate
+                    door_in_room = door.margined_segment in door_polygon
+                    door_in_corridor = any(door.margined_segment in boundary for boundary in self.corridor_grid.boundaries)
+                    if door_in_room and door_in_corridor:
+                        continue
+                    # In case the door is rigid we must check it is over the door room and then expand the corridor directly
+                    if door.rigid:
+                        # If door is not over the room then there is something very wrong
+                        if not door_in_room:
+                            raise ValueError('Door from room ' + door.room.name + ' is rigid and not over the room')
+                        # Expand corridor to reach the door
+                        if expand_corridor(door.margined_segment):
+                            # If we expanded successfully then skip checking other available segments and proceed
+                            expanded = True
+                            break
+                # If the door has not been located yet or it needs to be relocated then we find the available space
+                corridor_boundary_segments = sum([ boundary.segments for boundary in self.corridor_grid.boundaries ], [])
+                available_segments = door_polygon.get_segments_overlap_segments(corridor_boundary_segments)
+                # If the door may be relocated and there are avaibale segments then try to relocate the door
+                if len(available_segments) > 0:
+                    # Then find suitable space among the available space
+                    suitable_points = door.find_suitable_points(available_segments)
+                    if len(suitable_points) > 0:
+                        door.point = random.choice(suitable_points)
+                        continue
+                # Before trying to expand the corridor, try to expand the room if it is not rigid
+                # Corridor space is never returned while room space may be compensated further
+                if not door.room.rigid:
+                    room_expanded = False
+                    # If there is at least one segment overlap between the corridor and the door room then try to expand these
+                    if len(available_segments) > 0:
+                        # Set a function to expand the room in case it is possible and return a boolean
+                        # This function is called just once in the code, but we do it this way to get the boolean
+                        def expand_room (available_segment : Segment) -> bool:
+                            # Get the whole corridor segment where the available segment belongs
+                            corridor_reference_segment = None
+                            for segment in corridor_polygon.segments:
+                                overlap = segment.get_overlap_segment(available_segment)
+                                if overlap:
+                                    corridor_reference_segment = segment
+                                    break
+                            if not corridor_reference_segment:
+                                raise ValueError('Can not find the reference segment')
+                            if corridor_reference_segment.length < door.margined_width:
+                                return False
+                            # Now find in which direction we must expand this segment to do not get outside the corridor
+                            # There should be always a point in common with the reference segment
+                            common_point = next((point for point in available_segment.points if point in corridor_reference_segment.points), None)
+                            if common_point == None:
+                                raise ValueError('There is no common point between ' + door.room.name + ' expansion segment and the corridor reference segment')
+                            other_point = next(point for point in available_segment.points if point != common_point)
+                            # Now find the segment over the corridor which must be covered by the room expansion to fit the door
+                            expansion_direction = (common_point + other_point).normalized()
+                            expansion_length = door.margined_width - available_segment.length
+                            expansion_segment = Segment(other_point, other_point + expansion_direction * expansion_length)
+                            # Now find the whole region to be expanded 
+                            corridor_inside_direction = corridor_polygon.get_border_inside(corridor_reference_segment)
+                            perpendicular_point = other_point - corridor_inside_direction * door.room.min_size
+                            perpendicular_segment = Segment(other_point, perpendicular_point)
+                            expansion_rect = Rect.from_segments([expansion_segment, perpendicular_segment])
+                            expansion_grid = Grid([expansion_rect])
+                            # If the expansion grid is colliding with the rigid grid we must stop
+                            if rigid_grid and rigid_grid.get_overlap_grid(expansion_grid):
+                                return False
+                            # If we can not expand the grid at this point then we must stop
+                            # It may happen, for instance, when we try to expand over a door which can not be relocated anywhere else
+                            if not door.room.expand_grid(expansion_grid):
+                                return False
+                            door.point = common_point + expansion_direction * (door.margined_width / 2)
+                            return True
+                        for available_segment in available_segments:
+                            if expand_room(available_segment):
+                                room_expanded = True
+                                break
+                    # If there is no segment overlap between corridor and door room then we must rely in a point overlap
+                    # This point will be a corner for both the corridor and the door room and it must always be there
+                    else:
+                        # If there is no segment overlap between corridor and door room then we must rely in a point overlap
+                        # This point will be a corner for both the corridor and the door room and it must always be there
+                        corridor_outside_corners = sum([ boundary.outside_corners for boundary in self.corridor_grid.boundaries ], [])
+                        overlap_point = next((corner for corner in corridor_outside_corners if corner in door_polygon.corners), None)
+                        if not overlap_point:
+                            extra = [ s.get_colored_segment('blue') for s in corridor_boundary_segments ] + [ s.get_colored_segment('green') for s in door_polygon.segments ]
+                            self.update_display(title='Debug', extra=extra)
+                            raise RuntimeError('There is no overlap point between the corridor and the ' + door.room.name + '. This should never happen.')
+                        # Now find the two segments in the corridor boundary which include the overlap corner
+                        corridor_reference_segments = [ segment for segment in corridor_polygon.segments if overlap_point in segment ]
+                        # Set the expansion size as the whole door margined width
+                        expansion_size = door.margined_width
+                        for corridor_reference_segment in corridor_reference_segments:
+                            # Get the other point (i.e. the point in the reference segment which is not overlapping with the door room)
+                            other_point = next(point for point in corridor_reference_segment.points if point != overlap_point)
+                            # Set the segment which covers the region that the corridor must cover
+                            # Note that the expansion segment includes also the whole original corridor segment
+                            # Most of the new space may overlap with already existing space
+                            # However, in a diagonal supported scenario it may be critical to fill required space
+                            expansion_direction = (overlap_point + other_point).normalized()
+                            expansion_point = overlap_point + expansion_direction * expansion_size
+                            expansion_segment = Segment(overlap_point, expansion_point)
+                            # Set a function to expand the room in case it is possible and return a boolean
+                            # This function is called just once in the code, but we do it this way to get the boolean
+                            def expand_room (expansion_segment : Segment) -> bool:
+                                # Now find the whole region to be expanded 
+                                corridor_inside_direction = corridor_polygon.get_border_inside(corridor_reference_segment)
+                                perpendicular_point = expansion_point - corridor_inside_direction * door.room.min_size
+                                perpendicular_segment = Segment(expansion_point, perpendicular_point)
+                                expansion_rect = Rect.from_segments([expansion_segment, perpendicular_segment])
+                                expansion_grid = Grid([expansion_rect])
+                                # If the expansion grid is colliding with the rigid grid we must stop
+                                if rigid_grid and rigid_grid.get_overlap_grid(expansion_grid):
+                                    return False
+                                # If we can not expand the grid at this point then we must stop
+                                # It may happen, for instance, when we try to expand over a door which can not be relocated anywhere else
+                                if not door.room.expand_grid(expansion_grid):
+                                    return False
+                                door.point = overlap_point + expansion_direction * (door.margined_width / 2)
+                                return True
+                            # Now we have all we need to set the expansion using the previous function
+                            if expand_room(expansion_segment):
+                                # If we expanded successfully then skip checking other reference segments and proceed
+                                room_expanded = True
+                                break
+                    # If there was a room expansion then we have to restart the process and check every door again
+                    # If there was no expansion then we let the logic try to expand the corridor instead of the room
+                    if room_expanded:
+                        continue
+                # If there is not suitable space then we have to expand a bit the corridor
                 # At this point there should always be an overlap between the corridor and the door room
                 # It may be just a point, in a few ocassions, but normally it will be a segment
                 # In case we have segments in common, it normally will be one
@@ -2191,6 +2227,7 @@ class Room:
                         # We must find the direction to expand the corridor
                         # The available segment will always have one point which is an outside corner in the corridor boundary
                         # The expansion direction will be towards this point (from the other one)
+                        corridor_outside_corners = sum([ boundary.outside_corners for boundary in self.corridor_grid.boundaries ], [])
                         towards_point = next((point for point in available_segment.points if point in corridor_outside_corners), None)
                         # This should never happen, theorically
                         if not towards_point:
@@ -2266,6 +2303,7 @@ class Room:
                         raise RuntimeError('Failed to expand corridor for reaching room ' + door.room.name)
                 # If there is no segment overlap between corridor and door room then we must rely in a point overlap
                 # This point will be a corner for both the corridor and the door room and it must always be there
+                corridor_outside_corners = sum([ boundary.outside_corners for boundary in self.corridor_grid.boundaries ], [])
                 overlap_point = next((corner for corner in corridor_outside_corners if corner in door_polygon.corners), None)
                 if not overlap_point:
                     raise RuntimeError('There is no overlap point between the corridor and the ' + door.room.name + ' door. This should never happen.')
@@ -2333,7 +2371,15 @@ class Room:
                 return room_scores[room]
             return sorted(scored_rooms, key=by_score)
 
-        # Now, relocate and reshape children rooms 
+        # Check there is enought space to fit children after corridor area substraction
+        children_available_area = self.area - self.corridor_grid.area
+        children_required_area = sum([ child.min_area for child in self.children ])
+        #print('Available area: ' + str(children_available_area))
+        #print('Required area: ' + str(children_required_area))
+        if children_available_area < children_required_area:
+            raise RuntimeError('There is not enought space to fit all children after corridor area substraction')
+
+        # Now, relocate and reshape children rooms
         for child in sort_by_free_space_availability(self.children):
             if not child.fit_to_required_area():
                 raise ValueError(child.name + ' failed to fit to required area after corridor area truncation')
@@ -2588,7 +2634,7 @@ class Room:
             if self.area < self.min_area:
                 required_area = self.min_area - self.area
             elif self.area > self.max_area:
-                required_area = self.area - self.max_area
+                required_area = self.max_area - self.area
             else:
                 required_area = 0
         # If the corridor is not yet stablished then we must aim for the target area
@@ -2607,7 +2653,8 @@ class Room:
     def fit_to_required_area (self, restricted_segments : list = []) -> bool:
         # Calculate how much area we need to expand
         required_area = self.get_required_area()
-        print('Fit to required area ' + self.name + ' -> ' + str(required_area))
+        # print('Fitting ' + self.name + ' to target area: ' + str(self.min_area) + ' - ' + str(self.max_area))
+        # print('Current area: ' + str(self.area) + ' -> Required area: ' + str(required_area))
         # If the area is already satisfied then stop here
         if self.is_fit_to_required_area():
             return True
@@ -3627,14 +3674,30 @@ class Room:
         backup = self.grid
         # Set the new grid as the current gird
         self.grid = new_grid
-        # Now check if we are expanding over brother rooms and truncat them
-        if self.parent and check_overlaps:
-            brother_rooms = [ room for room in self.parent.children if room != self ]
-            for brother_room in brother_rooms:
-                if not brother_room.truncate(expansion_grid):
+        # In case this room has a parent room a few extra step must be done
+        if self.parent:
+            # Check if we are exceeding parent boundaries
+            parent_outer_grid = expansion_grid - self.parent.grid
+            if parent_outer_grid:
+                # If parent boundaries are flexible then we must expand the parent grid as well
+                if self.parent._child_adaptable_boundary:
+                    # If parent grid can not be expanded then go back
+                    if not parent.expand_grid(expansion_grid):
+                        self.grid = backup
+                        return False
+                # If parent boundaries are rigid then we can not expand
+                else:
+                    self.grid = backup
                     return False
-            # Truncate also the parent discarded grid
-            self.parent.discarded_grid -= expansion_grid
+            # Now check if we are expanding over brother rooms and truncate them
+            if check_overlaps:
+                brother_rooms = [ room for room in self.parent.children if room != self ]
+                for brother_room in brother_rooms:
+                    if not brother_room.truncate(expansion_grid):
+                        self.grid = backup
+                        return False
+                # Truncate also the parent discarded grid
+                self.parent.discarded_grid -= expansion_grid
         return True
 
     # Get all overlapped segments between the current room and other
@@ -3759,8 +3822,13 @@ class Room:
     # Add a new frame in the display with the current segments of this room and its children
     # Also an 'extra' argument may be passed with extra segments to be represented
     def update_display (self, extra : list = [], title : Optional[str] = None):
+        global display_frames_limit
         if not display_solving_process:
             return
+        if display_frames_limit:
+            display_frames_limit -= 1
+            if display_frames_limit == 0:
+                raise SystemExit('Reached frames limit')
         # Find the root room
         root = self.get_root_room()
         # Get all children rooms recursively

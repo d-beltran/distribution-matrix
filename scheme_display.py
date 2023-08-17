@@ -173,6 +173,11 @@ def get_segments_from_anything (things : list):
                 segments += boundary.exterior_polygon.segments
                 for polygon in boundary.interior_polygons:
                     segments += polygon.segments
+        # If it has a corridor grid (i.e. it is a room)
+        if hasattr(thing, 'corridor_grid'):
+            if thing.corridor_grid != None:
+                corridor_segments = sum([ boundary.segments for boundary in thing.corridor_grid.boundaries ], [])
+                segments += corridor_segments
         # If it has a discarded grid (i.e. it is a room)
         if hasattr(thing, 'discarded_grid'):
             if thing.discarded_grid != None:
