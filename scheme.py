@@ -712,7 +712,7 @@ class Room:
     # Set the grid
     # Reset the boundary
     # DANI: Esto, aunque debería funcionar, nunca se ha provado y no se usa actualmente
-    def set_grid (self, grid : Grid):
+    def set_grid (self, grid : Grid, skip_update_display : bool = False):
         self._grid = grid
         # Reset the boundary
         self._boundary = None
@@ -723,6 +723,9 @@ class Room:
             # In case the parent boundary was provisional
             if parent_room._child_adaptable_boundary:
                 parent_room.reset_grid()
+        # Update current display if the flag to skip the update is not passed
+        if not skip_update_display:
+            self.update_display(title='Modified grid in room ' + self.name)
 
     # The room boundary
     grid = property(get_grid, set_grid, None, "The room grid")
@@ -1992,21 +1995,8 @@ class Room:
             if not child.truncate(self.corridor_grid, force=True, skip_update_display=True):
                 raise ValueError('The space required by the corridor cannot be claimed from ' + child.name)
 
-        # At this point there should be no free space
-        # However, it may happen that truncating rooms to place the corridor may generate free spaces
-        # We must try to save those spaces which may be reclaimed by other rooms
-        # DANI: Esto es bastante trabajo, de momento lo descarto todo y palante
-        # However, there are places surrounded by the corridor and the exterior perimeter which may not be saved
-        # We must indetify and "flag" these regions to discard them as "free space"
-        if self.free_grid:
-            #problematic_rects = [ rect.get_colored_rect('red') for rect in self.free_grid.rects ]
-            #self.update_display(title='Displaying problematic free spaces', extra=problematic_rects)
-            print('WARNING: We are having problematic free spaces after corridor area truncation')
-            self.discarded_grid = self.free_grid
-            self.reset_free_grid()
-
         # Show the relocated doors
-        self.update_display(title='Displaying corridor')
+        self.update_display(title='Displaying early corridor')
 
         # Get all doors, both the already stablished and the not stablished ones
         door_rooms = [ self ] + required_children_rooms
@@ -2333,54 +2323,30 @@ class Room:
         # Show the relocated doors
         self.update_display(title='Displaying relocated doors')
 
-        # Sort rooms according to how closer they are to free space
-        # Find for each brother room the number of colliding rooms we must jump to find free space
-        # Then use this value to set the "score" of each brother room frontiers and sort them
-        # WARNING: Note that rooms which are not in contact with free space by any means will be excluded
-        # e.g. when the room is splitted by the corridor some rooms may be isolated from the ones in contact with free space
-        def sort_by_free_space_availability (rooms : List['Room']) -> List['Room']:
-            room_connections = {}
-            room_scores = {}
-            for room in rooms:
-                # Get room frontiers to find the connected rooms
-                free_frontiers, brother_frontiers, parent_frontiers = room.get_frontiers()
-                connected_rooms = list(set(sum([ frontier.rooms for frontier in brother_frontiers ], [])))
-                room_connections[room] = connected_rooms
-                if len(free_frontiers) > 0:
-                    room_scores[room] = 0
-            # Find the number of rooms away from free space for each room
-            score = 0
-            while len(room_scores.keys()) < len(rooms):
-                new_scores = {}
-                for room, room_score in room_scores.items():
-                    if room_score != score:
-                        continue
-                    connected_rooms = room_connections[room]
-                    for connected_room in connected_rooms:
-                        connected_room_score = room_scores.get(connected_room, None)
-                        if connected_room_score == None:
-                            new_scores[connected_room] = score + 1
-                # If there were not new scores in this round it means we are over
-                if len(new_scores.keys()) == 0:
-                    break
-                room_scores = { **room_scores, **new_scores }
-                score += 1
-            # Now sort rooms using previous scores
-            scored_rooms = list(room_scores.keys())
-            def by_score (room : 'Room') -> int:
-                return room_scores[room]
-            return sorted(scored_rooms, key=by_score)
+        # Discarded spots may be genrated while truncating rooms to place the corrido
+        # We must try to save those spaces which may be reclaimed by other rooms
+        # It is not always possible to retrieve save these regions however
+        if self.discarded_grid:
+            # print('WARNING: We are having problematic free spaces after corridor area truncation')
+            # Get the regions of the free space which may not be saved since they are not wide enought for any room
+            # These regions must be between the corridor and the parent boundary, since other regions may be recovered
+            # DANI: Aquí, cuando la boundary sea adaptable, almejor habría que usar la surrounding_grid en lugar de la self.grid
+            # non_corridor_grid = self.grid - self.corridor_grid
+            # non_corridor_reachable_grid = non_corridor_grid.keep_minimum(self.get_children_min_min_size())
+            # self.discarded_grid = non_corridor_grid - non_corridor_reachable_grid
+            # self.reset_free_grid()
+            self.reassign_discarded_regions()
+            # Show the discarded grid
+            self.update_display(title='Displaying discarded grid')
 
         # Check there is enought space to fit children after corridor area substraction
-        children_available_area = self.area - self.corridor_grid.area
+        children_available_area = self.area - self.corridor_grid.area - self.discarded_grid.area
         children_required_area = sum([ child.min_area for child in self.children ])
-        #print('Available area: ' + str(children_available_area))
-        #print('Required area: ' + str(children_required_area))
         if children_available_area < children_required_area:
             raise RuntimeError('There is not enought space to fit all children after corridor area substraction')
 
         # Now, relocate and reshape children rooms
-        for child in sort_by_free_space_availability(self.children):
+        for child in self.children:
             if not child.fit_to_required_area():
                 raise ValueError(child.name + ' failed to fit to required area after corridor area truncation')
 
@@ -2468,6 +2434,136 @@ class Room:
             print('WARNING: Failed to reduce corners to ' + str(self.max_corners) + '. Current number: ' + str(current_corners))
             return False
         return True
+
+    # Reassign discarded regions to colliding rooms
+    # Ignore rooms area budget
+    def reassign_discarded_regions (self):
+        # Keep trying to find new regions to reasssign until there is no more discarded grid
+        # This loop will also break if we failed to reassign any region
+        while self.discarded_grid:
+            # Set if there was any reassignment
+            reasigned = False
+            # Iterate over each regions in the discarded grid
+            for boundary in self.discarded_grid.boundaries:
+                if self._find_and_reassign_discarded_boundary_region(boundary):
+                    reasigned = True
+                    # Show the progress
+                    # self.update_display(title='Displaying discarded grid reasignation step')
+            # If there was no reasignment then stop here
+            if not reasigned:
+                break
+
+    # Given a boundary which is meant to belong to the discarded grid,
+    # Find regions which may be claimed by colliding rooms, the corridor or just free space
+    # DANI: Esta función NO está pensada para diagonales
+    def _find_and_reassign_discarded_boundary_region (self, boundary : Boundary) -> bool:
+        # Get discarded boundary segments which are not in the parent (self) boundary
+        target_segments = [ segment for segment in boundary.exterior_polygon.segments if segment not in self.boundary ]
+        # Get the segment of the exterior polygon and link each segment to the room it belongs to
+        segment_rooms = {}
+        for segment in target_segments:
+            # Trak when we found an owner for the segment so we can continue
+            got_it = False
+            # If this segment is in one of the rooms then add the room as the value
+            for room in self.children:
+                if segment in room.boundary:
+                    segment_rooms[segment] = room
+                    got_it = True
+                    break
+            # Stop here if we already found this segment belongs to a room
+            if got_it:
+                continue
+            # Otherwise, if it is in the corridor boundary then add the word 'corridor'
+            for corridor_boundary in self.corridor_grid.boundaries:
+                if segment in corridor_boundary:
+                    segment_rooms[segment] = 'corridor'
+                    got_it = True
+                    break
+            # Stop here if we already found this segment belongs to the corridor
+            if got_it:
+                continue
+            # If not, then the discarded grid is in contact with the free grid
+            segment_rooms[segment] = 'free'
+        # Find corners made of segment with the same room
+        corners = []
+        for current, nextone in pairwise(target_segments, retro=True):
+            current_owner = segment_rooms[current]
+            if current_owner == segment_rooms[nextone]:
+                corners.append((current_owner, [current, nextone]))
+        # Now yield regions which may be claimed
+        # Start with corners and then individual segments wider then the minimum region
+        # Priorize those in contact with free space, then with a room and finally with the corridor
+        # Start searching a free corner
+        free_corner = next((corner for corner in corners if corner[0] == 'free'), None)
+        if free_corner:
+            # Set the grid to be declared as free
+            # Note that this is not as simple as creating a rect from these 2 segments
+            # We could ignore an interior polygon of the boundary and create a free spot which does not respect the minimum
+            free_corner_segments = free_corner[1]
+            free_region = boundary.get_border_projection(free_corner_segments[0])
+            free_region += boundary.get_border_projection(free_corner_segments[1])
+            # Substract it from the discarded grid and reset the free grid
+            self.discarded_grid -= free_region
+            self.reset_free_grid()
+            return True
+        # Now search a free wide segment
+        wide_segments = [ segment for segment in target_segments if segment.length >= self.min_size ]
+        free_wide_segment = next((segment for segment in wide_segments if segment_rooms[segment] == 'free'), None)
+        if free_wide_segment:
+            # Set the grid to be declared as free
+            free_region = boundary.get_border_projection(free_wide_segment)
+            # Substract it from the discarded grid and reset the free grid
+            self.discarded_grid -= free_region
+            self.reset_free_grid()
+            return True
+        # Now search a room corners
+        room_corner = next((corner for corner in corners if isinstance(corner[0], self.__class__)), None)
+        if room_corner:
+            # Set the grid to be claimed by the room
+            # Note that this is not as simple as creating a rect from these 2 segments
+            # We could ignore and interior polygon of the boundary and create a free spot which does not respect the minimum
+            room_corner_segments = room_corner[1]
+            room_region = boundary.get_border_projection(room_corner_segments[0])
+            room_region += boundary.get_border_projection(room_corner_segments[1])
+            # Substract it from the discarded grid and give it to the corresponding room
+            self.discarded_grid -= room_region
+            room = room_corner[0]
+            room.expand_grid(room_region)
+            return True
+        # Now search a room wide segment
+        room_wide_segment = next((segment for segment in wide_segments if isinstance(segment_rooms[segment], self.__class__)), None)
+        if room_wide_segment:
+            # Set the grid to be claimed by the room
+            room_region = boundary.get_border_projection(room_wide_segment)
+            # Substract it from the discarded grid and give it to the corresponding room
+            self.discarded_grid -= room_region
+            room = segment_rooms[room_wide_segment]
+            room.expand_grid(room_region)
+            return True
+        # Now search for a corridor corner
+        corridor_corner = next((corner for corner in corners if corner[0] == 'corridor'), None)
+        if corridor_corner:
+            # Set the grid to be claimed by the corridor
+            # Note that this is not as simple as creating a rect from these 2 segments
+            # We could ignore and interior polygon of the boundary and create a free spot which does not respect the minimum
+            corridor_corner_segments = corridor_corner[1]
+            corridor_region = boundary.get_border_projection(corridor_corner_segments[0])
+            corridor_region += boundary.get_border_projection(corridor_corner_segments[1])
+            # Substract it from the discarded grid and give it to the corridor
+            self.discarded_grid -= corridor_region
+            self.corridor_grid += corridor_region
+            return True
+        # Now search a corridor wide segment
+        corridor_wide_segment = next((segment for segment in wide_segments if segment_rooms[segment] == 'corridor'), None)
+        if corridor_wide_segment:
+            # Set the grid to be claimed by the corridor
+            corridor_region = boundary.get_border_projection(corridor_wide_segment)
+            # Substract it from the discarded grid and give it to the corridor
+            self.discarded_grid -= corridor_region
+            self.corridor_grid += corridor_region
+            return True
+        # If we failed to find any of the previous features then we return false
+        return False
 
     # Reduce the number of corners in children exterior polygons by reshaping children boundaries
     # This can be done only in a very specific situation:
@@ -2629,18 +2725,18 @@ class Room:
     # Calculate how much area we need to expand
     def get_required_area (self) -> number:
         # If we already have a corridor then we are flexible with the area
-        # target area is not a specific area but a range
+        # Target area is not a specific area but a range
         if self.parent.corridor_grid:
+            # If we are over the maximum we must reduce the are so we return a negative area
+            if self.area > self.max_area:
+                return resolute(self.max_area - self.area)
+            # If area is below the minimum we must expand its area
             if self.area < self.min_area:
-                required_area = self.min_area - self.area
-            elif self.area > self.max_area:
-                required_area = self.max_area - self.area
-            else:
-                required_area = 0
+                return resolute(self.min_area - self.area)
+            # If the current area is exactly within the target area range then we are done
+            return 0
         # If the corridor is not yet stablished then we must aim for the target area
-        else:
-            required_area = self.target_area - self.area
-        return resolute(required_area)
+        return resolute(self.target_area - self.area)
 
     # Check if this room is already fit to its required area
     def is_fit_to_required_area (self) -> bool:
@@ -3572,14 +3668,17 @@ class Room:
             return False
         # In case the truncate was forced remove all regions in the truncated grid which do not respect the minimum size
         if force:
-            truncated_grid = truncated_grid.keep_minimum(self.min_size)
+            # Find regions in the truncated grid respecting the minimum size
+            safe_grid = truncated_grid.keep_minimum(self.min_size)
+            # The grid which is removed from the truncated grid by not respecting the minimum must be flaged as discarded
+            lost_grid = truncated_grid - safe_grid
+            self.parent.discarded_grid += lost_grid
+            self.parent.reset_free_grid()
+            # Now update the truncated grid
+            truncated_grid = safe_grid
         # If the grid has been fully consumed then give up
         if not truncated_grid:
             raise RuntimeError('We fully removed a whole room by force-truncating')
-        # Check the truncated grid to still respecting the minimum size
-        elif not truncated_grid.check_minimum(self.preventive_min_size):
-            print('WARNING: The room is not respecting the minimum size -> Go back')
-            return False
         truncated_boundaries = truncated_grid.find_boundaries()
         # In case the room has been splitted in 2 parts as a result of the invasion we go back
         if not force and len(truncated_boundaries) > 1:
@@ -3596,6 +3695,18 @@ class Room:
         if not force and len(truncated_boundaries) == 0:
             print('WARNING: The invaded room has been fully consumed -> Go back')
             return False
+        # Save a backup of the current grid
+        backup = self.grid
+        # Set the truncated grid as the current grid
+        self.set_grid(truncated_grid, skip_update_display=True)
+        # Check the truncated grid to still respecting the minimum size
+        if not self.grid.check_minimum(self.preventive_min_size):
+            #print('WARNING: The room is not respecting the minimum size -> Go back')
+            # If not then try to expand the truncated room accordingly to the truncated region to make it respect the minimum
+            compensation_grid = self.grid.get_compensation_grid(region, self.preventive_min_size)
+            if not self.expand_grid(compensation_grid):
+                self.set_grid(backup, skip_update_display=True)
+                return False
         # Check the new parent free grid to be respecting the minimum size in case it is requested
         # It may happen that we pull slightly a frontier which was in contact to a parent/brother frontier and create a small space
         # Note that parent grid is not checked in situtations where the truncated region is to be claimed by other room rigth away
@@ -3608,7 +3719,7 @@ class Room:
         #         add_frame(new_free_grid.rects, title='Debug -> ' + self.parent.name)
         #         return False
         # Modify the room boundary
-        self.set_boundary(truncated_boundaries[0], skip_update_display=skip_update_display)
+        #self.set_boundary(truncated_boundaries[0], skip_update_display=skip_update_display)
         return True
 
     # Invade this room by substracting part of its space
@@ -3689,8 +3800,13 @@ class Room:
                 else:
                     self.grid = backup
                     return False
-            # Now check if we are expanding over brother rooms and truncate them
+            # Check if we are overlapping other spaces
             if check_overlaps:
+                # Check if we are expanding over the corridor and, if so, abort the expansion
+                if self.parent.corridor_grid and self.parent.corridor_grid.get_overlap_grid(expansion_grid):
+                    self.grid = backup
+                    return False
+                # Now check if we are expanding over the brother rooms and truncate them
                 brother_rooms = [ room for room in self.parent.children if room != self ]
                 for brother_room in brother_rooms:
                     if not brother_room.truncate(expansion_grid):

@@ -2104,7 +2104,7 @@ class Boundary:
                 overall_overlap_segments += overlap_segments
         return list(set(overall_overlap_segments))
 
-    # Given a segment which overlaps the polygon, get a vector which is perpendicular to this segment and points into de inside of the polygon
+    # Given a segment which overlaps any polygon, get a vector which is perpendicular to this segment and points inside of the boundary
     def get_border_inside (self, segment : Segment) -> Vector:
         boundary_segment = self.get_segment_from_segment(segment)
         if not boundary_segment:
@@ -2116,6 +2116,36 @@ class Boundary:
         else:
             angle = -90 if boundary_polygon.clockwise else 90
         return boundary_segment.direction.rotate(angle)
+
+    # Given a segment which overlaps the boundary, generate a rect which contains this segment as deep in the boundary as possible
+    # If a margin is passed then the rect is as deep as possible minus the margin
+    # DANI: Esto no soporta diagonales
+    def get_border_projection (self, segment : Segment, margin : number = 0) -> Optional['Grid']:
+        # Find all maximum rects where this segment is contained
+        max_rects = [ max_rect for max_rect in self.grid.max_rects if segment in max_rect[0] ]
+        # If it is not contained anywhere then raise an error and show some debug
+        if len(max_rects) == 0:
+            boundary_segments = [ segm.get_colored_segment('black') for segm in self.segments ]
+            debug_segments = boundary_segments + [ segment.get_colored_segment('red') ]
+            add_frame(debug_segments, 'Debug')
+            raise ValueError('The segment is not in the grid')
+        # Get the length of the longest maximum rectangle
+        # Length may be in x or y dimension depending on the segment
+        if segment.is_vertical():
+            dimensions = [ max_rect[0].x_size for max_rect in max_rects ]
+        elif segment.is_horizontal():
+            dimensions = [ max_rect[0].y_size for max_rect in max_rects ]
+        else:
+            raise ValueError('This function does not support diagonal segments')
+        length = max(dimensions) - margin
+        # If the margin eats the whole rectangle then return None
+        if length <= 0:
+            return None
+        # Now create the the rectangle using the previous length
+        inside_direction = self.get_border_inside(segment)
+        inside_vector = inside_direction * length
+        inside_segment = Segment(segment.a, segment.a + inside_vector)
+        return Grid([ Rect.from_segments([segment, inside_segment]) ])
 
 # A grid is a group or groups of rectangles connected according to a standard:
 # Two connected rectangles have the whole segment connected
@@ -2643,6 +2673,38 @@ class Grid:
         # Return the bigger minimum region
         return minimum_regions[0]
 
+    # Given a substraction grid which has been already substracted, get the expansion grid to not break a minimum size
+    # Note that the substraction grid must perfectly collide and not overlap with self grid
+    def get_compensation_grid (self, substraction_grid : 'Grid', minimum_size : number) -> 'Grid':
+        # Get segments from all substraction boundaries
+        substracted_segments = sum([ boundary.segments for boundary in substraction_grid.boundaries ], [])
+        # Iterate over each grid boundary
+        for boundary in self.boundaries:
+            # The region to be expanded is deducted from the segments in the colliding region
+            substracted_reference_segments = boundary.get_segments_overlap_segments(substracted_segments)
+            # Get the original exterior polygon
+            polygon = boundary.exterior_polygon
+            # Once we have these segments we must "project" new space from them
+            # This is like creating a corridor along the exterior polygon, which is fully inside of the polygon
+            def all_inside (segment : Segment, direction : Vector) -> number:
+                # For the dead ends
+                # Note that for dead ends direction will always be equal to segment.direction, and not -segment.direction
+                if direction == segment.direction:
+                    return 0
+                # For the inside
+                if direction == polygon.get_border_inside(segment):
+                    return minimum_size
+                # For the outside
+                return 0
+            # Call the function which generates the extra space
+            extension_boundaries = generate_path_boundaries(substracted_reference_segments, all_inside)
+            # Now add the extended boundary to the original boundary
+            # Note that both grids will always overlap
+            compensated_grid = Grid()
+            for boundary in extension_boundaries:
+                compensated_grid += boundary.grid
+            return compensated_grid
+
     # One by one for each *available rectangle, where available rectangles are the splitted rectangles
     # Get as many rectanges as possible which are connected horizontally to the current rectangle
     # Get as many rows of rectangles as possible which are connected vertically to all previous rectangles
@@ -2903,6 +2965,15 @@ class Grid:
     # Given a polygon, for each segment in the polygon, get all segment regions which overlap the grid
     def get_polygon_overlap_segments (self, polygon : Polygon) -> List[Segment]:
         return self.get_segments_overlap_segments(polygon.segments)
+
+    # Given a grid, for each boundary in the grid, get all segment which overlap self grid boundaries
+    # DANI: No se ha provado
+    def get_grid_collide_segments (self, other : 'Grid') -> Generator[Segment, None, None]:
+        for boundary in self.boundaries:
+            for other_boundary in other.boundaries:
+                overlap_segments = boundary.get_boundary_overlap_segments(other_boundary)
+                for segment in overlap_segments:
+                    yield segment
 
 
 # Auxiliar functions ---------------------------------------------------------------
