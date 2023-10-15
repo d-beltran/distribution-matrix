@@ -1,6 +1,12 @@
 RAM
 
 
+setup_stairs -> que chequee para cada room si hay espacio o no en lower y upper
+	que tenga en cuenta los stacking
+		- tal vez los stacking entre todas las stairs podríamos configurarlos antes de nada??
+
+idear algoritmo para fitear una shape en un available space
+
 child adaptable debería ser una bool lista que se asigne al ser consultada por primera vez
 
 Todas las escaleras en todos los floors deberían colocarse pensando en el upper en casos de de boundary fija

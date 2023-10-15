@@ -907,8 +907,9 @@ class Room:
             return self._corridor_size
         # If we are the root but there is a parent building then inherit its value
         if self.parent_building:
-            self._corridor_size = self.parent_building.room_args['corridor_size']
-            return self._corridor_size
+            self._corridor_size = self.parent_building.room_args.get('corridor_size', None)
+            if self._corridor_size != None:
+                return self._corridor_size
         # If we can not inherit the values then we have to guess a reasonable value
         # Use the root minimum size as corridor size
         root_min_size = self.get_root_min_size()
@@ -3965,9 +3966,9 @@ class Room:
 class Stairs:
     def __init__ (self,
         # Set vairables to force the stairs location
-        shape : Optional[Polygon] = None,
-        downstairs_door : Optional[Door] = None,
-        upstairs_door : Optional[Door] = None,
+        polygon : Optional[Polygon] = None,
+        lower_door : Optional[Door] = None,
+        upper_door : Optional[Door] = None,
         # Set variables to randomly generate stairs
         # Set the slope of the stairs
         # Default: 45°
@@ -3983,9 +3984,9 @@ class Stairs:
         # Note that height is not an argument, since we depend on the building height
         # In case stairs have to be generated randomly there are 4 possible configurations
         # 0 - Vertical: Just a hole for vertical stairs or elevators (slope has no effect and length is equal to width)
-        # 1 - One line: Regular straight stairs. The room is expected to have a rectangular shape
-        # 2 - Two lines: Stairs with a corner at some point. The room is expected to have a 'L' shape
-        # 3 - Three lines: Stairs with two corners. The room is expected to have a squared shape
+        # 1 - One line: Regular straight stairs. The room is expected to have a rectangular polygon
+        # 2 - Two lines: Stairs with a corner at some point. The room is expected to have a 'L' polygon
+        # 3 - Three lines: Stairs with two corners. The room is expected to have a squared polygon
         # Default: 1
         configuration : Optional[int] = None,
         # Set a flag to define if corners are flat or 'staired'
@@ -3995,44 +3996,61 @@ class Stairs:
         # (When forced) Note that when corners are flat they don't count for the stairs length and thus the slope required is higher
         # (When random) Note that when corners are flat they don't count for the stairs length and thus the space required is bigger
         flat_corners : bool = True,
-        # Set the parent room
-        parent : Optional[Room] = None
+        # Set the parent building
+        parent_building : Optional['Building'] = None,
+        # Set the parent building floors connected by the stairs
+        # Note that each stairs connect only one floor to another
+        # Stairs connecting multiple floors are actually several starts stacked one over the other
+        lower_floor_number : Optional[int] = None,
+        upper_floor_number : Optional[int] = None,
+        # Set if stairs are to be stacked one upon the other
+        # This means that the upper room of a lower floor stairs will be identical to the lower room of an upper floor stairs with the same configuration, when possible
+        # Note that rooms will have the same polygon and will totally overlap but they will be not the same room since they will have different doors
+        # This is meant so save space and it is a very common feature in realistic buildings
+        stacking_stairs : bool = True,
+        
     ):
         # Save the initiation arguments
-        self.shape = shape
-        self.downstairs_door = downstairs_door
-        self.upstairs_door = upstairs_door
+        self.polygon = polygon
+        self.lower_door = lower_door
+        self.upper_door = upper_door
         self._slope = slope
         self._length = length
         self._width = width
         self.configuration = configuration
         self.flat_corners = flat_corners
-        self.parent = parent
+        self.parent_building = parent_building
+        self.lower_floor_number = lower_floor_number
+        self.upper_floor_number = upper_floor_number
+        self.stacking_stairs = stacking_stairs
+        # Check floor numbers to be correct
+        if lower_floor_number >= upper_floor_number:
+            raise InputError('Lower floor number must be lower than upper floor number in a stair')
         # Set internal variables
-        self._downstairs_room = None
-        self._upstairs_room = None
+        self._lower_room = None
+        self._upper_room = None
         # Forced scenario:
-        if shape:
+        if polygon:
             # Check there are no redunadancies and, if so, warn the user
-            # If the shape has been forced then all arguments for the random setup of the stairs make no sense
+            # If the polygon has been forced then all arguments for the random setup of the stairs make no sense
             if slope:
-                print('WARNING: Redundant input "slope" for stairs with already forced shape')
+                print('WARNING: Redundant input "slope" for stairs with already forced polygon')
             if width:
-                print('WARNING: Redundant input "width" for stairs with already forced shape')
+                print('WARNING: Redundant input "width" for stairs with already forced polygon')
             if length:
-                print('WARNING: Redundant input "length" for stairs with already forced shape')
+                print('WARNING: Redundant input "length" for stairs with already forced polygon')
             if configuration:
-                print('WARNING: Redundant input "configuration" for stairs with already forced shape')
-            # Check doors to be over the shape
-            if downstairs_door and downstairs_door.point not in shape:
-                raise InputError('Downstairs door is not over the shape')
-            if upstairs_door and upstairs_door.point not in shape:
-                raise InputError('Upstairs door is not over the shape')
+                print('WARNING: Redundant input "configuration" for stairs with already forced polygon')
+            # Check doors to be over the polygon
+            if lower_door and lower_door.point not in polygon:
+                raise InputError('Lower door is not over the polygon')
+            if upper_door and upper_door.point not in polygon:
+                raise InputError('Upper door is not over the polygon')
         # Random scenario:
         else:
-            # Doors can not be forced if the shape is not forced
-            if downstairs_door or upstairs_door:
-                raise InputError('You can not force stairs doors if the shape is not forced as well')
+            # Doors can not be forced if the polygon is not forced
+            if lower_door or upper_door:
+                raise InputError('You can not force stairs doors if the polygon is not forced as well')
             # Set the defaults
             # Slope and length cannot be both passed
             if slope and length:
@@ -4046,64 +4064,89 @@ class Stairs:
             if configuration == None:
                 self.configuration = 1
 
-    # Stairs will always have two rooms: one downstairs and one upstairs
+    # Stairs will always have two floors: one upper and one lower
+
+    # Get the upper floor
+    def get_upper_floor (self) -> Room:
+        if not self.parent_building:
+            raise RuntimeError('Trying to get upper floor of a stair with no parent building')
+        if self.upper_floor_number == None:
+            raise RuntimeError('Trying to get upper floor of a stair with no upper floor number')
+        return self.parent_building.floors[self.upper_floor_number]
+
+    # The upper floor
+    upper_floor = property(get_upper_floor, None, None, "The upper floor (read only)")
+
+    # Get the lower floor
+    def get_lower_floor (self) -> Room:
+        if not self.parent_building:
+            raise RuntimeError('Trying to get lower floor of a stair with no parent building')
+        if self.lower_floor_number == None:
+            raise RuntimeError('Trying to get lower floor of a stair with no lower floor number')
+        return self.parent_building.floors[self.lower_floor_number]
+
+    # The lower floor
+    lower_floor = property(get_lower_floor, None, None, "The lower floor (read only)")
+
+    # Stairs will always have two rooms: one lower and one upper
     # These rooms will always overlap in the boundaries
     # These rooms set the place for the actual stairs, which take place in both floors
     # However, the stairs between 2 fllors are always defined in the lower floor stairs
     # Note that stairs may stack, thus sharing the same room along different couples of floors
 
-    # Get the downstairs room
-    def get_downstairs_room (self) -> Room:
+    # Get the lower room
+    def get_lower_room (self) -> Room:
         # Return the internal value if it exists already
-        if self._downstairs_room:
-            return self._downstairs_room
-        # Otherwise we must set the downstairs room
-        # If shape is forced:
-        if self.shape:
-            boundary = Boundary(shape)
-            doors = [ self.downstairs_door ] if self.downstairs_door else None
-            self._downstairs_room = Room(boundary=boundary, doors=doors, rigid=True)
-            return self._downstairs_room
-        # If shape is random:
-        # WARNING: Note that there is no need to check if the upstairs room already existis to copy it
+        if self._lower_room:
+            return self._lower_room
+        # Otherwise we must set the lower room
+        # If polygon is forced:
+        if self.polygon:
+            boundary = Boundary(polygon)
+            doors = [ self.lower_door ] if self.lower_door else None
+            self._lower_room = Room(boundary=boundary, doors=doors, parent=self.lower_floor, rigid=True, name='Lower')
+            return self._lower_room
+        # If polygon is random:
+        # WARNING: Note that there is no need to check if the upper room already existis to copy it
         # WARNING: When one of the rooms is set the other room is set as well
-        shape, downstairs_door, upstairs_door = self.generate_shape()
-        boundary = Boundary(shape)
-        self._downstairs_room = Room(boundary=boundary, doors=[ downstairs_door ], rigid=True, name='Downstairs')
-        self._upstairs_room = Room(boundary=boundary, doors=[ upstairs_door ], rigid=True, name='Upstairs')
-        return self._downstairs_room
+        polygon, lower_door, upper_door = self.generate_polygon()
+        boundary = Boundary(polygon)
+        self._lower_room = Room(boundary=boundary, doors=[ lower_door ], parent=self.lower_floor, rigid=True, name='Lower')
+        self._upper_room = Room(boundary=boundary, doors=[ upper_door ], parent=self.upper_floor, rigid=True, name='Upper')
+        return self._lower_room
 
-    # The downstairs room
-    downstairs_room = property(get_downstairs_room, None, None, "The downstairs room (read only)")
+    # The lower room
+    lower_room = property(get_lower_room, None, None, "The lower room (read only)")
 
-    # Get the upstairs room
-    def get_upstairs_room (self) -> Room:
+    # Get the upper room
+    def get_upper_room (self) -> Room:
         # Return the internal value if it exists already
-        if self._upstairs_room:
-            return self._upstairs_room
-        # Otherwise we must set the upstairs room
-        # If shape is forced:
-        if self.shape:
-            boundary = Boundary(shape)
-            doors = [ self.upstairs_door ] if self.upstairs_door else None
-            self._upstairs_room = Room(boundary=boundary, doors=doors, rigid=True)
-            return self._upstairs_room
-        # If shape is random:
-        # WARNING: Note that there is no need to check if the upstairs room already existis to copy it
+        if self._upper_room:
+            return self._upper_room
+        # Otherwise we must set the upper room
+        # If polygon is forced:
+        if self.polygon:
+            boundary = Boundary(polygon)
+            doors = [ self.upper_door ] if self.upper_door else None
+            self._upper_room = Room(boundary=boundary, doors=doors, parent=self.upper_floor, rigid=True, name='Upper')
+            return self._upper_room
+        # If polygon is random:
+        # WARNING: Note that there is no need to check if the upper room already existis to copy it
         # WARNING: When one of the rooms is set the other room is set as well
-        shape, downstairs_door, upstairs_door = self.generate_shape()
-        self._downstairs_room = Room(boundary=boundary, doors=[ downstairs_door ], rigid=True, name='Downstairs')
-        self._upstairs_room = Room(boundary=boundary, doors=[ upstairs_door ], rigid=True, name='Upstairs')
-        return self._upstairs_room
+        polygon, lower_door, upper_door = self.generate_polygon()
+        boundary = Boundary(polygon)
+        self._lower_room = Room(boundary=boundary, doors=[ lower_door ], parent=self.lower_floor, rigid=True, name='Lower')
+        self._upper_room = Room(boundary=boundary, doors=[ upper_door ], parent=self.upper_floor, rigid=True, name='Upper')
+        return self._upper_room
 
-    # The upstairs room
-    upstairs_room = property(get_upstairs_room, None, None, "The upstairs room (read only)")
+    # The upper room
+    upper_room = property(get_upper_room, None, None, "The upper room (read only)")
 
     # Get the height
     def get_height (self) -> number:
-        if not self.parent:
-            raise ValueError('You are requesting the height of stairs with no parent')
-        return self.parent.height
+        if not self.lower_floor:
+            raise ValueError('Trying to get height of a stair with no lower floor')
+        return self.lower_floor.height
 
     # The height
     height = property(get_height, None, None, "The height (read only)")
@@ -4114,13 +4157,13 @@ class Stairs:
         # This means the width has been forced from the arguments
         if self._width != None:
             return self._width
-        # Otherwise we must use the parent corridor size
-        if not self.parent:
-            raise ValueError('You are requesting the width of stairs with no parent when this values was not passed')
-        width = self.parent.corridor_size
+        # Otherwise we must use the lower floor corridor size
+        if not self.lower_floor:
+            raise ValueError('You are requesting the width of stairs with no lower floor when this values was not passed')
+        width = self.lower_floor.corridor_size
         print('WIDTH: ' + str(width))
         if width == None:
-            raise ValueError('Parent room has no corridor size')
+            raise ValueError('Lower floor has no corridor size')
         return width
 
     # The width
@@ -4133,7 +4176,7 @@ class Stairs:
         if self._length != None:
             return self._length
         # Otherwise we must calculate the length
-        # Note that the height is required for this calculation and thus the parent must be set already
+        # Note that the height is required for this calculation and thus the lower floor must be set already
         self._length = self.height / tan(radians(self.slope))
         return self._length
 
@@ -4141,7 +4184,7 @@ class Stairs:
     # Modify the slope to make it coherent
     def set_length (self, new_length : number):
         self._length = new_length
-        # Note that the height is required for this calculation and thus the parent must be set already
+        # Note that the height is required for this calculation and thus the lower floor must be set already
         new_slope = degrees( atan( self.height / new_length ) )
         self._slope = new_slope
 
@@ -4156,7 +4199,7 @@ class Stairs:
             return self._slope
         # Otherwise we must calculate the slope
         # Note that this happens when length is passed as argument
-        # Note that the height is required for this calculation and thus the parent must be set already
+        # Note that the height is required for this calculation and thus the lower floor must be set already
         self._slope = degrees( atan( self.height / self.length ) )
         return self._slope
 
@@ -4164,34 +4207,36 @@ class Stairs:
     # Modify the length to make it coherent
     def set_slope (self, new_slope : number):
         self._slope = new_slope
-        # Note that the height is required for this calculation and thus the parent must be set already
+        # Note that the height is required for this calculation and thus the lower floor must be set already
         new_length = self.height / tan(radians(new_slope))
         self._length = new_length
 
     # The slope
     slope = property(get_slope, set_slope, None, "The slope")
 
-    # Set a function to randomly generate a shape, downstairs door and upstairs door according to the stairs parameters
-    def generate_shape (self) -> Tuple[Polygon, Door, Door]:
-        # At this point we do not know the position of the stairs, so we just build it next to the point 0,0 and in the positive side, to make it easier
-        # Then the polygon with the doors can be translated, rotated or even transposed
+    # Set a function to randomly generate a polygon, lower door and upper door according to the stairs parameters
+    # We must decide both the shape and the position of the stairs
+    # Note that when deciding the position of the polygon we must also consider a fex esra space for the corridor
+    # This space must be available both in the lower and in the upper floor, and they may be different regions
+    # Note that this additional space is unserstood as simply an extension of the stair length which keeps the stair width
+    def generate_polygon (self) -> Tuple[Polygon, Door, Door]:
         # Just a square using the width
         if self.configuration == 0:
             rect = Rect(x_min=0, y_min=0, x_max=self.width, ymax=self.width)
-            shape = Polygon.from_rect(rect)
+            polygon = Polygon.from_rect(rect)
             doors_point = Point(self.width / 2, 0)
-            downstairs_door = Door(point=doors_point, rigid=True)
-            upstairs_door = Door(point=doors_point, rigid=True, reverse=True)
-            return shape, downstairs_door, upstairs_door
+            lower_door = Door(point=doors_point, rigid=True)
+            upper_door = Door(point=doors_point, rigid=True, reverse=True)
+            return polygon, lower_door, upper_door
         # Rectangle with a door on each extreme
         if self.configuration == 1:
             rect = Rect(x_min=0, y_min=0, x_max=self.width, y_max=self.length)
-            shape = Polygon.from_rect(rect)
-            downstairs_door_point = Point(self.width / 2, 0)
-            downstairs_door = Door(point=downstairs_door_point, rigid=True)
-            upstairs_door_point = Point(self.width / 2, self.length)
-            upstairs_door = Door(point=upstairs_door_point, rigid=True, reverse=True)
-            return shape, downstairs_door, upstairs_door
+            polygon = Polygon.from_rect(rect)
+            lower_door_point = Point(self.width / 2, 0)
+            lower_door = Door(point=lower_door_point, rigid=True)
+            upper_door_point = Point(self.width / 2, self.length)
+            upper_door = Door(point=upper_door_point, rigid=True, reverse=True)
+            return polygon, lower_door, upper_door
         raise SystemExit('Configuration ' + str(self.configuration) + ' is not defined')
 
 
@@ -4206,31 +4251,25 @@ class Building:
         # These values are applied to all rooms unless other values are assigned explicitly
         room_args : Optional[dict] = None,
         # Set the stairs
-        # Stairs are also organized by dict indices: stairs to move from floor 0 to floor 1 will be sotred in the index 0
         # Note that each floor may have several stairs
         # If not stairs are provided then the default is one stairs per floor
         stairs : Optional[ List['Stairs'] ] = None,
-        # Set if stairs are to be stacked one upon the other
-        # This means that the upstairs room of a lower floor stairs will be identical to the downstairs room of an upper floor stairs with the same configuration, when possible
-        # Note that rooms will have the same shape and will totally overlap but they will be not the same room since they will have different doors
-        # This is meant so save space and it is a very common feature in realistic buildings
-        stacking_stairs : bool = True,
     ):
         # Set the floors
         self.floors = floors
         # Check input floors to make sense according to floor indices
         floor_indices = sorted(list(floors.keys()))
         self.floor_indices = floor_indices
-        lowest_floor_index = min(floor_indices)
-        self.lowest_floor_index = lowest_floor_index
-        highest_floor_index = max(floor_indices)
-        self.highest_floor_index = highest_floor_index
+        lowest_floor_number = min(floor_indices)
+        self.lowest_floor_number = lowest_floor_number
+        highest_floor_number = max(floor_indices)
+        self.highest_floor_number = highest_floor_number
         # There must always be a floor 0
         if not 0 in floor_indices:
             raise InputError('A building must have a floor 0 (i.e. the first floor)')
         # Floor indices must not have gaps
         # i.e. if there is a floor 1 and a floor 3 then there must be a floor 2
-        for index in range(lowest_floor_index +1, highest_floor_index):
+        for index in range(lowest_floor_number +1, highest_floor_number):
             if index not in floor_indices:
                 raise InputError('Missing floor ' + str(index))
         # Set the parent building in all floors
@@ -4238,18 +4277,20 @@ class Building:
             floor.parent_building = self
         # Set the stairs
         self.stairs = stairs
+        # If stairs are set by the user then make a few checks
+        if stairs:
+            for stair in stairs:
+                if stair.lower_floor_number >= highest_floor_number:
+                    raise InputError('Stair lower floor number must be below the building highest floor number')
+                if stair.upper_floor_number <= lowest_floor_number:
+                    raise InputError('Stair upper floor number must be above the building lowest floor number')
         # If stairs are missing then set the default values
         # By default all floors are connected by one stairs
-        if not stairs:
-            self.stairs = {}
-            for floor_index_a, floor_index_b in pairwise(floor_indices):
-                floor = self.floors[floor_index_a]
-                self.stairs[floor_index_a] = [ Stairs(parent=floor) ]
-            # For now the last floor will not have stairs
-            # DANI: Sino hay que pensar como gestionarlo. Un desván?
-            self.stairs[highest_floor_index] = None
-        # Set the stacking stairs flag
-        self.stacking_stairs = stacking_stairs
+        else:
+            self.stairs = []
+            for floor_number_a, floor_number_b in pairwise(floor_indices):
+                default_stairs = Stairs(parent_building=self, lower_floor_number=floor_number_a, upper_floor_number=floor_number_b)
+                self.stairs.append(default_stairs)
         # Calcualte the overall min size which may be useful to set some default values
         floor_min_sizes = [ floor.get_min_size_recursive() for floor in self.floors.values() ]
         overall_min_size = min(floor_min_sizes)
@@ -4284,23 +4325,15 @@ class Building:
     # This avoids hierarchy problems such as stair rooms not having a valid root floor to guess door args
     def setup_stairs (self):
         # Iterate over floors
-        for floor_index, stairs in self.stairs.items():
-            if not stairs:
-                continue
-            # Get the stairs current floor and check it exists
-            current_floor = self.floors.get(floor_index, None)
-            if not current_floor:
-                raise InputError('There is no floor ' + str(floor_index) + ' but there are staris for this floor')
-            # Get the stairs upper floor and check it exists
-            upper_floor = self.floors.get(floor_index + 1, None)
-            if not upper_floor:
-                raise InputError('Floor ' + str(floor_index) + ' has stairs but there is no upper floor')
-            # Set the downstair rooms for the current floor
-            downstairs_rooms = [ s.downstairs_room for s in stairs ]
-            current_floor.children += downstairs_rooms
-            # Set the upstairs room for the upper floor
-            upstairs_rooms = [ s.upstairs_room for s in stairs ]
-            upper_floor.children += upstairs_rooms
+        for stair in self.stairs:
+            # Get the stair lower floor and check it exists
+            lower_floor = stair.lower_floor
+            # Get the stair upper floor and check it exists
+            upper_floor = stair.upper_floor
+            # Set the lower room for the lower floor and add it to the actual floor children rooms
+            lower_floor.children.append(stair.lower_room)
+            # Set the upper room for the upper floor and add it to the actual floor children rooms
+            upper_floor.children.append(stair.upper_room)
 
     # DANI: Al final esto no lo he implementado
     # Fix corridor sized regions in a non-base floor which are produced by actual corridors in previous floors
@@ -4334,33 +4367,33 @@ class Building:
         # First of all setup the stairs
         self.setup_stairs()
         # Solve each floor starting by the floor 0 (the first floor), then solving the superior floors and finally the basements
-        sorted_floor_indices = list(range(self.highest_floor_index +1)) + list(range(self.lowest_floor_index, 0))
-        for floor_index in sorted_floor_indices:
-            floor = self.floors[floor_index]
-            stairs = self.stairs[floor_index]
+        sorted_floor_indices = list(range(self.highest_floor_number +1)) + list(range(self.lowest_floor_number, 0))
+        for floor_number in sorted_floor_indices:
+            floor = self.floors[floor_number]
+            stairs = [ stair for stair in self.stairs if stair.lower_floor_number == floor_number ]
             # Get the lower floor, it may be useful to aset a few parameter of the current one
-            lower_floor_index = floor_index - 1
+            lower_floor_number = floor_number - 1
             # Get the upper floor, it may be useful to aset a few parameter of the current one
-            upper_floor_index = floor_index + 1
+            upper_floor_number = floor_number + 1
             # In case this floor has not a forced boundary,
             if not floor.input_boundary:
                 # Basement floors
-                if floor_index < 0:
+                if floor_number < 0:
                     # We set same boundary as the base
                     base_boundary = self.floors[0].boundary
                     floor.boundary = base_boundary
                     floor._child_adaptable_boundary = False
                 # Upper floors
-                elif floor_index > 0:
+                elif floor_number > 0:
                     # We set same boundary as the lower floor
-                    lower_floor_boundary = self.floors[lower_floor_index].boundary
+                    lower_floor_boundary = self.floors[lower_floor_number].boundary
                     floor.boundary = lower_floor_boundary
                     floor._child_adaptable_boundary = False
                 # Base floor
                 else:
-                    # If we have an area range in the inputs then generate a random shape
+                    # If we have an area range in the inputs then generate a random polygon
                     if floor.min_area != None and floor.max_area != None:
-                        # Generate a random shape and set it as the floor boundary
+                        # Generate a random polygon and set it as the floor boundary
                         random_polygon = generate_random_polygon(
                             min_area=floor.min_area,
                             max_area=floor.max_area,
@@ -4376,10 +4409,10 @@ class Building:
                         if stairs:
                             # Now calculate the space required by the door
                             for stair in stairs:
-                                extra_space = Grid([ stair.upstairs_room.doors[0].generate_rect(inside=False) ])
+                                extra_space = Grid([ stair.upper_room.doors[0].generate_rect(inside=False) ])
                                 floor.forced_grid += extra_space
             # In case this floor has not forced doors there will be not doors incase it is not the base
-            if floor.input_doors == None and floor_index != 0:
+            if floor.input_doors == None and floor_number != 0:
                 floor.doors = []
             # Start the whole solving process
             floor.solve(display)
