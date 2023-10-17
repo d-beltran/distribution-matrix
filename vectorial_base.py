@@ -2518,6 +2518,12 @@ class Grid:
             if x_fit_size <= x_size and y_fit_size <= y_size:
                 yield rect
 
+    # Get the grid of available space to allocate a given x and y sizes
+    # If only the x size parameter is passed it is assumed to be both x and y size
+    def get_fitting_space (self, x_fit_size : number, y_fit_size : Optional[number] = None) -> Generator[Rect, None, None]:
+        maximum_rects = self.get_fitting_space(x_fit_size, y_fit_size)
+        return Grid.non_canonical(maximum_rects)
+
     # Some functions are defined to find colliding rects
     # Note that these functions rely on the fact that grids must never have overlapping rects
     def get_left_rect (self, rect : Rect) -> Optional[Rect]:
@@ -3611,3 +3617,16 @@ def generate_random_polygon (
         raise ValueError('The final polygon corners (' + str(polygon_corners) + ') does not match the input corners (' + str(corners) + ')')
     # Return the final polygon
     return polygon
+
+    # Get the fitting grid of two grids at the same time
+    # Both grids must fit two different sizes which may be offseted in position as well
+    # This is useful to calculate when a stair can be placed somewhere according to both the lower and the upper floor
+    def get_combined_fitting_grid (
+        grid_1 : Grid, x_fit_size_1 : number, y_fit_size_1 : number,
+        grid_2 : Grid, x_fit_size_2 : number, y_fit_size_2 : number,
+        offset : number
+    ) -> Tuple[Grid, Grid]:
+        # 1: Calcula la available grid del primer caso
+        # 2: Calcula la grid equivalente con el size y el offset del segundo caso
+        # 3: Devuelve la intersección entre la grid equivalente y la grid 2
+        pass
