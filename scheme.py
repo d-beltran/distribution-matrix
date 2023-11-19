@@ -229,7 +229,7 @@ class Door:
     # Generate a rect containing the minimum required space for this door
     # If inside is true (default) then the rect in the inside side of the room is returned
     # Otherwise the outside side rect is returned
-    def generate_rect (self, inside : bool = True) -> Optional[Rect]:
+    def get_required_space (self, inside : bool = True) -> Optional[Rect]:
         margined_segment = self.margined_segment
         if not margined_segment:
             return None
@@ -1104,8 +1104,8 @@ class Room:
         size = room.min_size
         # Get all fitting rects
         grid = self.grid if forced else self.free_grid
-        fitting_rects = grid.get_fitting_space(size, size)
-        return list(fitting_rects)
+        fitting_rects = list(grid.generate_fitting_rects(size, size))
+        return fitting_rects
 
     # Set up a child room boundary
     def set_child_room_boundary (self, room : 'Room', forced : bool = False) -> bool:
@@ -3581,8 +3581,8 @@ class Room:
         # truncated_bounday_segments = [ segment.get_colored_segment('blue') for segment in truncated_bounday_segments ]
         # door_segments = []
         # for door in stablished_doors:
-        #     inside_segments = [ segment.get_colored_segment('green') for segment in door.generate_rect(inside=True).segments ]
-        #     outside_segments = [ segment.get_colored_segment('red') for segment in door.generate_rect(inside=False).segments ]
+        #     inside_segments = [ segment.get_colored_segment('green') for segment in door.get_required_space(inside=True).segments ]
+        #     outside_segments = [ segment.get_colored_segment('red') for segment in door.get_required_space(inside=False).segments ]
         #     door_segments += inside_segments + outside_segments
         # elements_to_display = truncated_bounday_segments + door_segments
         # self.update_display(extra=elements_to_display, title='Doors checking')
@@ -3592,7 +3592,7 @@ class Room:
         # For each stablished door,
         for door in stablished_doors:
             # Check the inside space to be fully inside
-            inside_rect = door.generate_rect(inside=True)
+            inside_rect = door.get_required_space(inside=True)
             # This may happen when the door is not even in the boundary
             if not inside_rect:
                 return False
@@ -3601,7 +3601,7 @@ class Room:
             if uncovered_inside_space:
                 return False
             # Check the outside space to be fully outside
-            outside_rect = door.generate_rect(inside=False)
+            outside_rect = door.get_required_space(inside=False)
              # This may happen when the door is not even in the boundary
             if not outside_rect:
                 return False
@@ -3621,7 +3621,7 @@ class Room:
         # For each stablished door,
         for door in stablished_doors:
             # Check the outside space to be fully outside
-            rect = door.generate_rect(inside=inside)
+            rect = door.get_required_space(inside=inside)
             # This may happen when the door is not even in the boundary
             if not rect:
                 return False
@@ -4012,8 +4012,8 @@ class Stairs:
     ):
         # Save the initiation arguments
         self.polygon = polygon
-        self.lower_door = lower_door
-        self.upper_door = upper_door
+        self._lower_door = lower_door
+        self._upper_door = upper_door
         self._slope = slope
         self._length = length
         self._width = width
@@ -4042,14 +4042,14 @@ class Stairs:
             if configuration:
                 print('WARNING: Redundant input "configuration" for stairs with already forced polygon')
             # Check doors to be over the polygon
-            if lower_door and lower_door.point not in polygon:
+            if self._lower_door and self._lower_door.point not in polygon:
                 raise InputError('Lower door is not over the polygon')
-            if upper_door and upper_door.point not in polygon:
+            if self._upper_door and self._upper_door.point not in polygon:
                 raise InputError('Upper door is not over the polygon')
         # Random scenario:
         else:
             # Doors can not be forced if the polygon is not forced
-            if lower_door or upper_door:
+            if self._lower_door or self._upper_door:
                 raise InputError('You can not force stairs doors if the polygon is not forced as well')
             # Set the defaults
             # Slope and length cannot be both passed
@@ -4094,29 +4094,60 @@ class Stairs:
     # However, the stairs between 2 fllors are always defined in the lower floor stairs
     # Note that stairs may stack, thus sharing the same room along different couples of floors
 
+    # Generate both the upper and lower rooms
+    def setup_rooms (self):
+        # If polygon is forced:
+        if self.polygon:
+            # Set the lower door
+            if not self._lower_door:
+                self._lower_door = Door()
+            # Set the upper door
+            if not self._upper_door:
+                self._upper_door = Door()
+        # If polygon is random:
+        else:
+            # This function sets self polygon and doors
+            self.set_place()
+        # Set the rooms
+        boundary = Boundary(self.polygon)
+        self._lower_room = Room(boundary=boundary, doors=[ self._lower_door ], parent=self.lower_floor, rigid=True, name='Lower')
+        self._upper_room = Room(boundary=boundary, doors=[ self._upper_door ], parent=self.upper_floor, rigid=True, name='Upper')
+
+    # Get the lower door
+    def get_lower_door (self) -> Door:
+        # Return the internal value if it exists already
+        if self._lower_door:
+            return self._lower_door
+        # Otherwise we must set the lower door
+        self.setup_rooms()
+        return self._lower_door
+
+    # The lower door
+    lower_door = property(get_lower_door, None, None, "The lower door (read only)")
+
     # Get the lower room
     def get_lower_room (self) -> Room:
         # Return the internal value if it exists already
         if self._lower_room:
             return self._lower_room
         # Otherwise we must set the lower room
-        # If polygon is forced:
-        if self.polygon:
-            boundary = Boundary(polygon)
-            doors = [ self.lower_door ] if self.lower_door else None
-            self._lower_room = Room(boundary=boundary, doors=doors, parent=self.lower_floor, rigid=True, name='Lower')
-            return self._lower_room
-        # If polygon is random:
-        # WARNING: Note that there is no need to check if the upper room already existis to copy it
-        # WARNING: When one of the rooms is set the other room is set as well
-        polygon, lower_door, upper_door = self.generate_polygon()
-        boundary = Boundary(polygon)
-        self._lower_room = Room(boundary=boundary, doors=[ lower_door ], parent=self.lower_floor, rigid=True, name='Lower')
-        self._upper_room = Room(boundary=boundary, doors=[ upper_door ], parent=self.upper_floor, rigid=True, name='Upper')
+        self.setup_rooms()
         return self._lower_room
 
     # The lower room
     lower_room = property(get_lower_room, None, None, "The lower room (read only)")
+
+    # Get the upper door
+    def get_upper_door (self) -> Door:
+        # Return the internal value if it exists already
+        if self._upper_door:
+            return self._upper_door
+        # Otherwise we must set the upper door
+        self.setup_rooms()
+        return self._upper_door
+
+    # The upper door
+    upper_door = property(get_upper_door, None, None, "The upper door (read only)")
 
     # Get the upper room
     def get_upper_room (self) -> Room:
@@ -4124,19 +4155,7 @@ class Stairs:
         if self._upper_room:
             return self._upper_room
         # Otherwise we must set the upper room
-        # If polygon is forced:
-        if self.polygon:
-            boundary = Boundary(polygon)
-            doors = [ self.upper_door ] if self.upper_door else None
-            self._upper_room = Room(boundary=boundary, doors=doors, parent=self.upper_floor, rigid=True, name='Upper')
-            return self._upper_room
-        # If polygon is random:
-        # WARNING: Note that there is no need to check if the upper room already existis to copy it
-        # WARNING: When one of the rooms is set the other room is set as well
-        polygon, lower_door, upper_door = self.generate_polygon()
-        boundary = Boundary(polygon)
-        self._lower_room = Room(boundary=boundary, doors=[ lower_door ], parent=self.lower_floor, rigid=True, name='Lower')
-        self._upper_room = Room(boundary=boundary, doors=[ upper_door ], parent=self.upper_floor, rigid=True, name='Upper')
+        self.setup_rooms()
         return self._upper_room
 
     # The upper room
@@ -4161,7 +4180,7 @@ class Stairs:
         if not self.lower_floor:
             raise ValueError('You are requesting the width of stairs with no lower floor when this values was not passed')
         width = self.lower_floor.corridor_size
-        print('WIDTH: ' + str(width))
+        #print('WIDTH: ' + str(width))
         if width == None:
             raise ValueError('Lower floor has no corridor size')
         return width
@@ -4177,7 +4196,7 @@ class Stairs:
             return self._length
         # Otherwise we must calculate the length
         # Note that the height is required for this calculation and thus the lower floor must be set already
-        self._length = self.height / tan(radians(self.slope))
+        self._length = resolute( self.height / tan(radians(self.slope)) )
         return self._length
 
     # Set the length
@@ -4186,7 +4205,7 @@ class Stairs:
         self._length = new_length
         # Note that the height is required for this calculation and thus the lower floor must be set already
         new_slope = degrees( atan( self.height / new_length ) )
-        self._slope = new_slope
+        self._slope = resolute(new_slope)
 
     # The length
     length = property(get_length, set_length, None, "The length")
@@ -4214,30 +4233,76 @@ class Stairs:
     # The slope
     slope = property(get_slope, set_slope, None, "The slope")
 
-    # Set a function to randomly generate a polygon, lower door and upper door according to the stairs parameters
-    # We must decide both the shape and the position of the stairs
-    # Note that when deciding the position of the polygon we must also consider a fex esra space for the corridor
-    # This space must be available both in the lower and in the upper floor, and they may be different regions
+    # Set the polygon, lower door and upper door according to the stair parameters and floor avilable space
+    # Here is decided both shape and position of the stair rooms and their doors also considering extra space for the corridor
+    # Note that the extra space may not be the same in upper and lower floors
     # Note that this additional space is unserstood as simply an extension of the stair length which keeps the stair width
-    def generate_polygon (self) -> Tuple[Polygon, Door, Door]:
-        # Just a square using the width
+    def set_place (self):
+        # Set the lower and upper floor grids
+        # If there is no upper floor then asume the available space will be the lower floor
+        lower_floor_grid = self.lower_floor.grid
+        upper_floor_grid = self.upper_floor.grid
+        if not upper_floor_grid:
+            upper_floor_grid = lower_floor_grid
+        # Set the additional space length required
+        # Note that the additional space width will be the stairs width to avoid difficulties, but length may change
+        required_free_space_length = self.width
+        # Rectangle with both doors in the same place (e.g. elevators)
         if self.configuration == 0:
-            rect = Rect(x_min=0, y_min=0, x_max=self.width, ymax=self.width)
-            polygon = Polygon.from_rect(rect)
-            doors_point = Point(self.width / 2, 0)
-            lower_door = Door(point=doors_point, rigid=True)
-            upper_door = Door(point=doors_point, rigid=True, reverse=True)
-            return polygon, lower_door, upper_door
-        # Rectangle with a door on each extreme
-        if self.configuration == 1:
-            rect = Rect(x_min=0, y_min=0, x_max=self.width, y_max=self.length)
-            polygon = Polygon.from_rect(rect)
-            lower_door_point = Point(self.width / 2, 0)
-            lower_door = Door(point=lower_door_point, rigid=True)
-            upper_door_point = Point(self.width / 2, self.length)
-            upper_door = Door(point=upper_door_point, rigid=True, reverse=True)
-            return polygon, lower_door, upper_door
-        raise SystemExit('Configuration ' + str(self.configuration) + ' is not defined')
+            pass
+        # Rectangle with a door on each extreme (e.g. regular linear stairs)
+        elif self.configuration == 1:
+            # Stair may be oriented in any direction and it may tell the difference between fitting or not
+            for direction in [ UP, RIGHT, DOWN, LEFT ]:
+                is_vertical = direction.is_vertical()
+                x_size = self.width if is_vertical else self.length + required_free_space_length
+                y_size = self.length + required_free_space_length if is_vertical else self.width
+                x_offset = 0 if is_vertical else required_free_space_length * direction.x # Direction x is to be -1 or 1
+                y_offset = required_free_space_length * direction.y if is_vertical else 0 # Direction y is to be -1 or 1
+                # Get both available spaces, lower and upper, taking in count each other
+                lower_available_space, upper_available_space = get_tandem_fitting_grid(
+                    grid_1 = lower_floor_grid, x_fit_size_1 = x_size, y_fit_size_1 = y_size,
+                    grid_2 = upper_floor_grid, x_fit_size_2 = x_size, y_fit_size_2 = y_size,
+                    x_position_offset = x_offset, y_position_offset = y_offset )
+                # Now we must define a random spot in the available lower space and set its equivalent in the upper room
+                lower_spot = next(lower_available_space.generate_fitting_spots(x_size, y_size))
+                upper_spot = lower_spot.get_offset_rect(x_position_offset = x_offset, y_position_offset = y_offset)
+                # Now we tell apart the free space from the actual room space
+                x_size_offset = 0 if is_vertical else -self.length
+                y_size_offset = -self.length if is_vertical else 0
+                lower_x_position_offset = self.length if direction == LEFT else 0
+                lower_y_position_offset = self.length if direction == DOWN else 0
+                lower_free_space = lower_spot.get_offset_rect( lower_x_position_offset, lower_y_position_offset, x_size_offset, y_size_offset )
+                lower_free_grid = Grid([lower_free_space])
+                upper_x_position_offset = self.length if direction == RIGHT else 0
+                upper_y_position_offset = self.length if direction == UP else 0
+                upper_free_space = upper_spot.get_offset_rect( upper_x_position_offset, upper_y_position_offset, x_size_offset, y_size_offset )
+                upper_free_grid = Grid([upper_free_space])
+                # Check boths spots match after substracting free spaces
+                lower_grid = Grid([lower_spot]) - lower_free_grid
+                upper_grid = Grid([upper_spot]) - upper_free_grid
+                if lower_grid != upper_grid:
+                    raise Exception('Lower and upper grids must be identical')
+                if len(lower_grid.boundaries) != 1:
+                    raise Exception('Grid must have only one boundary')
+                # Set the polygon
+                self.polygon = lower_grid.boundaries[0].exterior_polygon
+                # Set the door positions
+                if is_vertical:
+                    lower_door_point_x_position = upper_door_point_x_position = lower_free_space.x_min + lower_free_space.x_size / 2
+                    lower_door_point_y_position = lower_free_space.y_min if direction == DOWN else lower_free_space.y_max
+                    upper_door_point_y_position = upper_free_space.y_max if direction == DOWN else upper_free_space.y_min
+                else:
+                    lower_door_point_x_position = lower_free_space.x_min if direction == LEFT else lower_free_space.x_max
+                    upper_door_point_x_position = upper_free_space.x_max if direction == LEFT else upper_free_space.x_min
+                    lower_door_point_y_position = upper_door_point_y_position = lower_free_space.y_min + lower_free_space.y_size / 2
+                lower_door_point = Point(lower_door_point_x_position, lower_door_point_y_position)
+                self._lower_door = Door(point = lower_door_point)
+                upper_door_point = Point(upper_door_point_x_position, upper_door_point_y_position)
+                self._upper_door = Door(point = upper_door_point)
+        # If the configuration is not recognized then raise an input error
+        else:
+            raise InputError('Stairs configuration ' + str(self.configuration) + ' is not defined')
 
 
 # The building which may contain several floors
@@ -4321,20 +4386,6 @@ class Building:
                 'margin': margin
             }
 
-    # Setup the stairs basics before solving boundary details
-    # This avoids hierarchy problems such as stair rooms not having a valid root floor to guess door args
-    def setup_stairs (self):
-        # Iterate over floors
-        for stair in self.stairs:
-            # Get the stair lower floor and check it exists
-            lower_floor = stair.lower_floor
-            # Get the stair upper floor and check it exists
-            upper_floor = stair.upper_floor
-            # Set the lower room for the lower floor and add it to the actual floor children rooms
-            lower_floor.children.append(stair.lower_room)
-            # Set the upper room for the upper floor and add it to the actual floor children rooms
-            upper_floor.children.append(stair.upper_room)
-
     # DANI: Al final esto no lo he implementado
     # Fix corridor sized regions in a non-base floor which are produced by actual corridors in previous floors
     # These regions are common and they appear between rigid rooms (e.g. stairs) and the floor perimeter
@@ -4364,13 +4415,12 @@ class Building:
 
     # Solve all floors
     def solve (self, display : bool = False):
-        # First of all setup the stairs
-        self.setup_stairs()
         # Solve each floor starting by the floor 0 (the first floor), then solving the superior floors and finally the basements
         sorted_floor_indices = list(range(self.highest_floor_number +1)) + list(range(self.lowest_floor_number, 0))
         for floor_number in sorted_floor_indices:
             floor = self.floors[floor_number]
-            stairs = [ stair for stair in self.stairs if stair.lower_floor_number == floor_number ]
+            upward_stairs = [ stair for stair in self.stairs if stair.lower_floor_number == floor_number ]
+            downward_stairs = [ stair for stair in self.stairs if stair.upper_floor_number == floor_number ]
             # Get the lower floor, it may be useful to aset a few parameter of the current one
             lower_floor_number = floor_number - 1
             # Get the upper floor, it may be useful to aset a few parameter of the current one
@@ -4402,18 +4452,30 @@ class Building:
                         floor.boundary = Boundary(random_polygon)
                     # Otherwise, we have a child adaptable boundary scenario
                     else:
-                        # We may need to set a bit of extra free space next to the stairs
-                        # This is for the perimeter in the floor above to have space for the corridor to reach the stairs door
-                        # Note that this has to be done now that the stair rooms are children of the floor
-                        # Otherwise the door is not able to find its arguments (width and margin) at this point since it has not root
-                        if stairs:
-                            # Now calculate the space required by the door
-                            for stair in stairs:
-                                extra_space = Grid([ stair.upper_room.doors[0].generate_rect(inside=False) ])
-                                floor.forced_grid += extra_space
+                        raise Exception('This scenario is not yet supported')
+                        # # We may need to set a bit of extra free space next to the stairs
+                        # # This is for the perimeter in the floor above to have space for the corridor to reach the stairs door
+                        # # Note that this has to be done now that the stair rooms are children of the floor
+                        # # Otherwise the door is not able to find its arguments (width and margin) at this point since it has not root
+                        # if stairs:
+                        #     # Now calculate the space required by the door
+                        #     for stair in stairs:
+                        #         extra_space = Grid([ stair.upper_room.doors[0].get_required_space(inside=False) ])
+                        #         floor.forced_grid += extra_space
             # In case this floor has not forced doors there will be not doors incase it is not the base
             if floor.input_doors == None and floor_number != 0:
                 floor.doors = []
+            # Set the stairs
+            for stair in upward_stairs + downward_stairs:
+                # At this moment we set both lower and upper room positions and shapes
+                # If stairs already have a polygon then skip this part
+                if not stair.polygon:
+                    stair.set_place()
+            # Add the lower and upper rooms to the floor children doors
+            for stair in upward_stairs:
+                floor.children.append(stair.lower_room)
+            for stair in downward_stairs:
+                floor.children.append(stair.upper_room)
             # Start the whole solving process
             floor.solve(display)
 

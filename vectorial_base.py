@@ -242,6 +242,12 @@ class Vector:
         yield perpendicular_vector
         yield -perpendicular_vector
 
+# Set some standard vectors
+LEFT = Vector(-1, 0)
+RIGHT = Vector(1, 0)
+UP = Vector(0, 1)
+DOWN = Vector(0, -1)
+
 # A line defined by a point and a directional vector
 class Line:
 
@@ -983,16 +989,16 @@ class Rect:
         segments = self.get_segments()
         # Left side
         if segment == segments[0]:
-            return Vector(1,0)
+            return RIGHT
         # Upper side
         if segment == segments[1]:
-            return Vector(0,-1)
+            return DOWN
         # Right side
         if segment == segments[2]:
-            return Vector(-1,0)
+            return LEFT
         # Buttom side
         if segment == segments[3]:
-            return Vector(0,1)
+            return UP
         raise ValueError('Segment "' + str(segment) + '" is not part of rectangle "' + str(self) + '"')
 
     # Return a segment which crosses the rectangle in diagonal from bottom left to upper right points
@@ -1234,6 +1240,19 @@ class Rect:
         new_y_min = self.y_min - margin_size
         new_x_max = self.x_max + margin_size
         new_y_max = self.y_max + margin_size
+        return Rect(new_x_min, new_y_min, new_x_max, new_y_max)
+
+    # Return a new rect with position and size offset
+    def get_offset_rect (self,
+        x_position_offset : number = 0,
+        y_position_offset : number = 0,
+        x_size_offset : number = 0,
+        y_size_offset : number = 0
+    ) -> 'Rect':
+        new_x_min = self.x_min + x_position_offset
+        new_y_min = self.y_min + y_position_offset
+        new_x_max = self.x_max + x_position_offset + x_size_offset
+        new_y_max = self.y_max + y_position_offset + y_size_offset
         return Rect(new_x_min, new_y_min, new_x_max, new_y_max)
 
 # A polygon is a list of connected segments which is closed
@@ -2172,6 +2191,13 @@ class Grid:
     def __bool__(self):
         return len(self._rects) > 0
 
+    # Two grids are equal if they match in their rects
+    def __eq__ (self, other):
+        if not isinstance(other, self.__class__):
+            return False
+        return set(self.rects) == set(other.rects)
+
+
     def __contains__(self, other):
         if isinstance(other, Point):
             for rect in self.rects:
@@ -2313,6 +2339,8 @@ class Grid:
             for rect in rect_group:
                 splitted_rects = rect.split(x_splits, y_splits)
                 canonical_rects += splitted_rects
+        # Remove duplicates
+        canonical_rects = list(set(canonical_rects))
         # Now that we have canonical rects, set the grid
         grid = cls(canonical_rects)
         # Now rectangles should be canonical, but we may have redundant "cuts" where several rows/columns may be merged to optimize the grid
@@ -2509,7 +2537,7 @@ class Grid:
     # Search all maximum rectangles which fulfill the specified minimum x and y sizes
     # Fitting rects are returned as a generator
     # If only the x size parameter is passed it is assumed to be both x and y size
-    def get_fitting_space (self, x_fit_size : number, y_fit_size : Optional[number] = None) -> Generator[Rect, None, None]:
+    def generate_fitting_rects (self, x_fit_size : number, y_fit_size : Optional[number] = None) -> Generator[Rect, None, None]:
         if not y_fit_size:
             y_fit_size = x_fit_size
         for max_rect in self.max_rects:
@@ -2520,8 +2548,31 @@ class Grid:
 
     # Get the grid of available space to allocate a given x and y sizes
     # If only the x size parameter is passed it is assumed to be both x and y size
-    def get_fitting_space (self, x_fit_size : number, y_fit_size : Optional[number] = None) -> Generator[Rect, None, None]:
-        maximum_rects = self.get_fitting_space(x_fit_size, y_fit_size)
+    def get_fitting_space (self, x_fit_size : number, y_fit_size : Optional[number] = None) -> 'Grid':
+        maximum_rects = list(self.generate_fitting_rects(x_fit_size, y_fit_size))
+        return Grid.non_canonical(maximum_rects)
+
+    # Generate rectangles with the specific input size in different places along the grid
+    def generate_fitting_spots (self, x_fit_size : number, y_fit_size : Optional[number] = None) -> Generator[Rect, None, None]:
+        # Iterate over the fitting rects
+        for rect in self.generate_fitting_rects(x_fit_size, y_fit_size):
+            # Yield lower left corner spot
+            yield Rect(rect.x_min, rect.y_min, rect.x_min + x_fit_size, rect.y_min + y_fit_size)
+            # Yield lower right corner spot
+            different_width = rect.x_size != x_fit_size
+            if different_width:
+                yield Rect(rect.x_max - x_fit_size, rect.y_min, rect.x_max, rect.y_min + y_fit_size)
+            # Yield upper left corner spot
+            different_height = rect.y_size != y_fit_size
+            if different_height:
+                yield Rect(rect.x_min, rect.y_max - y_fit_size, rect.x_min + x_fit_size, rect.y_max)
+            # Yield upper right corner spot
+            if different_width and different_height:
+                yield Rect(rect.x_max - x_fit_size, rect.y_max - y_fit_size, rect.x_max, rect.y_max)
+
+    # Return a new grid with position and size offset
+    def get_offset_grid (self, x_position_offset : number, y_position_offset : number, x_size_offset : number, y_size_offset : number) -> 'Grid':
+        maximum_rects = [ rect[0].get_offset_rect(x_position_offset, y_position_offset, x_size_offset, y_size_offset) for rect in self.max_rects ]
         return Grid.non_canonical(maximum_rects)
 
     # Some functions are defined to find colliding rects
@@ -3618,15 +3669,28 @@ def generate_random_polygon (
     # Return the final polygon
     return polygon
 
-    # Get the fitting grid of two grids at the same time
-    # Both grids must fit two different sizes which may be offseted in position as well
-    # This is useful to calculate when a stair can be placed somewhere according to both the lower and the upper floor
-    def get_combined_fitting_grid (
-        grid_1 : Grid, x_fit_size_1 : number, y_fit_size_1 : number,
-        grid_2 : Grid, x_fit_size_2 : number, y_fit_size_2 : number,
-        offset : number
-    ) -> Tuple[Grid, Grid]:
-        # 1: Calcula la available grid del primer caso
-        # 2: Calcula la grid equivalente con el size y el offset del segundo caso
-        # 3: Devuelve la intersección entre la grid equivalente y la grid 2
-        pass
+# Get the fitting grid of two grids at the same time
+# Both grids must fit two different sizes which may be offseted in position as well
+# This is useful to calculate when a stair can be placed somewhere according to both the lower and the upper floor
+# DANI: No se ha testeado en profundidad
+def get_tandem_fitting_grid (
+    grid_1 : Grid, x_fit_size_1 : number, y_fit_size_1 : number,
+    grid_2 : Grid, x_fit_size_2 : number, y_fit_size_2 : number,
+    x_position_offset : number, y_position_offset : number
+) -> Tuple[Grid, Grid]:
+    # Get the fitting space for the first element
+    fitting_grid_1 = grid_1.get_fitting_space(x_fit_size_1, y_fit_size_1)
+    # Get the equivalent space required to fit the second element
+    x_size_offset = x_fit_size_2 - x_fit_size_1
+    y_size_offset = y_fit_size_2 - y_fit_size_1
+    required_grid_2 = fitting_grid_1.get_offset_grid(x_position_offset, y_position_offset, x_size_offset, y_size_offset)
+    # Get the overlap between the required space and the available space for the second element
+    available_grid_2 = required_grid_2.get_overlap_grid(grid_2)
+    # If there is not available grid then we are done
+    if not available_grid_2:
+        return None, None
+    # Now fit the second element in the available grid
+    fitting_grid_2 = available_grid_2.get_fitting_space(x_fit_size_2, y_fit_size_2)
+    # And finally offset the result back to the grid 1
+    available_grid_1 = fitting_grid_2.get_offset_grid(-x_position_offset, -y_position_offset, -x_size_offset, -y_size_offset)
+    return available_grid_1, fitting_grid_2
