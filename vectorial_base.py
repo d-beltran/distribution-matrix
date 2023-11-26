@@ -1363,7 +1363,7 @@ class Polygon:
         return cls(rect.segments)
 
     def __str__ (self):
-        return ', '.join([str(segment) for segment in self.segments])
+        return 'Polygon: ' + ' -> '.join([str(segment.a) for segment in self.segments])
 
     def __repr__ (self):
         return ', '.join([str(segment) for segment in self.segments])
@@ -1800,13 +1800,10 @@ class Polygon:
                 # This may fail, for example, if interior polygons are overlapped
                 if len(intersection_points) == 0:
                     # Represent polygons in the problematic boundary
-                    # for limit_segment in limit_segments:
-                    #     limit_segment.color = 'black'
-                    # interior_segments = [ segment for polygon in self.interior_polygons for segment in polygon.segments ]
-                    # for interior_segment in interior_segments:
-                    #     interior_segment.color = 'blue'
-                    # segment.color = 'green'
-                    # add_frame(limit_segments + interior_segments + list(mark_point(corner, 'red')) + [segment])
+                    for limit_segment in limit_segments:
+                        limit_segment.color = 'black'
+                    segment.color = 'green'
+                    add_frame(limit_segments + list(mark_point(corner, 'red')) + [segment], title='Debug')
                     raise RuntimeError('An inside segment has no intersection point: ' + str(segment))
 
                 # Sort the points by distance
