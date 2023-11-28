@@ -680,6 +680,10 @@ class Room:
         for child in children:
             child.parent = self
         self._children = children
+        # If new children are added then some of them may have overlapping boundaries
+        # e.g. when the stairs rooms are added
+        # For this reason we must reset the free grid
+        self.reset_free_grid()
 
     # The children rooms
     children = property(get_children, set_children, None, "The children rooms")
@@ -884,11 +888,6 @@ class Room:
         # Return none if there is not boundary yet
         if not self.boundary:
             return None
-        # If there are no children then return the current boundary grid
-        # If all children have no boundary then return the current boundary grid
-        if len(self.children) == 0 or not any([ child.boundary for child in self.children ]):
-            self._free_grid = self.grid
-            return self._free_grid
         # Otherwise, find out the free space grid
         # Get all non-free space grids
         occupied_grids = [ child.grid for child in self.children if child.grid ]
@@ -1575,9 +1574,6 @@ class Room:
         # Set the rooms which must be reached by the corridor
         required_children_rooms = [ child for child in self.children if child.boundary and len(child.doors) > 0 and child not in already_doored_rooms ]
         required_rooms = ([ self ] if len(self.doors) > 0 and self not in already_doored_rooms else []) + required_children_rooms
-        # If there are less than 2 required rooms then it makes not sense finding a corridor
-        if len(required_rooms) < 2:
-            raise ValueError('Trying to find a corridor between less than 2 rooms')
         # Set the variables to store the current corridor
         current_corridor = []
         current_corridor_nodes = []
@@ -4531,9 +4527,9 @@ class Building:
                     stair.set_place()
             # Add the lower and upper rooms to the floor children doors
             for stair in upward_stairs:
-                floor.children.append(stair.lower_room)
+                floor.children += [stair.lower_room]
             for stair in downward_stairs:
-                floor.children.append(stair.upper_room)
+                floor.children += [stair.upper_room]
             # Start the whole solving process
             floor.solve(display)
 
