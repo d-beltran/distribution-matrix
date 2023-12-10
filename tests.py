@@ -346,14 +346,12 @@ test_building_2 = Building(
                     name='Sala de mantenimiento',
                     min_area=800,
                     max_area=800,
-                    min_size=15,
                     fill_color='blue'
                 ),
                 Room(
                     name='Sala de máquinas',
                     min_area=1000,
                     max_area=1000,
-                    min_size=15,
                     fill_color='green'
                 ),
             ]
@@ -365,36 +363,31 @@ test_building_2 = Building(
                     name='Apartamento',
                     min_area='60%',
                     max_area='99%',
-                    min_size=15,
                     fill_color='red',
                     children=[
                         Room(
                             name='Cocina',
                             min_area='15%',
                             max_area='25%',
-                            min_size=15,
                             fill_color='purple'),
                         Room(
                             name='Comedor',
                             min_area='30%',
                             max_area='45%',
-                            min_size=15,
                             fill_color='orange'),
                         Room(
                             name='Habitación',
                             min_area='10%',
                             max_area='18%',
-                            min_size=15,
                             fill_color='blue'),
                         Room(
                             name='Lavabo',
                             min_area='08%',
                             max_area='12%',
-                            min_size=15,
                             fill_color='green')
                     ]),
             ]
         )
     },
-    room_args = { 'height': 20 }
+    room_args = { 'height': 20, 'min_size': 10 }
 )

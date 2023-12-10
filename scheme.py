@@ -9,8 +9,7 @@ from math import sqrt, inf, tan, atan, degrees, radians
 
 # Set the seed and print it
 seed = None
-#seed = 908524
-seed = 149067
+seed = 716178
 
 if not seed:
     seed = round(random.random() * 999999)
@@ -25,22 +24,6 @@ display_solving_process = False
 # Set the number of frames to be displayed before stopping the process
 # This is useful for debugging
 display_frames_limit = 100
-
-# Sets how much greater is the effective minimum size in the steps previous to corridor and wall tickness build
-# The most preventive margin we have, the most respect for the minimum size but the less flexibility when solving the puzzle
-# This means a strict protocol may have not solution
-# 0 - Use the minimum size as it is
-#     This is prone to not respect minimum size at several regions
-#     Moderate risk of large room space loose during the corridor build
-# 1 - Use the minimum size + half the corridor size
-#     This is prone to not respect minimum size at a few regions
-#     Lesser risk of large room space loose during the corridor build
-# 2 - Use the minimum size + the corridor size
-#     This should respect minimum size in most cases
-#     Negligible risk of large room space loose during the corridor build
-# 3 - Use the minimum size + twice the corridor size
-#     This should respect minimum size even in the worst possible scenario
-preventive_min_size_protocol = 0
 
 # A door is a segment in a boundary
 # When boundaries are transformed to walls with tickness, doors become holes in the wall
@@ -599,10 +582,7 @@ class Room:
             if max_corners < 4:
                 raise InputError('It is not supported having less than 4 corners in the final boundary')
         # Set size limits
-        if min_size != None:
-            self.min_size = min_size
-        else:
-            self.min_size = 0
+        self._min_size = min_size
         # Set the internal max size value
         self._max_size = None
         # Parent free limit is set by the parent while setting the child boundary
@@ -622,18 +602,6 @@ class Room:
         # This is space which is not sitable to be claimed and thus is not set free to avoid the solver to try it
         # This space may be generated when setting the corridor and it may be impossible to recover
         self.discarded_grid = Grid()
-        # In order to respect the minimum size we are going to use a greater minimum size at the first steps
-        # This is done to have margin for performing invasive steps (e.g. corridor and wall thickness build)
-        if preventive_min_size_protocol == 0:
-            self.preventive_min_size = self.min_size
-        elif preventive_min_size_protocol == 1:
-            self.preventive_min_size = self.min_size + self.corridor_size / 2
-        elif preventive_min_size_protocol == 2:
-            self.preventive_min_size = self.min_size + self.corridor_size
-        elif preventive_min_size_protocol == 3:
-            self.preventive_min_size = self.min_size + self.corridor_size * 2
-        else:
-            raise InputError('Preventive min size protocol ' + str(preventive_min_size_protocol) + ' not defined')
         # Children handling:
         if self.children:
             # Now set some parameters in children
@@ -921,11 +889,7 @@ class Room:
         if self._corridor_size != None:
             return self._corridor_size
         # Otherwise, find valid corridor size
-        # We can use the room minimum size by default
-        if self.min_size:
-            self._corridor_size = self.min_size
-            return self._corridor_size
-        # If the minimum size is missing we can use the parent corridor size
+        # Try to inherit the parent corridor size
         if self.parent:
             self._corridor_size = self.parent.corridor_size
             return self._corridor_size
@@ -934,14 +898,9 @@ class Room:
             self._corridor_size = self.parent_building.room_args.get('corridor_size', None)
             if self._corridor_size != None:
                 return self._corridor_size
-        # If we can not inherit the values then we have to guess a reasonable value
-        # Use the root minimum size as corridor size
-        root_min_size = self.get_root_min_size()
-        if root_min_size:
-            self._corridor_size = root_min_size
-            return self._corridor_size
-        # If we could not find a valid corridor size at this point the we complain
-        raise InputError('Cannot guess the corridor size. Please set a minimum size or provide explicit "corridor_size" in the room.')
+        # Otherwise, rely in the minimum size
+        self._corridor_size = self.min_size
+        return self._corridor_size
 
     # Set the corridor size (regular setter)
     def set_corridor_size (self, new_corridor_size : number):
@@ -966,6 +925,22 @@ class Room:
     # Free space grid (read only)
     corridor_grid = property(get_corridor_grid, set_corridor_grid, None, "The room corridor space grid")
 
+    # Get the minimum size (read only)
+    def get_min_size (self) -> number:
+        # If we have a stored value already then return it
+        if self._min_size:
+            return self._min_size
+        # Get the parent minimum size
+        if self.parent:
+            self._min_size = self.parent.min_size
+            return self._min_size
+        # If we are the root but we are part of a building then get the minimum size from the room args
+        if self.parent_building:
+            self._min_size = self.parent_building.room_args.get('min_size', None)
+            return self._min_size
+        raise InputError('Cannot find minimum size for room ' + self.name + '. Please, set the minimum size in the root room or the buildings room args')
+    min_size = property(get_min_size, None, None, "The room minimum space")
+
     # Get the maximum size (read only)
     def get_max_size (self) -> number:
         # If we have a stored value already then return it
@@ -973,9 +948,9 @@ class Room:
             return self._max_size
         # Calculate the maximum size: the maximum possible size in case the boundary was the thinest rectangle
         # Then save it and return it
-        if not self.preventive_min_size:
+        if not self.min_size:
             return inf
-        self._max_size = self.target_area / self.preventive_min_size
+        self._max_size = self.target_area / self.min_size
         return self._max_size
     max_size = property(get_max_size, None, None, "The room maximum space")
 
@@ -1084,6 +1059,9 @@ class Room:
             if not room.boundary:
                 if not self.set_child_room_boundary(room):
                     raise SystemExit('Child ' + room.name + ' has failed to be set')
+
+        # Reshaped children boundaries to reduce unnecessary corners as well
+        self.reduce_children_corners()
 
         # Now that all children bondaries are set we must set the corridor
 
@@ -1392,7 +1370,7 @@ class Room:
     # Set the initial room boundary as the minimum possible rectangle
     # This is used when the initial boundary must be forced over other children rooms
     def build_minimum_initial_boundary (self, corner : Point, space : Rect) -> Boundary:
-        minimum_rect = Rect.from_corner(corner, self.preventive_min_size, self.preventive_min_size)
+        minimum_rect = Rect.from_corner(corner, self.min_size, self.min_size)
         return Boundary(Polygon.from_rect(minimum_rect))
 
     # Using all boundaries, calculate which segments make the shortest path to connect parent doors and all children rooms
@@ -1891,7 +1869,7 @@ class Room:
         # Set a function to generate the corridor boundary
         # This process is wrapped in a function because we may have to change the corridor and redo the boundary further
         # e.g. a door can not be relocated in the boundary so it must be relocated now and the corridor will change
-        def generate_corridor_grid () -> Grid:
+        def make_corridor_grid () -> Grid:
             corridor = current_corridor
             # Now we must substract segments in the free space (fake corridors)
             if functional_corridor_grid:
@@ -1904,43 +1882,33 @@ class Room:
                 # Check that there is just one node, as expected
                 if len(current_corridor_nodes) != 1:
                     raise SystemExit('There is something very wrong with the corridor backbone')
-                corridor_boundaries = [ generate_point_boundary(current_corridor_nodes[0], corridor_size) ]
+                corridor_grid = Grid([ generate_point_rect(current_corridor_nodes[0], corridor_size) ])
             else:
                 # Generate a boundary around the current corridor path
-                corridor_boundaries = generate_path_boundaries(corridor, corridor_size)
-            corridor_boundary_segments = sum([ boundary.segments for boundary in corridor_boundaries ], [])
-            # Display the corridor boundary
-            elements_to_display = [ segment.get_colored_segment('blue') for segment in corridor_boundary_segments ]
-            self.update_display(extra=elements_to_display, title='Displaying corridor boundary sketch')
-
-            # Define the primal corridor grid
-            current_grid = self.grid if self.grid else exterior_polygon.grid
-            corridor_boundary_grids = [ boundary.grid for boundary in corridor_boundaries ]
-            # if self.free_grid:
-            #     corridor_boundary_grids.append(self.free_grid)
-            corridor_grid = merge_grids(corridor_boundary_grids)
+                corridor_grid = get_path_margined_grid(corridor, corridor_size)
+            # Display the very first corridor boundary
+            elements_to_display = corridor_grid.get_perimeter_segments('blue')
+            self.update_display(extra=elements_to_display, title='Displaying first corridor boundary')
 
             # Set the regions of the corridor which must be removed
             # e.g. regions out of the parent boundary, in case it is not adaptable
             # e.g. regions over rigid rooms which must not be modified
-            excluding_regions = None
+            excluding_regions = Grid()
 
             # Find the regions of the corridor which are out of the parent (self)
+            current_grid = self.grid if self.grid else exterior_polygon.grid
             out_regions = corridor_grid - current_grid
 
             # In case we have out regions...
             if out_regions and not self._child_adaptable_boundary:
-                excluding_regions = out_regions
+                excluding_regions += out_regions
 
             # Check also if the corridor overlaps with rigid rooms (rooms which must not be modified)
             rigid_regions = rigid_grid.get_overlap_grid(corridor_grid) if rigid_grid else None
 
             # In case we have rigid regions we must exclude them
             if rigid_regions:
-                if excluding_regions:
-                    excluding_regions += rigid_regions
-                else:
-                    excluding_regions = rigid_regions
+                excluding_regions += rigid_regions
 
             # If there are not excluding regions (not the usual case) then we are done
             if not excluding_regions:
@@ -1964,19 +1932,13 @@ class Room:
 
             # And now we must expand the corridor regions where we substracted the excluding regions
             # Otherwise the corridor would have regions which do not respect the minimum size
-            for excluding_region_boundary in excluding_regions.boundaries:
-                corridor_boundary = corridor_grid.boundaries[0]
-                # DEPRECATED
-                # The region to be expanded is deducted from the segments in the excluding region boundary which overlap the already corridor boundary
-                # excluded_reference_segments = excluding_region_boundary.get_boundary_overlap_segments(corridor_boundary)
+            for corridor_boundary in corridor_grid.boundaries:
                 # IMPORTANT: Use the overlap with the path segments instead of the excluding region boundary segments
                 # IMPORTANT: Otherwise, we may expand the corridor over unnecessary space. See figure 7
                 # The region to be expanded is deducted from the segments in the path which overlap the already truncated corridor boundary
                 excluded_reference_segments = corridor_boundary.get_segments_overlap_segments(current_corridor)
-
                 # Get the corridor exterior polygon
                 corridor_polygon = corridor_boundary.exterior_polygon
-
                 # Once we have these segments we must "project" a corridor from them
                 # This is like creating a corridor along the exterior polygon, which is fully inside of the polygon
                 def all_inside (segment : Segment, direction : Vector) -> number:
@@ -1989,18 +1951,19 @@ class Room:
                         return corridor_size
                     # For the outside
                     return 0
-                # elements_to_display = [ segment.get_colored_segment('green') for segment in excluded_reference_segments ]
-                # self.update_display(extra=elements_to_display, title='Debug 1')
-                extension_boundaries = generate_path_boundaries(excluded_reference_segments, all_inside)
-                # the_segments = sum([boundary.segments for boundary in extension_boundaries], [])
-                # elements_to_display = [ segment.get_colored_segment('green') for segment in the_segments ]
-                # self.update_display(extra=elements_to_display, title='Debug 1')
+                # Display the segments used as reference for the excluded region
+                elements_to_display = [ segment.get_colored_segment('green') for segment in excluded_reference_segments ]
+                self.update_display(extra = elements_to_display, title = 'DEBUG: Excluded reference segments')
+                # Generate the extension boundary from the excluded reference segments
+                extension_grid = get_path_margined_grid(excluded_reference_segments, all_inside)
+                # Display the segments used as reference for the excluded region
+                elements_to_display = extension_grid.get_perimeter_segments('purple')
+                self.update_display(extra = elements_to_display, title = 'DEBUG: Extension segments')
                 # elements_to_display = [ segment.get_colored_segment('purple') for segment in extension_boundaries[0].segments ]
                 # self.update_display(extra=elements_to_display, title='Debug 2')
-                # Now add the extended boundary to the corridor boundary
+                # Now add the extended grid to the corridor grid
                 # Note that both grids will always overlap
-                for boundary in extension_boundaries:
-                    corridor_grid += boundary.grid
+                corridor_grid += extension_grid
 
             # Display the corridor boundaries
             corridor_boundaries = corridor_grid.boundaries
@@ -2018,6 +1981,10 @@ class Room:
                 elements_to_display = [ segment.get_colored_segment('blue') for segment in corridor_boundary_segments ]
                 self.update_display(extra=elements_to_display, title='Displaying corridor boundaries after adding back the parent free space')
 
+            # Check we have only one boundary at this point
+            if len(corridor_grid.boundaries) > 1:
+                raise ValueError('We have a splitted corridor')
+
             # Remove regions from the corridor grid which are not respecting the minimum size
             # This may happen in some scenarios but there should be no problem in removing them. See figure 8
             corridor_grid = corridor_grid.keep_minimum(self.corridor_size)
@@ -2033,10 +2000,10 @@ class Room:
             corridor_boundaries = self.corridor_grid.boundaries
             corridor_boundary_segments = sum([ boundary.segments for boundary in corridor_boundaries ], [])
             elements_to_display = [ segment.get_colored_segment('blue') for segment in corridor_boundary_segments ]
-            self.update_display(extra=elements_to_display, title='Displaying corridor boundaries after removing regions not respecting minimum size')
+            self.update_display(extra=elements_to_display, title='Displaying corridor boundaries after removing regions not respecting the corridor minimum size')
 
         # Run the function above to generate the corridor
-        generate_corridor_grid()
+        make_corridor_grid()
 
         # At this point there must be a corridor grid
         if not self.corridor_grid:
@@ -2071,7 +2038,7 @@ class Room:
                 # Set a function to expand the corridor in reference to a given segment
                 # The expansion segment is a segment in contact with the corridor
                 def expand_corridor (expansion_segment : Segment) -> bool:
-                    #print('EXPANDING CORRIDOR FOR ' + door.room.name)
+                    #print('EXPANDING CORRIDOR FOR ' + door.room.name + ' -> ' + str(expansion_segment))
                     nonlocal door_polygon
                     # Get a perpendicular segment as long as the corridor size and pointing inside the corridor (outside the door room)
                     # Do not rely on the other corner segment. In a diagonal supported scenario it may not be perpendicular
@@ -2082,7 +2049,10 @@ class Room:
                             corridor_reference_segment = segment
                             break
                     if not corridor_reference_segment:
-                        raise ValueError('Can not find the reference segment to expand corridor')
+                        elements_to_display = [ s.get_colored_segment('blue') for s in corridor_polygon.segments ]
+                        elements_to_display.append(expansion_segment.get_colored_segment('red'))
+                        add_frame(elements_to_display, 'DEBUG')
+                        raise ValueError('Cannot find the reference segment to expand corridor')
                     corridor_inside_direction = corridor_polygon.get_border_inside(corridor_reference_segment)
                     reference_point = expansion_segment.points[0] # Just any point in the segment
                     perpendicular_point = reference_point + corridor_inside_direction * corridor_size
@@ -2163,7 +2133,7 @@ class Room:
                                     corridor_reference_segment = segment
                                     break
                             if not corridor_reference_segment:
-                                raise ValueError('Can not find the reference segment to expand room')
+                                raise ValueError('Cannot find the reference segment to expand room')
                             if corridor_reference_segment.length < door.margined_width:
                                 return False
                             # Now find in which direction we must expand this segment to do not get outside the corridor
@@ -2758,14 +2728,6 @@ class Room:
             return 0
         return min(all_min_sizes)
 
-    # Get the minimum of all minimum sizes
-    # Get to the the root and the check all children min sizes recuersively in order to get the minimum
-    # This function is meant to be used only once by the root, so its value is not stored
-    # WARNING: 0 values are removed
-    def get_root_min_size (self) -> number:
-        root = self.get_root_room()
-        return root.get_min_size_recursive()
-
     # Get the minimum size of this room and its children recurisvely
     # Return the lowest minimum size
     def get_min_size_recursive (self) -> number:
@@ -2907,7 +2869,7 @@ class Room:
         # As an exception, short frontiers connected to at least 1 inside corner may be expanded
         # However these frontiers will have a push length limit
         def is_suitable (frontier : Segment) -> bool:
-            return frontier.length >= self.preventive_min_size or frontier.a in inside_corners or frontier.b in inside_corners
+            return frontier.length >= self.min_size or frontier.a in inside_corners or frontier.b in inside_corners
 
         # Short frontiers could be also expanded together with other connected and aligned frontiers
         # These compound frontiers must be taken in count also although they are harder to expand
@@ -2919,7 +2881,7 @@ class Room:
                 implicated_rooms = frontier.rooms
                 next_point = point
                 # Join connected frontiers until we have enough length or the next frontier is not aligned
-                while combined_frontier.length < self.preventive_min_size:
+                while combined_frontier.length < self.min_size:
                     # Find the next connected frontier
                     # There may be no next connected frontier if next would be a parent frontier
                     connected_frontier = next((seg for seg in other_frontiers if seg.has_point(next_point)), None)
@@ -2932,14 +2894,14 @@ class Room:
                     implicated_rooms += connected_frontier.rooms
                     next_point = next(p for p in connected_frontier.points if p != next_point)
                 # If the combined frontier reaches the minimum length add it to the list to be returned
-                if combined_frontier.length >= self.preventive_min_size:
+                if combined_frontier.length >= self.min_size:
                     # Get unique implicated rooms
                     implicated_rooms = unique(implicated_rooms)
                     # Create a fit combined frontier which takes the minimum possible part from the last added frontier
                     # This way the expansion takes as much possible from the main frontier room
                     extended_direction = (point + next_point).normalized()
                     oposite_point = next(p for p in frontier.points if p != point)
-                    fit_combined_frontier = Segment(oposite_point, oposite_point + extended_direction * self.preventive_min_size)
+                    fit_combined_frontier = Segment(oposite_point, oposite_point + extended_direction * self.min_size)
                     # Add all combined frontier rooms to the fit combined frontier
                     fit_combined_frontier.rooms = implicated_rooms
                     yield fit_combined_frontier
@@ -3144,7 +3106,7 @@ class Room:
         new_exterior_polygon = Polygon.non_canonical([ *added_segments, *remaining_segments ])
         new_boundary = Boundary(new_exterior_polygon, self.boundary.interior_polygons)
         # Check that the new boundary is respecting the minimum size
-        if not new_boundary.grid.check_minimum(self.preventive_min_size):
+        if not new_boundary.grid.check_minimum(self.min_size):
             return False
         # In case the boundary is extended over another room,
         # We must substract the claimed rect from the other room and make it expand to compensate
@@ -3282,15 +3244,15 @@ class Room:
             if push_length < minimum_resolution:
                 print('WARNING: The push length is too small for segment ' + str(pushed_segment))
                 new_point_a = pushed_segment.a
-                new_point_b = pushed_segment.a + pushed_segment.direction * self.preventive_min_size
+                new_point_b = pushed_segment.a + pushed_segment.direction * self.min_size
                 pushed_segment = Segment(new_point_a, new_point_b)
                 print('WARNING: segment has been reduced to ' + str(pushed_segment))
-                push_length = required_area / self.preventive_min_size
+                push_length = required_area / self.min_size
             # In case this is an insider segment which is not wide enought to be pushed alone,
             # Find out how much we can push this segment
             # i.e. find the connected frontier/s and get the maximum length of these segments
             corner_push_limit = None
-            if lower(pushed_segment.length, self.preventive_min_size):
+            if lower(pushed_segment.length, self.min_size):
                 other_segments = [ segment for segment in exterior_polygon.segments if pushed_segment not in segment]
                 for point in pushed_segment.points:
                     if point in inside_corners:
@@ -3452,7 +3414,7 @@ class Room:
             if new_point not in reduced_frontier:
                 print('WARNING: The frontier has been fully consumed')
                 return False
-            if new_point.get_distance_to(other_point) < self.preventive_min_size:
+            if new_point.get_distance_to(other_point) < self.min_size:
                 print('WARNING: The reduced frontier is not wide enought')
                 return False
             reduced_frontier = Segment(new_point, other_point)
@@ -3506,7 +3468,7 @@ class Room:
             raise RuntimeError('Frontier ' + str(frontier) + ' has no space in ' + str(rects))
         space_contact = next(segment for segment in space.segments if frontier in segment)
         space_forward_limit = space.get_size()[forward]
-        margin_limit = self.preventive_min_size
+        margin_limit = self.min_size
         margined_space_forward_limit = space_forward_limit - margin_limit
 
         # Find the direction of the expansion as a vector
@@ -3617,7 +3579,7 @@ class Room:
             if new_point not in reduced_frontier:
                 print('WARNING: The frontier has been fully consumed')
                 return False
-            if new_point.get_distance_to(other_point) < self.preventive_min_size:
+            if new_point.get_distance_to(other_point) < self.min_size:
                 print('WARNING: The reduced frontier is not wide enought')
                 return False
             reduced_frontier = Segment(new_point, other_point)
@@ -3731,7 +3693,7 @@ class Room:
             truncated_grid = safe_grid
         # If the grid has been fully consumed then give up
         if not truncated_grid:
-            raise RuntimeError('We fully removed a whole room by force-truncating')
+            raise RuntimeError('We fully removed a whole room (' + self.name + ') by force-truncating')
         truncated_boundaries = truncated_grid.find_boundaries()
         # In case the room has been splitted in 2 parts as a result of the invasion we go back
         if not force and len(truncated_boundaries) > 1:
@@ -3753,10 +3715,10 @@ class Room:
         # Set the truncated grid as the current grid
         self.set_grid(truncated_grid, skip_update_display=True)
         # Check the truncated grid to still respecting the minimum size
-        if not self.grid.check_minimum(self.preventive_min_size):
+        if not self.grid.check_minimum(self.min_size):
             #print('WARNING: The room is not respecting the minimum size -> Go back')
             # If not then try to expand the truncated room accordingly to the truncated region to make it respect the minimum
-            compensation_grid = self.grid.get_compensation_grid(region, self.preventive_min_size)
+            compensation_grid = self.grid.get_compensation_grid(region, self.min_size)
             if not self.expand_grid(compensation_grid):
                 self.set_grid(backup, skip_update_display=True)
                 return False
@@ -3831,7 +3793,7 @@ class Room:
         # Create a new grid by mergin the current and the expansion grid
         new_grid = self.grid.get_merge_grid(expansion_grid, check_overlaps=check_overlaps)
         # In case there is a minimum size restriction check that the colliding segment is as long as required
-        if not new_grid.check_minimum(self.preventive_min_size):
+        if not new_grid.check_minimum(self.min_size):
             #raise ValueError('Some colliding region is not wide enough')
             return False
         # Make a backup of the current grid
@@ -4408,24 +4370,29 @@ class Building:
             for floor_number_a, floor_number_b in pairwise(floor_indices):
                 default_stairs = Stairs(parent_building=self, lower_floor_number=floor_number_a, upper_floor_number=floor_number_b)
                 self.stairs.append(default_stairs)
-        # Calcualte the overall min size which may be useful to set some default values
-        floor_min_sizes = [ floor.get_min_size_recursive() for floor in self.floors.values() ]
-        overall_min_size = min(floor_min_sizes)
-        if not overall_min_size:
-            raise InputError('Cannot guess the overall minimum size. Please set a minimum size somewhere')
         # Set the room args
         self.room_args = room_args if room_args else {}
         # Complete the missing values with some default values
         # If the height is not passed try to guess a reasonable height
         if room_args.get('height', None) == None:
             # DANI: Ya pensaré algo un poco más elaborado
-            room_args['height'] = 20
+            self.room_args['height'] = 30
+        # If minimum size is not passed then guess a reasonable value as well
+        if room_args.get('min_size', None) == None:
+            # DANI: Lo mismo
+            self.room_args['min_size'] = 10
+        # Calcualte the overall min size which may be useful to set some default values
+        floor_min_sizes = [ floor.get_min_size_recursive() for floor in self.floors.values() ]
+        overall_min_size = min(floor_min_sizes)
+        if not overall_min_size:
+            raise InputError('Cannot guess the overall minimum size. Please set a minimum size somewhere')
         # If the corridor size is missing guess a resonable size from the overall minimum size
         # Note that making the corridor slightly thiner than the min size makes things easier specially in upper floors
         # This avoids the inherited corridor regions between rigid boundaries to be filled by a room
         # This is not a "problem", but depending on the configuration the result may be "not elegant"
         if room_args.get('corridor_size', None) == None:
-            room_args['corridor_size'] = overall_min_size * 0.9 # DANI: No me, lo suyo es que mida lo mismo el pasillo
+            # DANI: No me, lo suyo es que mida lo mismo el pasillo
+            self.room_args['corridor_size'] = overall_min_size * 0.9
         # If the door args are missing guess resonable values from the corridor size
         if room_args.get('door_args', None) == None:
             # Make the margined width of all doors equal to the corridor size
@@ -4434,7 +4401,7 @@ class Building:
             width = margined_width * 0.8
             margin = margined_width * 0.1
             length = margined_width
-            room_args['door_args'] = {
+            self.room_args['door_args'] = {
                 'width': width,
                 'margin': margin,
                 'length' : length

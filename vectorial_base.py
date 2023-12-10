@@ -110,8 +110,8 @@ class Vector:
 
     def __init__(self, x : number, y : number):
         # Save the coordinates as the whole float
-        self.x = x
-        self.y = y
+        self.x = resolute(x)
+        self.y = resolute(y)
 
     # Set the vector from a slope
     # If slope is None a vertical vector is returned
@@ -180,30 +180,30 @@ class Vector:
 
     __rtruediv__ = __truediv__
 
-    def get_magnitude(self) -> number:
+    def get_magnitude (self) -> number:
         return sqrt( self.x**2 + self.y**2 )
 
-    def get_slope(self) -> Optional[number]:
+    def get_slope (self) -> Optional[number]:
         if same_number(self.x, 0):
             return None
         return self.y / self.x
 
     # Return a new vector with identical direction and sense but magnitude = 1
-    def normalized(self) -> 'Vector':
+    def normalized (self) -> 'Vector':
         magnitude = self.get_magnitude()
         if magnitude == 0:
             raise ValueError('Can not normalize Vector(0,0)')
         return self / magnitude
 
     # Find out if the vector is totally vertical
-    def is_vertical(self) -> bool:
+    def is_vertical (self) -> bool:
         return same_number(self.x, 0)
     # Find out if the segment is totally horizontal
-    def is_horizontal(self) -> bool:
+    def is_horizontal (self) -> bool:
         return same_number(self.y, 0)
 
     # Find out if the segment is diagonal
-    def is_diagonal(self) -> bool:
+    def is_diagonal (self) -> bool:
         return not self.is_vertical() and not self.is_horizontal()
 
     # Find out if two vectors are equivalent
@@ -788,10 +788,10 @@ class Corner(Point):
 class Rect:
 
     def __init__(self, x_min : number, y_min : number, x_max : number, y_max : number, segments_color : str = 'black', fill_color : str = 'white'):
-        self.x_min = x_min
-        self.y_min = y_min
-        self.x_max = x_max
-        self.y_max = y_max
+        self.x_min = resolute(x_min)
+        self.y_min = resolute(y_min)
+        self.x_max = resolute(x_max)
+        self.y_max = resolute(y_max)
         self.x = (x_min, x_max)
         self.y = (y_min, y_max)
         self.x_size, self.y_size = self.get_size()
@@ -805,7 +805,7 @@ class Rect:
     # Set the rect from segments
     # The new rect will contain all segments
     @classmethod
-    def from_segments(cls, segments : List[Segment], segments_color : str = 'black', fill_color : str = 'white'):
+    def from_segments (cls, segments : List[Segment], segments_color : str = 'black', fill_color : str = 'white'):
         # Get all segment points and find the minimum and maximum x and y values of all those points
         points = [ point for segment in segments for point in (segment.a, segment.b) ]
         x_coords = [ point.x for point in points ]
@@ -824,7 +824,7 @@ class Rect:
     # Optionally you can ask for specific x and y sizes
     # If no size is passed then the size of the original corner segment is used
     @classmethod
-    def from_corner(cls, corner : Corner, x_size = None, y_size = None, segments_color : str = 'black', fill_color : str = 'white'):
+    def from_corner (cls, corner : Corner, x_size = None, y_size = None, segments_color : str = 'black', fill_color : str = 'white'):
         # Get the two segments from the corner
         segments = corner.segments
         directions = [ segment.vector.normalized() for segment in segments ]
@@ -1146,7 +1146,7 @@ class Rect:
 
 
     # Given another rectangle, it returns the overlapping region with this rectangle, if exists, as a new rectangle
-    # DANI: No lo he provado desde que lo moví de abajo
+    # DANI: Muchas funciones que usan esta no están preparadas para que el resultado no sea un rect
     def get_overlap_rect (self, rect : 'Rect', borders : bool = True) -> Optional[ Union[ 'Point', 'Rect', 'Segment'] ]:
         # Find the overlap in the 'x' dimension
         # Get the maximum of the minimums
@@ -2659,7 +2659,7 @@ class Grid:
         for max_rect, contained_rects in self.max_rects:
             # If any of the sizes is not enough to cover the size then this maximum rectangle is not respecting the limits
             max_x_size, max_y_size = max_rect.get_size()
-            if max_x_size < minimum or max_y_size < minimum:
+            if lower(max_x_size, minimum) or lower(max_y_size, minimum):
                 continue
             # Add the contained rects to the respecting rects list
             respecting_rects += contained_rects
@@ -2751,12 +2751,7 @@ class Grid:
                 # For the outside
                 return 0
             # Call the function which generates the extra space
-            extension_boundaries = generate_path_boundaries(substracted_reference_segments, all_inside)
-            # Now add the extended boundary to the original boundary
-            # Note that both grids will always overlap
-            compensated_grid = Grid()
-            for boundary in extension_boundaries:
-                compensated_grid += boundary.grid
+            compensated_grid = get_path_margined_grid(substracted_reference_segments, all_inside)
             return compensated_grid
 
     # One by one for each *available rectangle, where available rectangles are the splitted rectangles
@@ -3029,6 +3024,12 @@ class Grid:
                 for segment in overlap_segments:
                     yield segment
 
+    # Get all perimeters segments
+    # This is used for displaying reasons usually
+    def get_perimeter_segments (self, color : str = 'black') -> List[Segment]:
+        boundary_segments = sum([ boundary.segments for boundary in self.boundaries ], [])
+        return [ segment.get_colored_segment(color) for segment in boundary_segments ]
+
 
 # Auxiliar functions ---------------------------------------------------------------
 
@@ -3265,32 +3266,20 @@ def get_path_length (path : List['Segment']) -> number:
     return sum([ segment.length for segment in path ])
 
 # Generate a boundary around a point
-def generate_point_boundary (point : Point, size : number) -> Boundary:
+def generate_point_rect (point : Point, size : number) -> Rect:
     half_size = size / 2
     # Set the dimension values
-    x_rigth = point.x + half_size
-    x_left  = point.x - half_size
-    y_upper = point.y + half_size
-    y_lower = point.y - half_size
-    # Set the corners
-    upper_left  = Point(x_left,  y_upper)
-    upper_right = Point(x_rigth, y_upper)
-    lower_right = Point(x_rigth, y_lower)
-    lower_left  = Point(x_left,  y_lower)
-    # Set the segments
-    upper = Segment(upper_left,  upper_right)
-    right = Segment(upper_right, lower_right)
-    lower = Segment(lower_right, lower_left )
-    left  = Segment(lower_left,  upper_left )
-    # Set the polygon and thus the boundary
-    exterior_polygon = Polygon([ upper, right, lower, left ])
-    boundary = Boundary(exterior_polygon)
-    return boundary
+    x_min = point.x - half_size
+    x_max = point.x + half_size
+    y_min = point.y - half_size
+    y_max = point.y + half_size
+    # Set the rect and return it
+    return Rect(x_min, y_min, x_max, y_max)
 
-# Given a list of segments, set a function to generate a boundary around them
-# Size is the tickness of the new boundary
+# Given a list of segments, set a function to generate a grid around them
+# Size is the tickness of the new grid
 # Alternatively, the size may be a function whose input is a segments in the path and a direction
-def generate_path_boundaries (path : List['Segment'], size : Union[number, Callable], margined_ends : bool = False) -> List['Boundary']:
+def get_path_margined_grid (path : List['Segment'], size : Union[number, Callable], margined_ends : bool = False) -> Grid:
     # Size must be a function
     # If it is a number then convert it to a function which returns half the size number
     if not callable(size):
@@ -3298,9 +3287,7 @@ def generate_path_boundaries (path : List['Segment'], size : Union[number, Calla
         def size (segment, direction) -> number:
             return half_size
     # Generate data for each point between segments (similar to nodes) by recording the connected segments
-    # Generate data for each segment by generating 2 boundary lines
     point_connected_segments = {}
-    segment_lines = {}
     for segment in path:
         # Get the points connected segments
         points = segment.points
@@ -3310,166 +3297,87 @@ def generate_path_boundaries (path : List['Segment'], size : Union[number, Calla
                 connected_segments.append(segment)
             else:
                 point_connected_segments[point] = [segment]
-        # Set the segment boundary lines
-        # Each segment will have 2 lines: one on each side
-        # We call these sides as clockwise and counter-clockwise sides
-        # Each line will be half the size far from the segment
-        segment_direction = segment.direction
-        clockwise_direction = segment_direction.rotate(90)
-        counterclockwise_direction = segment_direction.rotate(-90)
-        clockwise_point = segment.a + clockwise_direction * size(segment, clockwise_direction)
-        counterclockwise_point = segment.a + counterclockwise_direction * size(segment, counterclockwise_direction)
-        clockwise_line = Line(clockwise_point, segment_direction)
-        counterclockwise_line = Line(counterclockwise_point, segment_direction)
-        # Save both lines in a data dictionary
-        data = { 'clockwise': clockwise_line, 'counterclockwise': counterclockwise_line }
-        # Save the data dictionary inside another dictionary where the key is the segment itself
-        segment_lines[segment] = data
-
-    # Join all segment lines together in a dictionary where lines are the keys
-    # Each line value will be a list of intersections which will be set empty at this moment
-    # At the end of the next step each line must have exactly 2 intersections
-    # Note that duplicated lines will remain as a single key
-    line_intersections = {}
-    for lines in segment_lines.values():
-        clockwise_line = lines['clockwise']
-        counterclockwise_line = lines['counterclockwise']
-        for line in [ clockwise_line, counterclockwise_line ]:
-            line_intersections[line] = []
-
-    # Now for each segment in the path get the segments of the boundary
-    # First, segments must be built by finding the intersection point between segment lines
-    boundary_segments = []
+    # For each segment in path, set the space required
+    required_spaces = {}
+    # Also capture the highest rect width according to the size function
+    highest_width = 0
+    for segment in path:
+        # Set the rect dimensions according to segment orientation and the size function
+        if segment.is_horizontal():
+            x_coords = [ point.x for point in segment.points ]
+            x_min = min(x_coords)
+            x_max = max(x_coords)
+            y_min = segment.a.y - size(segment, DOWN)
+            y_max = segment.a.y + size(segment, UP)
+            width = y_max - y_min
+        elif segment.is_vertical():
+            x_min = segment.a.x - size(segment, LEFT)
+            x_max = segment.a.x + size(segment, RIGHT)
+            width = x_max - x_min
+            y_coords = [ point.y for point in segment.points ]
+            y_min = min(y_coords)
+            y_max = max(y_coords)
+        else:
+            ValueError('Diagonal segments are not supported when creating a path margined grid')
+        # Set the actual grid and asign it to the corresponding segment
+        required_spaces[segment] = Rect(x_min, y_min, x_max, y_max)
+        # Update the highest width
+        if width > highest_width:
+            highest_width = width
+    # Now for each point, find the common space required by its connected segments
+    point_overlap_regions = []
     for point, connected_segments in point_connected_segments.items():
+        # Set a function to get the expansion rect from a connected segment with an specific size
+        def get_connected_segment_expansion_rect (segment : Segment, expansion_size : number = highest_width) -> Rect:
+            # Find the segment to expand the rectangle over it
+            other_point = next(p for p in segment.points if p != point)
+            expansion_direction = (other_point + point).normalized()
+            expansion_segment = Segment(point, point + expansion_direction * expansion_size)
+            # Get any of the perpendicular segments from the segment rect
+            segment_rect = required_spaces[segment]
+            perpendicular_direction = next(expansion_direction.get_perpendicular_vectors())
+            perpendicular_segment = next(s for s in segment_rect.segments if s.is_paralel_to(perpendicular_direction))
+            # Set the expansion rect and add it to the required spaces dict
+            return Rect.from_segments([expansion_segment, perpendicular_segment])
         # In case we have only 1 connected segment it means this is a death end of the path
-        # In this case we generate a new segment perpendicular to the only segment and which crosses the point itself*
-        # *WARNING: If the segment is shorter than the size then we push the new line/segment to compensate the difference
-        # WARNING: If not done, unreachable areas would appear. See figure 4
-        # This segment will be generated from a line which intersects both of the boundary lines in the only segment
         if len(connected_segments) == 1:
-            segment = connected_segments[0]
-            # Using the current point as the reference point of view
-            is_segment_pointing_outside = point == segment.a
-            lines = segment_lines[segment]
-            clockwise_line = lines['clockwise'] if is_segment_pointing_outside else lines['counterclockwise']
-            counterclockwise_line = lines['counterclockwise'] if is_segment_pointing_outside else lines['clockwise']
-            perpendicular_vector = clockwise_line.vector.rotate(90)
-            # Calculate the size required
-            # DANI: Hay una situación (aunque rebuscada) en que se añade espacio extra cuando no se debería
-            # DANI: Vease figura 6
-            current_size = size(segment, segment.direction)
-            size_difference = current_size - segment.length
-            # Push the segment point in case the segment is to short to fill the size
-            if margined_ends:
-                push_direction = -segment.direction if is_segment_pointing_outside else segment.direction
-                pushed_point = point + push_direction * current_size
-                perpendicular_line = Line(pushed_point, perpendicular_vector)
-            elif size_difference > 0:
-                push_direction = -segment.direction if is_segment_pointing_outside else segment.direction
-                pushed_point = point + push_direction * size_difference
-                perpendicular_line = Line(pushed_point, perpendicular_vector)
-            else:
-                perpendicular_line = Line(point, perpendicular_vector)
-            clockwise_line_intersection = clockwise_line.get_line_intersection_point(perpendicular_line)
-            counterclockwise_line_intersection = counterclockwise_line.get_line_intersection_point(perpendicular_line)
-            line_intersections[clockwise_line].append((clockwise_line_intersection, segment))
-            line_intersections[counterclockwise_line].append((counterclockwise_line_intersection, segment))
-            new_segment = Segment(clockwise_line_intersection, counterclockwise_line_intersection)
-            boundary_segments.append(new_segment)
+            # If the margined ends is passed as false then we are done
+            if not margined_ends:
+                continue
+            # Otherwise we expect the size function to be prepared for this scenario
+            # i.e. to return a valid result when the direction is paralel to the input segment
+            only_segment = connected_segments[0]
+            actual_size = size(only_segment, only_segment.direction)
+            expansion_rect = get_connected_segment_expansion_rect(only_segment, actual_size)
+            required_spaces[point] = Grid([expansion_rect])
             continue
-
-        # Using the current point as the reference point of view:
-        # Sort segments according to their order around the point
-        reference_vector = Vector(0,1) # This could be any vector
-        def get_reference_angle (segment : 'Segment') -> number:
-            pointing_outside_vector = segment.vector if point == segment.a else -segment.vector
-            return reference_vector.get_angle_with(pointing_outside_vector)
-        sorted_connected_segments = sorted(connected_segments, key=get_reference_angle)
-        # print('SORTED ' + str(point))
-        # print([ segment.vector for segment in sorted_connected_segments ])
-        # For each pair of segments, there is a pair of boundary lines (one from each segment) which must intersect
-        # As an exception, if segments are paralel, we must check if lines are the same line
-        # In this case there the intersection point will be the middle point (bot segments will be merged further)
-        # Otherwise, we will have to add a perpendicular segment to intercept both lines to close the boundary at some point
-        for current, nextone in pairwise(sorted_connected_segments, retro=True):
-            # Using the current point as the reference point of view:
-            # Get the intersection point between the line in the clockwise side of the current segment and
-            #   the line in the counterclockwise side of the next one
-            is_current_pointing_outside = point == current.a
-            current_side = 'clockwise' if is_current_pointing_outside else 'counterclockwise'
-            current_lines = segment_lines[current]
-            current_clockwise_line = current_lines[current_side]
-            is_nextone_pointing_outside = point == nextone.a
-            nextone_side = 'counterclockwise' if is_nextone_pointing_outside else 'clockwise'
-            nextone_lines = segment_lines[nextone]
-            nextone_counterclockwise_line = nextone_lines[nextone_side]
-            intersection = current_clockwise_line.get_line_intersection_point(nextone_counterclockwise_line)
-            # If there is an intersection then save this point as an intersection for both lines
-            if intersection:
-                line_intersections[current_clockwise_line].append((intersection, current))
-                line_intersections[nextone_counterclockwise_line].append((intersection, nextone))
-            # If there is no intersection it means lines are paralel
-            else:
-                # If they are the same line then there is no intersection at this point
-                if current_clockwise_line == nextone_counterclockwise_line:
-                    continue
-                # Otherwise, generate a new paralel segment which cuts both lines thus closing the boundary
-                perpendicular_vector = current_clockwise_line.vector.rotate(90)
-                # Find which line is closer to the point and find if this line 
-                current_line_distance = current_clockwise_line.get_distance_to(point)
-                nextone_line_distance = nextone_counterclockwise_line.get_distance_to(point)
-                current_is_closer = current_line_distance < nextone_line_distance
-                closer_line = current_clockwise_line if current_is_closer else nextone_counterclockwise_line
-                # If the line is intersecting with the point itself then the new segment must start at the point itself
-                # (Note that we are in a corner of the parent exterior boundary)
-                if point in closer_line:
-                    new_line = Line(point, perpendicular_vector)
-                # Otherwise, the new line must be pushed in one direction in order to make space for the boundary
-                # The direction of the push must be through where is the segment whom the closer line comes from
-                else:
-                    if current_is_closer:
-                        offset_direction = current.direction
-                        if not is_current_pointing_outside:
-                            offset_direction = -offset_direction
-                    else:
-                        offset_direction = nextone.direction
-                        if not is_nextone_pointing_outside:
-                            offset_direction = -offset_direction
-                    offset = offset_direction * size
-                    offset_point = point + offset
-                    new_line = Line(offset_point, perpendicular_vector)
-                # Find the intersection points with each line and create a new segment from both interactions
-                current_line_intersection = current_clockwise_line.get_line_intersection_point(new_line)
-                nextone_line_intersection = nextone_counterclockwise_line.get_line_intersection_point(new_line)
-                line_intersections[current_clockwise_line].append((current_line_intersection, current))
-                line_intersections[nextone_counterclockwise_line].append((nextone_line_intersection, nextone))
-                new_segment = Segment(current_line_intersection, nextone_line_intersection)
-                boundary_segments.append(new_segment)
-
-    # Build segments out of all found intersection points
-    for line, intersections in line_intersections.items():
-        # It may happen in a few ocassions that a line has more than 2 intersections (e.g. 4)
-        # This happens when boundaries overlap in a 'U' shaped path
-        # It also may happen in two segments in the same line separated in a 'T' shaped path
-        # Sort the intersection points and the build segments by pairs of points
-        # First of all check intersections to be even and remove duplicates (all duplicates)
-        intersection_points = [ intersection[0] for intersection in intersections ]
-        if len(intersection_points) % 2 != 0:
-            print('Line ' + str(line) + ' from the original segment ' + str(original_segment))
-            raise ValueError('The number of intersection points in the line is not even: ' + str(intersection_points))
-        duplicated_points = list(set([ point for point in intersection_points if intersection_points.count(point) > 1 ]))
-        unique_points = [ point for point in intersection_points if point not in duplicated_points ]
-        sorted_points = sort_points(unique_points)
-        for a, b in pairwise(sorted_points, loyals=True):
-            new_segment = Segment(a, b)
-            boundary_segments.append(new_segment)
-
-    # Generate a boundary from the previous segments
-    # DANI: Con la implementación actual debería haber siempre un único polígono
-    # DANI: Es posible que esto cambie en el futuro
-    polygons = list(connect_segments(boundary_segments))
-    path_boundaries = connect_polygons(polygons)
-    return path_boundaries
+        # Expand each segment space towards the connecting point and keep the overlap
+        # The expansion should be as much as needed, so we will expand as much as the highest width
+        # First calculate the expansions
+        segment_expansion_rects = []
+        for connected_segment in connected_segments:
+            expansion_rect = get_connected_segment_expansion_rect(connected_segment)
+            segment_expansion_rects.append(expansion_rect)
+        # Calculate the different overlaps and merge them
+        required_space = Grid()
+        for space_a, space_b in pairwise(segment_expansion_rects):
+            overlap = space_a.get_overlap_rect(space_b)
+            # We may have segment or point overlaps, but this means there is no area overlap so we skip them
+            if type(overlap) != Rect:
+                continue
+            required_space += Grid([overlap])
+        # Update the point required space
+        required_spaces[point] = required_space
+    # Join all required spaces
+    grid = Grid()
+    for space in required_spaces.values():
+        # Segment spaces are rects
+        if type(space) == Rect:
+            grid += Grid([space])
+        # Point spaces are grids already
+        else:
+            grid += space
+    return grid
 
 # Target corners here would be inside corners which are connected to outside corners
 # Each pairs of corners makes what could be called "zigzag"
@@ -3643,9 +3551,10 @@ def generate_random_polygon (
         bones.append(suitable_bone)
     # Use this to see the backbone
     # add_frame(bones, title='Random polygon generator: backbone')
-    # Now that we have the backbone we can generate the bondary around it
-    boundaries = generate_path_boundaries(bones, size=width, margined_ends=True)
+    # Now that we have the backbone we can generate the boundary around it
+    grid = get_path_margined_grid(bones, size=width, margined_ends=True)
     # Since bones are all connected there should be only one boundary
+    boundaries = grid.boundaries
     if len(boundaries) > 1:
         raise ValueError('There is more than 1 boundary')
     boundary = boundaries[0]
@@ -3659,6 +3568,8 @@ def generate_random_polygon (
     # Check the polygon is respecting the restrictions
     polygon_area = polygon.area
     if not equal(polygon_area, area):
+        elements_to_display = grid.get_perimeter_segments('blue') + [ segment.get_colored_segment('green') for segment in bones ]
+        add_frame(elements_to_display, 'DEBUG')
         raise ValueError('The final polygon area (' + str(polygon_area) + ') is not respecting the input area (' + str(area) + ')')
     polygon_corners = len(polygon.corners)
     if polygon_corners != corners:
