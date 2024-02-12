@@ -1,4 +1,4 @@
-from typing import Union, Optional, List, Tuple, Generator, Callable
+from typing import Union, Optional, List, Set, Tuple, Generator, Callable
 
 from scheme_display import add_frame
 
@@ -696,6 +696,13 @@ class Segment(Line):
         new_a = self.a + self.direction * margin
         new_b = self.b - self.direction * margin
         return Segment(new_a, new_b)
+
+    # Get a segment starting from a side of the segment to some length
+    def get_side_segment (self, side : Point, length : number) -> 'Segment':
+        other_point = self.get_other_point(side)
+        direction = (side + other_point).normalized()
+        other_side = side + direction * length
+        return Segment(side, other_side)
 
     # Get a segment after translating the current segment
     def translate (self, direction : 'Vector') -> 'Segment':
@@ -2179,23 +2186,23 @@ class Grid:
         self._area = None
         self._boundaries = None
 
-    def __str__(self):
+    def __str__ (self) -> str:
         return '<Grid ' + str(self.rects) + '>'
 
-    def __repr__(self):
+    def __repr__ (self) -> str:
         return '<Grid ' + str(self.rects) + '>'
 
-    def __bool__(self):
+    def __bool__ (self) -> bool:
         return len(self._rects) > 0
 
     # Two grids are equal if they match in their rects
-    def __eq__ (self, other):
+    def __eq__ (self, other) -> bool:
         if not isinstance(other, self.__class__):
             return False
         return set(self.rects) == set(other.rects)
 
 
-    def __contains__(self, other):
+    def __contains__ (self, other) -> bool:
         if isinstance(other, Point):
             for rect in self.rects:
                 if other in rect:
@@ -2215,10 +2222,10 @@ class Grid:
             return all([ boundary in self for boundary in other.boundaries ])
         return False
 
-    def __add__(self, other : 'Grid') -> 'Grid':
+    def __add__ (self, other : 'Grid') -> 'Grid':
         return self.get_merge_grid(other)
 
-    def __sub__(self, other : 'Grid') -> 'Grid':
+    def __sub__ (self, other : 'Grid') -> 'Grid':
         return self.get_substract_grid(other)
 
     # Check for each corner on each rect that, if it is inside any other rect, it is also a corner in this rect
@@ -2751,7 +2758,8 @@ class Grid:
                 # For the outside
                 return 0
             # Call the function which generates the extra space
-            compensated_grid = get_path_margined_grid(substracted_reference_segments, all_inside)
+            compensated_corridor = Path(substracted_reference_segments)
+            compensated_grid = compensated_corridor.get_margined_grid(all_inside)
             return compensated_grid
 
     # One by one for each *available rectangle, where available rectangles are the splitted rectangles
@@ -3030,6 +3038,172 @@ class Grid:
         boundary_segments = sum([ boundary.segments for boundary in self.boundaries ], [])
         return [ segment.get_colored_segment(color) for segment in boundary_segments ]
 
+# A path is a group of connected segments
+class Path:
+    def __init__ (self, segments : Union[ Set[Segment], List[Segment] ] = []):
+        # Set the segments as a set
+        if type(segments) == set:
+            self._segments = segments
+        elif type(segments) == list:
+            self._segments = set(segments)
+        else:
+            raise TypeError('Paths are built from sets or lists of segments only')
+        # Unique points between segments
+        self._nodes = None
+
+    def __str__ (self) -> str:
+        return '<Path ' + str(self.segments) + '>'
+
+    def __repr__ (self) -> str:
+        return '<Path ' + str(self.segments) + '>'
+
+    def __bool__ (self) -> bool:
+        return len(self.segments) > 0
+
+    # get the number of segments in the path
+    def __len__ (self) -> int:
+        return len(self.segments)
+
+    # Add segments to the path
+    def __add__ (self, other):
+        if isinstance(other, Segment):
+            new_segments = self._segments.copy()
+            new_segments.add(other)
+            return Path(new_segments)
+        raise ValueError('Path addition of ' + str(other.__class__) + ' is not supported')
+
+    # Substract segments from the path
+    def __sub__ (self, other):
+        if isinstance(other, Segment):
+            new_segments = self._segments.copy()
+            new_segments.remove(other)
+            return Path(new_segments)
+        raise ValueError('Path substraction of ' + str(other.__class__) + ' is not supported')
+
+    # Get the segments
+    def get_segments (self) -> List[Segment]:
+        return self._segments
+    segments = property(get_segments, None, None, "Path segments (read only)")
+
+    # Get the nodes
+    def get_nodes (self) -> Set[Point]:
+        if self._nodes != None:
+            return self._nodes
+        self._nodes = set(sum([ list(segment.points) for segment in self.segments ], []))
+        return self._nodes
+    nodes = property(get_nodes, None, None, "Path nodes (read only)")
+
+    # Check if a segment is connected to this path and thus it could be added to the path
+    def is_connected_to_segment (self, segment : Segment) -> bool:
+        return segment.a in self.nodes or segment.b in self.nodes
+
+    # Check if a segment is connected to this path and thus it could be added to the path
+    def get_segment_connected_node (self, segment : Segment) -> Point:
+        return next( point for point in segment.points if point in self.nodes )
+
+    # Set a grid around path segments
+    # Size is the tickness of the new grid
+    # Alternatively, the size may be a function whose input is a segments in the path and a direction
+    def get_margined_grid (self, size : Union[number, Callable], margined_ends : bool = False) -> Grid:
+        # Size must be a function
+        # If it is a number then convert it to a function which returns half the size number
+        if not callable(size):
+            half_size = size / 2
+            def size (segment, direction) -> number:
+                return half_size
+        # Generate data for each point between segments (similar to nodes) by recording the connected segments
+        point_connected_segments = {}
+        for segment in self.segments:
+            # Get the points connected segments
+            points = segment.points
+            for point in points:
+                connected_segments = point_connected_segments.get(point, None)
+                if connected_segments:
+                    connected_segments.append(segment)
+                else:
+                    point_connected_segments[point] = [segment]
+        # For each segment in path, set the space required
+        required_spaces = {}
+        # Also capture the highest rect width according to the size function
+        highest_width = 0
+        for segment in self.segments:
+            # Set the rect dimensions according to segment orientation and the size function
+            if segment.is_horizontal():
+                x_coords = [ point.x for point in segment.points ]
+                x_min = min(x_coords)
+                x_max = max(x_coords)
+                y_min = segment.a.y - size(segment, DOWN)
+                y_max = segment.a.y + size(segment, UP)
+                width = y_max - y_min
+            elif segment.is_vertical():
+                x_min = segment.a.x - size(segment, LEFT)
+                x_max = segment.a.x + size(segment, RIGHT)
+                width = x_max - x_min
+                y_coords = [ point.y for point in segment.points ]
+                y_min = min(y_coords)
+                y_max = max(y_coords)
+            else:
+                ValueError('Diagonal segments are not supported when creating a path margined grid')
+            # Set the actual grid and asign it to the corresponding segment
+            required_spaces[segment] = Rect(x_min, y_min, x_max, y_max)
+            # Update the highest width
+            if width > highest_width:
+                highest_width = width
+        # Now for each point, find the common space required by its connected segments
+        point_overlap_regions = []
+        for point, connected_segments in point_connected_segments.items():
+            # Set a function to get the expansion rect from a connected segment with an specific size
+            def get_connected_segment_expansion_rect (segment : Segment, expansion_size : number = highest_width) -> Rect:
+                # Find the segment to expand the rectangle over it
+                other_point = next(p for p in segment.points if p != point)
+                expansion_direction = (other_point + point).normalized()
+                expansion_segment = Segment(point, point + expansion_direction * expansion_size)
+                # Get any of the perpendicular segments from the segment rect
+                segment_rect = required_spaces[segment]
+                perpendicular_direction = next(expansion_direction.get_perpendicular_vectors())
+                perpendicular_segment = next(s for s in segment_rect.segments if s.is_paralel_to(perpendicular_direction))
+                # Set the expansion rect and add it to the required spaces dict
+                return Rect.from_segments([expansion_segment, perpendicular_segment])
+            # In case we have only 1 connected segment it means this is a death end of the path
+            if len(connected_segments) == 1:
+                # If the margined ends is passed as false then we are done
+                if not margined_ends:
+                    continue
+                # Otherwise we expect the size function to be prepared for this scenario
+                # i.e. to return a valid result when the direction is paralel to the input segment
+                only_segment = connected_segments[0]
+                actual_size = size(only_segment, only_segment.direction)
+                expansion_rect = get_connected_segment_expansion_rect(only_segment, actual_size)
+                required_spaces[point] = Grid([expansion_rect])
+                continue
+            # Expand each segment space towards the connecting point and keep the overlap
+            # The expansion should be as much as needed, so we will expand as much as the highest width
+            # First calculate the expansions
+            segment_expansion_rects = []
+            for connected_segment in connected_segments:
+                expansion_rect = get_connected_segment_expansion_rect(connected_segment)
+                segment_expansion_rects.append(expansion_rect)
+            # Calculate the different overlaps and merge them
+            required_space = Grid()
+            for space_a, space_b in pairwise(segment_expansion_rects):
+                overlap = space_a.get_overlap_rect(space_b)
+                # We may have segment or point overlaps, but this means there is no area overlap so we skip them
+                if type(overlap) != Rect:
+                    continue
+                required_space += Grid([overlap])
+            # Update the point required space
+            required_spaces[point] = required_space
+        # Join all required spaces
+        grid = Grid()
+        for space in required_spaces.values():
+            # Segment spaces are rects
+            if type(space) == Rect:
+                grid += Grid([space])
+            # Point spaces are grids already
+            else:
+                grid += space
+        return grid
+
 
 # Auxiliar functions ---------------------------------------------------------------
 
@@ -3276,109 +3450,6 @@ def generate_point_rect (point : Point, size : number) -> Rect:
     # Set the rect and return it
     return Rect(x_min, y_min, x_max, y_max)
 
-# Given a list of segments, set a function to generate a grid around them
-# Size is the tickness of the new grid
-# Alternatively, the size may be a function whose input is a segments in the path and a direction
-def get_path_margined_grid (path : List['Segment'], size : Union[number, Callable], margined_ends : bool = False) -> Grid:
-    # Size must be a function
-    # If it is a number then convert it to a function which returns half the size number
-    if not callable(size):
-        half_size = size / 2
-        def size (segment, direction) -> number:
-            return half_size
-    # Generate data for each point between segments (similar to nodes) by recording the connected segments
-    point_connected_segments = {}
-    for segment in path:
-        # Get the points connected segments
-        points = segment.points
-        for point in points:
-            connected_segments = point_connected_segments.get(point, None)
-            if connected_segments:
-                connected_segments.append(segment)
-            else:
-                point_connected_segments[point] = [segment]
-    # For each segment in path, set the space required
-    required_spaces = {}
-    # Also capture the highest rect width according to the size function
-    highest_width = 0
-    for segment in path:
-        # Set the rect dimensions according to segment orientation and the size function
-        if segment.is_horizontal():
-            x_coords = [ point.x for point in segment.points ]
-            x_min = min(x_coords)
-            x_max = max(x_coords)
-            y_min = segment.a.y - size(segment, DOWN)
-            y_max = segment.a.y + size(segment, UP)
-            width = y_max - y_min
-        elif segment.is_vertical():
-            x_min = segment.a.x - size(segment, LEFT)
-            x_max = segment.a.x + size(segment, RIGHT)
-            width = x_max - x_min
-            y_coords = [ point.y for point in segment.points ]
-            y_min = min(y_coords)
-            y_max = max(y_coords)
-        else:
-            ValueError('Diagonal segments are not supported when creating a path margined grid')
-        # Set the actual grid and asign it to the corresponding segment
-        required_spaces[segment] = Rect(x_min, y_min, x_max, y_max)
-        # Update the highest width
-        if width > highest_width:
-            highest_width = width
-    # Now for each point, find the common space required by its connected segments
-    point_overlap_regions = []
-    for point, connected_segments in point_connected_segments.items():
-        # Set a function to get the expansion rect from a connected segment with an specific size
-        def get_connected_segment_expansion_rect (segment : Segment, expansion_size : number = highest_width) -> Rect:
-            # Find the segment to expand the rectangle over it
-            other_point = next(p for p in segment.points if p != point)
-            expansion_direction = (other_point + point).normalized()
-            expansion_segment = Segment(point, point + expansion_direction * expansion_size)
-            # Get any of the perpendicular segments from the segment rect
-            segment_rect = required_spaces[segment]
-            perpendicular_direction = next(expansion_direction.get_perpendicular_vectors())
-            perpendicular_segment = next(s for s in segment_rect.segments if s.is_paralel_to(perpendicular_direction))
-            # Set the expansion rect and add it to the required spaces dict
-            return Rect.from_segments([expansion_segment, perpendicular_segment])
-        # In case we have only 1 connected segment it means this is a death end of the path
-        if len(connected_segments) == 1:
-            # If the margined ends is passed as false then we are done
-            if not margined_ends:
-                continue
-            # Otherwise we expect the size function to be prepared for this scenario
-            # i.e. to return a valid result when the direction is paralel to the input segment
-            only_segment = connected_segments[0]
-            actual_size = size(only_segment, only_segment.direction)
-            expansion_rect = get_connected_segment_expansion_rect(only_segment, actual_size)
-            required_spaces[point] = Grid([expansion_rect])
-            continue
-        # Expand each segment space towards the connecting point and keep the overlap
-        # The expansion should be as much as needed, so we will expand as much as the highest width
-        # First calculate the expansions
-        segment_expansion_rects = []
-        for connected_segment in connected_segments:
-            expansion_rect = get_connected_segment_expansion_rect(connected_segment)
-            segment_expansion_rects.append(expansion_rect)
-        # Calculate the different overlaps and merge them
-        required_space = Grid()
-        for space_a, space_b in pairwise(segment_expansion_rects):
-            overlap = space_a.get_overlap_rect(space_b)
-            # We may have segment or point overlaps, but this means there is no area overlap so we skip them
-            if type(overlap) != Rect:
-                continue
-            required_space += Grid([overlap])
-        # Update the point required space
-        required_spaces[point] = required_space
-    # Join all required spaces
-    grid = Grid()
-    for space in required_spaces.values():
-        # Segment spaces are rects
-        if type(space) == Rect:
-            grid += Grid([space])
-        # Point spaces are grids already
-        else:
-            grid += space
-    return grid
-
 # Target corners here would be inside corners which are connected to outside corners
 # Each pairs of corners makes what could be called "zigzag"
 # The segment between those corners is to be removed and the envolving segments aligned
@@ -3552,7 +3623,8 @@ def generate_random_polygon (
     # Use this to see the backbone
     # add_frame(bones, title='Random polygon generator: backbone')
     # Now that we have the backbone we can generate the boundary around it
-    grid = get_path_margined_grid(bones, size=width, margined_ends=True)
+    bones_path = Path(bones)
+    grid = bones_path.get_margined_grid(size=width, margined_ends=True)
     # Since bones are all connected there should be only one boundary
     boundaries = grid.boundaries
     if len(boundaries) > 1:

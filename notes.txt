@@ -1,5 +1,10 @@
 RAM
 
+si target area es mayor que available area hay que gestionarlo para que no intente expandir una vez lo haya consumido todo
+
+puede que el nuevo sistema para junat free spaces de errores en casos en los que no haría falta añadir más pasillo: cuando se de el caso se estuida
+
+recolocación de puertas después del setup: deberían buscar el punto más próximo a la puerta de entrada a la habitación padre
 
 setup_stairs -> que chequee para cada room si hay espacio o no en lower y upper
 	que tenga en cuenta los stacking

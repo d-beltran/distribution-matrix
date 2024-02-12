@@ -23,7 +23,7 @@ display_solving_process = False
 
 # Set the number of frames to be displayed before stopping the process
 # This is useful for debugging
-display_frames_limit = 100
+display_frames_limit = 1000
 
 # A door is a segment in a boundary
 # When boundaries are transformed to walls with tickness, doors become holes in the wall
@@ -539,6 +539,8 @@ class Room:
         self.parent_building = parent_building
         # Set an atrribute to sabe the corridor grid when it is set
         self._corridor_grid = Grid()
+        # Set a status variable which becomes true after the corridor has been fully solved
+        self.is_corridor_stablished = False
         # Set the boundary
         # If the boundary has been forced then update the display with the initial segments
         if boundary:
@@ -801,6 +803,7 @@ class Room:
 
     # Set a function to set all children target areas at once
     def set_children_target_areas (self):
+        print('Setting children areas')
         # First of all check al children area ranges to make sense
         for child in self.children:
             if lower(child.max_area, child.min_area):
@@ -1870,13 +1873,26 @@ class Room:
         # This process is wrapped in a function because we may have to change the corridor and redo the boundary further
         # e.g. a door can not be relocated in the boundary so it must be relocated now and the corridor will change
         def make_corridor_grid () -> Grid:
-            corridor = current_corridor
+            corridor = Path(current_corridor)
             # Now we must substract segments in the free space (fake corridors)
+            # Always leave a minimal corridor fragment from the free space for the grid to be continuous
             if functional_corridor_grid:
-                free_corridor_segments = []
+                # Iterate over the different free grids and remove its segments from the corridor
                 for free_region in free_regions:
-                    free_corridor_segments += free_region['corridor_segments']
-                corridor = [ segment for segment in corridor if segment not in free_corridor_segments ]
+                    for segment in free_region['corridor_segments']:
+                        corridor -= segment
+                # Now that we have the corridor alone we can search for corridor fragments to connect
+                for free_region in free_regions:
+                    for segment in free_region['corridor_segments']:
+                        # Skip segments not connected to the remaining corridor
+                        if not corridor.is_connected_to_segment(segment):
+                            continue
+                        # Set a fragment to connect the corridor
+                        connection_node = corridor.get_segment_connected_node(segment)
+                        connection_segment = segment.get_side_segment(connection_node, corridor_size)
+                        corridor += connection_segment
+                        break
+
             # It may happen that there are no corridor segments at this point when all rooms are connected by a point
             if len(corridor) == 0:
                 # Check that there is just one node, as expected
@@ -1884,8 +1900,11 @@ class Room:
                     raise SystemExit('There is something very wrong with the corridor backbone')
                 corridor_grid = Grid([ generate_point_rect(current_corridor_nodes[0], corridor_size) ])
             else:
+                # Display the current corridor
+                elements_to_display = [ segment.get_colored_segment('red') for segment in corridor.segments ]
+                self.update_display(extra=elements_to_display, title='Display the corridor to build the boundary')
                 # Generate a boundary around the current corridor path
-                corridor_grid = get_path_margined_grid(corridor, corridor_size)
+                corridor_grid = corridor.get_margined_grid(corridor_size)
             # Display the very first corridor boundary
             elements_to_display = corridor_grid.get_perimeter_segments('blue')
             self.update_display(extra=elements_to_display, title='Displaying first corridor boundary')
@@ -1955,7 +1974,8 @@ class Room:
                 elements_to_display = [ segment.get_colored_segment('green') for segment in excluded_reference_segments ]
                 self.update_display(extra = elements_to_display, title = 'DEBUG: Excluded reference segments')
                 # Generate the extension boundary from the excluded reference segments
-                extension_grid = get_path_margined_grid(excluded_reference_segments, all_inside)
+                extension_corridor = Path(excluded_reference_segments)
+                extension_grid = extension_corridor.get_margined_grid(all_inside)
                 # Display the segments used as reference for the excluded region
                 elements_to_display = extension_grid.get_perimeter_segments('purple')
                 self.update_display(extra = elements_to_display, title = 'DEBUG: Extension segments')
@@ -2376,6 +2396,9 @@ class Room:
         # Show redistribution after reshaping child rooms
         self.update_display(title='Displaying redistributed rooms')
 
+        # Set the corridor as stablished
+        self.is_corridor_stablished = True
+
     # Reduce the number of corners in this room exterior polygon by reshaping self and children boundaries
     # This function is meant to run in the root room only
     # Return True if the reduction suceed or False if it failed
@@ -2741,7 +2764,7 @@ class Room:
     def get_required_area (self) -> number:
         # If we already have a corridor then we are flexible with the area
         # Target area is not a specific area but a range
-        if self.parent.corridor_grid:
+        if self.parent.is_corridor_stablished:
             # If we are over the maximum we must reduce the are so we return a negative area
             if self.area > self.max_area:
                 return resolute(self.max_area - self.area)
@@ -2756,6 +2779,8 @@ class Room:
     # Check if this room is already fit to its required area
     def is_fit_to_required_area (self) -> bool:
         required_area = self.get_required_area()
+        # print('Fitting ' + self.name + ' to target area: ' + str(self.min_area) + ' - ' + str(self.max_area))
+        # print('Current area: ' + str(self.area) + ' -> Required area: ' + str(required_area))
         return abs(required_area) < minimum_resolution * self.max_area
 
     # Expand or contract this room until it reaches the forced area
@@ -2764,8 +2789,6 @@ class Room:
     def fit_to_required_area (self, restricted_segments : list = []) -> bool:
         # Calculate how much area we need to expand
         required_area = self.get_required_area()
-        # print('Fitting ' + self.name + ' to target area: ' + str(self.min_area) + ' - ' + str(self.max_area))
-        # print('Current area: ' + str(self.area) + ' -> Required area: ' + str(required_area))
         # If the area is already satisfied then stop here
         if self.is_fit_to_required_area():
             return True
