@@ -516,9 +516,17 @@ class Room:
         # However the parent building is not mandatory even in the root room
         parent_building : Optional['Room'] = None,
     ):
-        # Set internal variables
+        # WARNING: Note that the declaration of many variables in the init must be in a strict order
+        # An internal boundary and save the input boundary
         self._boundary = None
         self.input_boundary = boundary
+        # Set if the boundary is rigid
+        if rigid == None:
+            self.rigid = bool(boundary)
+        else:
+            if rigid == True and not boundary:
+                raise InputError('Cannot set a rigid room and not provide a boundary')
+            self.rigid = rigid
         # The forced grid is the space which must be occupied by a room whose boundary is not fixed (child adaptable)
         # Note that this value is totally redundant for rooms with fixed boundaries
         # Note also that the input boundary becomes the forced grid by default
@@ -526,6 +534,7 @@ class Room:
         self.forced_grid = boundary.grid if boundary else Grid()
         self._grid = None
         self._free_grid = None
+        self._available_grid = None
         # Set representation parameters
         self.name = name
         self.segments_color = segments_color
@@ -571,11 +580,6 @@ class Room:
         self._max_area = max_area
         # Set the internal value for the expected final area
         self._target_area = None
-        # Set if the boundary is rigid
-        if rigid == None:
-            self.rigid = bool(boundary)
-        else:
-            self.rigid = rigid
         # Set the maximum number of corners
         self.max_corners = max_corners
         if max_corners != None:
@@ -600,10 +604,8 @@ class Room:
         self.doors = doors if doors != None else [ Door() ]
         # Set the room corridor size
         self._corridor_size = corridor_size
-        # Set a grid for discarted space
-        # This is space which is not sitable to be claimed and thus is not set free to avoid the solver to try it
-        # This space may be generated when setting the corridor and it may be impossible to recover
-        self.discarded_grid = Grid()
+        # Set an empty grid as the discarded space
+        self._discarded_grid = Grid()
         # Children handling:
         if self.children:
             # Now set some parameters in children
@@ -649,6 +651,8 @@ class Room:
     def set_children (self, children : List['Room']):
         for child in children:
             child.parent = self
+            # Everytime childrens are set we must reset the target area
+            child._target_area = None
         self._children = children
         # If new children are added then some of them may have overlapping boundaries
         # e.g. when the stairs rooms are added
@@ -788,6 +792,9 @@ class Room:
         # Return the internal value, if any
         if self._target_area != None:
             return self._target_area
+        # If the room is rigid then there is no target area, it makes not sense
+        if self.rigid:
+            return None
         # We must calculate target areas
         if not self.parent:
             raise RuntimeError('Can not calculate target area since parent room is not defined in room '  + self.name)
@@ -802,35 +809,42 @@ class Room:
     target_area = property(get_target_area, None, None, "Target area to be reached after the solving process")
 
     # Set a function to set all children target areas at once
+    # Note that all children areas have to be assigned together
     def set_children_target_areas (self):
-        print('Setting children areas')
+        print('Setting children target areas of ' + ', '.join([ child.name for child in self.children ]))
+        # We assign target areas for non rigid rooms only
+        non_rigid_children = [ child for child in self.children if not child.rigid ]
+        # Get the available area to fit the children
+        available_area = self.get_available_area()
         # First of all check al children area ranges to make sense
-        for child in self.children:
+        # Note that this is calculated here and not in the init for a reason:
+        # One area could be a percent and the other a number, for instance
+        for child in non_rigid_children:
             if lower(child.max_area, child.min_area):
                 raise InputError('Maximum area must be higher than minimum area in room ' + child.name)
         # If the parent (self) is child adaptable then children target areas are set randomly
         if self._child_adaptable_boundary:
-            for child in self.children:
+            for child in non_rigid_children:
                 child._target_area = random.uniform(child.min_area, child.max_area)
             return
         # Get all minimum areas and calculate the overall minimum area needed
-        min_areas = [ child.min_area for child in self.children ]
+        min_areas = [ child.min_area for child in non_rigid_children ]
         overall_min_area = sum(min_areas)
         # Check we have enough area to allocate all children
-        if greater(overall_min_area, self.area):
+        if greater(overall_min_area, available_area):
             raise RuntimeError('Parent ' + self.name + ' has not enought area to allocate all its children')
         # Get all maximum areas and calculate the overall maximum area which may be occupied
-        max_areas = [ child.max_area for child in self.children ]
+        max_areas = [ child.max_area for child in non_rigid_children ]
         overall_max_area = sum(max_areas)
         # If the parent is able to allocate all children in their maximum areas then we set all target areas as the maximum
-        if lower(overall_max_area, self.area):
-            for child in self.children:
+        if lower(overall_max_area, available_area):
+            for child in non_rigid_children:
                 child._target_area = child.max_area
             return
         # If the parent is not able to allocate all children in their maximum areas then target areas must be calculated
         overall_range = overall_max_area - overall_min_area
-        overall_percent = (self.area - overall_min_area) / overall_range
-        for child in self.children:
+        overall_percent = (available_area - overall_min_area) / overall_range
+        for child in non_rigid_children:
             child_range = child.max_area - child.min_area
             child._target_area = child.min_area + child_range * overall_percent
 
@@ -876,8 +890,8 @@ class Room:
     # Free space grid (read only)
     free_grid = property(get_free_grid, None, None, "The room free space grid")
 
-    # Reset all minimum and maximum free rects
-    # This must be done each time the boundary is modified since they are not valid anymore
+    # Set the free grid as None for it to be recalculated again next time it is needed
+    # This must be done each time the boundary is modified or some children claims area since it is not valid anymore
     def reset_free_grid (self):
         self._free_grid = None
 
@@ -885,6 +899,15 @@ class Room:
     def get_free_area (self) -> number:
         return self.free_grid.area
     free_area = property(get_free_area, None, None, "Free space area (read only)")
+
+    # Area after substracting the corridor, the discarded regions and the rigid children
+    def get_available_area (self) -> number:
+        occupied_grids = [ child.grid for child in self.children if child.grid and child.rigid ]
+        if self.corridor_grid:
+            occupied_grids.append(self.corridor_grid)
+        if self.discarded_grid:
+            occupied_grids.append(self.discarded_grid)
+        return self.area - sum([ grid.area for grid in occupied_grids ])
 
     # Get the corridor size
     def get_corridor_size (self) -> number:
@@ -927,6 +950,18 @@ class Room:
         
     # Free space grid (read only)
     corridor_grid = property(get_corridor_grid, set_corridor_grid, None, "The room corridor space grid")
+
+    # Simple getter
+    def get_discarded_grid (self) -> Grid:
+        return self._discarded_grid
+    # Setter which triggers free/available grid resetting
+    def set_discarded_grid (self, new_discarded_grid):
+        self._discarded_grid = new_discarded_grid
+        self.reset_free_grid()
+    # Set a grid for discarded space
+    # This is space which is not suitable to be claimed and thus it is not set free to avoid the solver to try it
+    # This space may be generated when setting the corridor and it may be impossible to recover
+    discarded_grid = property(get_discarded_grid, set_discarded_grid, None, "The discarded regions which are not possible to be claimed")
 
     # Get the minimum size (read only)
     def get_min_size (self) -> number:
@@ -2377,7 +2412,6 @@ class Room:
             # non_corridor_grid = self.grid - self.corridor_grid
             # non_corridor_reachable_grid = non_corridor_grid.keep_minimum(self.get_children_min_min_size())
             # self.discarded_grid = non_corridor_grid - non_corridor_reachable_grid
-            # self.reset_free_grid()
             self.reassign_discarded_regions()
             # Show the discarded grid
             self.update_display(title='Displaying discarded grid')
@@ -2550,7 +2584,6 @@ class Room:
             free_region += boundary.get_border_projection(free_corner_segments[1])
             # Substract it from the discarded grid and reset the free grid
             self.discarded_grid -= free_region
-            self.reset_free_grid()
             return True
         # Now search a free wide segment
         wide_segments = [ segment for segment in target_segments if segment.length >= self.min_size ]
@@ -2560,7 +2593,6 @@ class Room:
             free_region = boundary.get_border_projection(free_wide_segment)
             # Substract it from the discarded grid and reset the free grid
             self.discarded_grid -= free_region
-            self.reset_free_grid()
             return True
         # Now search a room corners
         room_corner = next((corner for corner in corners if isinstance(corner[0], self.__class__)), None)
@@ -3711,7 +3743,6 @@ class Room:
             # The grid which is removed from the truncated grid by not respecting the minimum must be flaged as discarded
             lost_grid = truncated_grid - safe_grid
             self.parent.discarded_grid += lost_grid
-            self.parent.reset_free_grid()
             # Now update the truncated grid
             truncated_grid = safe_grid
         # If the grid has been fully consumed then give up
@@ -3789,6 +3820,7 @@ class Room:
         # Now find which children are overlaped by the invade region and then truncate them
         # Get only children already set (i.e. with a grid)
         children = [ child for child in self.children if child != invasor and child.grid ]
+        truncated_children = []
         for child in children:
             # Get the overlap regions between the invaded region and this child
             overlap_grid = child.grid.get_overlap_grid(region)
@@ -3798,8 +3830,9 @@ class Room:
             if not child.truncate(overlap_grid):
                 self.restore_children_backup(backup)
                 return False
+            truncated_children.append(child)
         # Finally expand all truncated children
-        for child in children:
+        for child in truncated_children:
             # In case something went wrong with any child expansion recover all children backups and stop
             if not child.fit_to_required_area():
                 self.restore_children_backup(backup)
