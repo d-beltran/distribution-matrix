@@ -2073,8 +2073,11 @@ class Room:
         # Show the relocated doors
         self.update_display(title='Displaying early corridor')
 
-        # Get all doors, both the already stablished and the not stablished ones
-        door_rooms = [ self ] + self.children
+        # Get all children doors, both the already stablished and the not stablished ones
+        # Add the room door also if this room is the root
+        # Otherwise the door room must never be moved since it is already placed according to the parent corridor
+        # The solving must be top-down, and it may be a node in the recently solved corridor so it is better not to move it
+        door_rooms = self.children if self.parent else [ self ] + self.children
         doors = sum([ room.doors for room in door_rooms ], [])
         
         # Now expand the corridor as much as we need to make space for doors between the corridor and each connected room
