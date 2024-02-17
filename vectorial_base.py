@@ -1293,12 +1293,10 @@ class Polygon:
     # Segments will be sorted, flipped and merged as necessary to accomplish the polygon standard
     @classmethod
     def non_canonical(cls, segments : List[Segment]):
-
         # Check each polygon segment to not be diagonal
         for segment in segments:
             if segment.is_diagonal():
                 raise RuntimeError('The polygon has diagonal segments, which are not supported')
-
         # ---------------------------------------------------------------------------------
         # Format segments in a way that segments and their points are ordered
         # i.e. each segment 'b' point is the 'a' point of the next segment
@@ -1334,21 +1332,26 @@ class Polygon:
             add_frame(segments, 'Open polygon error')
             raise cls.open_polygon_error
         segments = ordered_segments
-            
         # Merge continuous segments (i.e. connected segments in the same line)
-        count = 0
-        while count < len(segments):
-            for current, nextone in pairwise(segments, retro=True):
-                if current.same_line_as(nextone):
-                    merged_segment = Segment(current.a, nextone.b)
-                    segments = [ seg for seg in segments if seg not in [current, nextone] ]
-                    segments.insert(count, merged_segment)
-                    count = 0
-                    break
-                count += 1
-
+        # Check segment by segment if they are aligned with the previous segment
+        merged_segments = []
+        last_segment = segments[0]
+        for next_segment in segments[1:]:
+            if last_segment.same_line_as(next_segment):
+                last_segment = Segment(last_segment.a, next_segment.b)
+            else:
+                merged_segments.append(last_segment)
+                last_segment = next_segment
+        # At the end we will always have a last segment which is not yet included in the merged segments list
+        # This segment however may be aligned with the first segment so we must check
+        first_segment = merged_segments[0]
+        if last_segment.same_line_as(first_segment):
+            last_segment = Segment(last_segment.a, first_segment.b)
+            merged_segments[0] = last_segment
+        else:
+            merged_segments.append(last_segment)
         # Build the canonical polygon
-        return cls(segments)
+        return cls(merged_segments)
 
     # Set the polygon from its corners in order
     @classmethod

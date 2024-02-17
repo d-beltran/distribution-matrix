@@ -3370,8 +3370,8 @@ class Room:
             added_segments = [ seg for segment in new_segments for seg in segment.substract_segments(current_segments) ]
             remaining_segments = [ seg for segment in current_segments for seg in segment.substract_segments(new_segments) ]
             # Join all previous segments to make new polygons
-            new_polygons = list(connect_segments([ *added_segments, *remaining_segments ]))
-            new_boundary = connect_polygons(new_polygons)[0] # There should be always 1 and only 1 boundary
+            new_exterior_polygon = Polygon.non_canonical([ *added_segments, *remaining_segments ])
+            new_boundary = Boundary(new_exterior_polygon, self.boundary.interior_polygons)
             # Check doors would be respected with the new boundary
             if parent_room in rooms and parent_room._child_adaptable_boundary and not parent_room.check_doors_side(new_boundary.grid, inside=False):
                 return False
