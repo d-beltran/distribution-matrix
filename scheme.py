@@ -184,6 +184,9 @@ class Door:
         # Return internal value if it exists
         if self._margined_segment:
             return self._margined_segment
+        # If the door has no point then complain
+        if not self.point:
+            raise RuntimeError('Trying to get door margined segment when no point is defined')
         self._margined_segment = self.generate_segment(self.margined_width)
         return self._margined_segment
 
@@ -1080,6 +1083,12 @@ class Room:
         # If there are not children then we have nothing to do here
         if len(rooms) == 0:
             return
+        # Before allocating place for any children room, set corridor spaces in front of parent doors
+        # This way this space is never claimed since it has to be occupied by the corridor anyway
+        # Note that the root room may have non defined doors
+        already_set_doors = [ door for door in self.doors if door.point ]
+        for door in already_set_doors:
+            self.corridor_grid += Grid([door.get_required_space(inside=True)])
         # Sort children rooms by minimum size, with the biggest sizes first
         if self._child_adaptable_boundary:
             random.shuffle(rooms)
