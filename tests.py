@@ -361,8 +361,8 @@ test_building_2 = Building(
             children = [
                 Room(
                     name='Apartamento',
-                    min_area='60%',
-                    max_area='99%',
+                    min_area='100%',
+                    max_area='100%',
                     fill_color='red',
                     children=[
                         Room(

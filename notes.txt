@@ -1,8 +1,16 @@
 RAM
 
-si target area es mayor que available area hay que gestionarlo para que no intente expandir una vez lo haya consumido todo
+una vez ha resuleto el puzle parece que no está contento, sigue peleando y nunca acaba
+	creo que es el comedor el que cree que necesita expandirse
 
-puede que el nuevo sistema para junat free spaces de errores en casos en los que no haría falta añadir más pasillo: cuando se de el caso se estuida
+recuperar min size para el parent free space porque sino al final pueden quedar huecos que no respeten
+	*** esto lo quité por un problema técnico, por lo visto
+	y si prohibimos el espacio libre sobrante?
+		-> si quieres un recibidor hacemos que haya un forma explícita de declarar un child que se fusione con el corridor
+
+puede que el nuevo sistema para juntar free spaces de errores en casos en los que no haría falta añadir más pasillo
+	-> cuando se de el caso se estudia
+
 
 recolocación de puertas después del setup: deberían buscar el punto más próximo a la puerta de entrada a la habitación padre
 

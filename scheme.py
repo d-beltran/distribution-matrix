@@ -23,7 +23,7 @@ display_solving_process = False
 
 # Set the number of frames to be displayed before stopping the process
 # This is useful for debugging
-display_frames_limit = 1000
+display_frames_limit = 100
 
 # A door is a segment in a boundary
 # When boundaries are transformed to walls with tickness, doors become holes in the wall
@@ -578,9 +578,9 @@ class Room:
                     raise InputError('Area range (' + value + ') has a non-supported format in room ' + name)
             else:
                 raise InputError('Area range (' + str(value) + ') has a non-supported format in room ' + name)
-        # Set the internal values for minimum and maximum areas 
-        self._min_area = min_area
-        self._max_area = max_area
+        # Set the internal values for minimum and maximum areas
+        self.input_min_area = min_area
+        self.input_max_area = max_area
         # Set the internal value for the expected final area
         self._target_area = None
         # Set the maximum number of corners
@@ -685,6 +685,13 @@ class Room:
     # Set the boundary
     # Reset the own grid, free grid and parent free grid
     def set_boundary (self, boundary : Boundary, skip_update_display : bool = False):
+        # If the new boundary is dentical to the previous one then do nothing
+        if self._boundary == boundary:
+            return
+        # DANI: esto es debugueo, ya lo quitaré
+        previous_area = self._boundary.area if self._boundary else 0
+        new_area = boundary.area if boundary else 0
+        area_difference = new_area - previous_area
         self._boundary = boundary
         self._grid = None
         self.reset_free_grid()
@@ -695,7 +702,7 @@ class Room:
             if parent_room._child_adaptable_boundary:
                 parent_room.reset_grid()
         if not skip_update_display:
-            self.update_display(title='Modified boundary in room ' + self.name)
+            self.update_display(title=f'Modified boundary in room {self.name} (area {area_difference})')
 
     # The room boundary
     boundary = property(get_boundary, set_boundary, None, "The room boundary")
@@ -744,48 +751,44 @@ class Room:
 
     # Get the minimum area
     def get_min_area (self) -> number:
-        # Return the internal value, if any
-        if is_number(self._min_area):
-            return self._min_area
+        # Return the value as it is, in case it is numeric
+        if is_number(self.input_min_area):
+            return self.input_min_area
         # If not then calculate the minimum area
         # If no input minimum area was passed then a boundary must have been passed
-        if self._min_area == None:
-            if not self.area:
-                raise RuntimeError('Target area can not be guessed since there is no area in room '  + self.name)
-            self._min_area = self.area
-            return self._min_area
+        if self.input_min_area == None:
+            if self.area and self.rigid:
+                return self.area
+            raise InputError(f'Minimum area can not be guessed in room {self.name}. Please specify an area range or provide a rigid boundary')
         # If area is a string then it means it is a percent and this it must be parsed
-        if type(self._min_area) == str:
+        if type(self.input_min_area) == str:
             if not self.parent:
                 raise RuntimeError('Can not solve a percent area since parent room is not defined in room '  + self.name)
-            portion = float(self._min_area[0:-1]) / 100
-            self._min_area = portion * self.parent.area
-            return self._min_area
-        raise ValueError('Not processable minimum area ' + str(self._min_area) + ' in room ' + self.name)
+            portion = float(self.input_min_area[0:-1]) / 100
+            return portion * self.parent.get_available_area()
+        raise ValueError('Not processable minimum area ' + str(self.input_min_area) + ' in room ' + self.name)
 
     # The minimum area to be reached at the end of the solving process (read only)
     min_area = property(get_min_area, None, None, "Minimum area to be reached after the solving process")
 
     # Get the maximum area
     def get_max_area (self) -> number:
-        # Return the internal value, if any
-        if is_number(self._max_area):
-            return self._max_area
+        # Return the value as it is, in case it is numeric
+        if is_number(self.input_max_area):
+            return self.input_max_area
         # If not then calculate the maximum area
         # If no input maximum area was passed then a boundary must have been passed
-        if self._max_area == None:
-            if not self.area:
-                raise RuntimeError('Target area can not be guessed since there is no area in room '  + self.name)
-            self._max_area = self.area
-            return self._max_area
+        if self.input_max_area == None:
+            if self.area and self.rigid:
+                return self.area
+            raise InputError(f'Maximum area can not be guessed in room {self.name}. Please specify an area range or provide a rigid boundary')
         # If area is a string then it means it is a percent and this it must be parsed
-        if type(self._max_area) == str:
+        if type(self.input_max_area) == str:
             if not self.parent:
                 raise RuntimeError('Can not solve a percent area since parent room is not defined in room '  + self.name)
-            portion = float(self._max_area[0:-1]) / 100
-            self._max_area = portion * self.parent.area
-            return self._max_area
-        raise ValueError('Not processable maximum area ' + str(self._max_area) + ' in room ' + self.name)
+            portion = float(self.input_max_area[0:-1]) / 100
+            return portion * self.parent.get_available_area()
+        raise ValueError('Not processable maximum area ' + str(self.input_max_area) + ' in room ' + self.name)
 
     # The maximum area to be reached at the end of the solving process (read only)
     max_area = property(get_max_area, None, None, "Maximum area to be reached after the solving process")
@@ -795,9 +798,9 @@ class Room:
         # Return the internal value, if any
         if self._target_area != None:
             return self._target_area
-        # If the room is rigid then there is no target area, it makes not sense
+        # If the room is rigid then the target area is the already occupied area
         if self.rigid:
-            return None
+            return self.area
         # We must calculate target areas
         if not self.parent:
             raise RuntimeError('Can not calculate target area since parent room is not defined in room '  + self.name)
@@ -819,6 +822,7 @@ class Room:
         non_rigid_children = [ child for child in self.children if not child.rigid ]
         # Get the available area to fit the children
         available_area = self.get_available_area()
+        #print(' Available area: ' + str(available_area))
         # First of all check al children area ranges to make sense
         # Note that this is calculated here and not in the init for a reason:
         # One area could be a percent and the other a number, for instance
@@ -840,7 +844,7 @@ class Room:
         max_areas = [ child.max_area for child in non_rigid_children ]
         overall_max_area = sum(max_areas)
         # If the parent is able to allocate all children in their maximum areas then we set all target areas as the maximum
-        if lower(overall_max_area, available_area):
+        if lower(overall_max_area, available_area) or equal(overall_max_area, available_area):
             for child in non_rigid_children:
                 child._target_area = child.max_area
             return
@@ -934,6 +938,9 @@ class Room:
     # Set the corridor size (regular setter)
     def set_corridor_size (self, new_corridor_size : number):
         self._corridor_size = new_corridor_size
+        # If the corridor is modified then we must update children target areas
+        for child in self.children:
+            child._target_area = None
 
     # The corridor size
     corridor_size = property(get_corridor_size, set_corridor_size, None, "The corridor size")
@@ -961,6 +968,9 @@ class Room:
     def set_discarded_grid (self, new_discarded_grid):
         self._discarded_grid = new_discarded_grid
         self.reset_free_grid()
+        # If the corridor is modified then we must update children target areas
+        for child in self.children:
+            child._target_area = None
     # Set a grid for discarded space
     # This is space which is not suitable to be claimed and thus it is not set free to avoid the solver to try it
     # This space may be generated when setting the corridor and it may be impossible to recover
@@ -1428,6 +1438,12 @@ class Room:
     # NEVER FORGET: The algorithm to solve the corridor finds all possible combinations of nodes to know the final result is the shortest possible path
     # NEVER FORGET: Once I tried to add as many nodes as 'candidate doors' and as a result the algorithm was taking hours to solve the problem
     def set_corridor (self, backbone_only : bool = False) -> Optional[List['Segment']]:
+
+        # available_area = self.get_available_area()
+        # print(f'Available area: {available_area}')
+        # for child in self.children:
+        #     child_percent_area = child.area / available_area
+        #     print(f' Child {child.name} -> {child_percent_area}')
 
         # Set the corridor nodes
         # This is a preprocessing step which is required to find the shortest corridor and other similar calculations
@@ -2823,8 +2839,9 @@ class Room:
     # Check if this room is already fit to its required area
     def is_fit_to_required_area (self) -> bool:
         required_area = self.get_required_area()
-        # print('Fitting ' + self.name + ' to target area: ' + str(self.min_area) + ' - ' + str(self.max_area))
-        # print('Current area: ' + str(self.area) + ' -> Required area: ' + str(required_area))
+        # print(f'Fitting {self.name} to target area: {self.min_area} - {self.max_area}')
+        # print(f'  Current area: {self.area} -> Required area: {required_area}')
+        # print(f'  Is fit? {abs(required_area) < minimum_resolution * self.max_area}')
         return abs(required_area) < minimum_resolution * self.max_area
 
     # Expand or contract this room until it reaches the forced area
@@ -3779,14 +3796,14 @@ class Room:
         # Save a backup of the current grid
         backup = self.grid
         # Set the truncated grid as the current grid
-        self.set_grid(truncated_grid, skip_update_display=True)
+        self.set_grid(truncated_grid, skip_update_display=skip_update_display)
         # Check the truncated grid to still respecting the minimum size
         if not self.grid.check_minimum(self.min_size):
             #print('WARNING: The room is not respecting the minimum size -> Go back')
             # If not then try to expand the truncated room accordingly to the truncated region to make it respect the minimum
             compensation_grid = self.grid.get_compensation_grid(region, self.min_size)
             if not self.expand_grid(compensation_grid):
-                self.set_grid(backup, skip_update_display=True)
+                self.set_grid(backup, skip_update_display=skip_update_display)
                 return False
         # Check the new parent free grid to be respecting the minimum size in case it is requested
         # It may happen that we pull slightly a frontier which was in contact to a parent/brother frontier and create a small space
@@ -3892,7 +3909,7 @@ class Room:
                 # Now check if we are expanding over the brother rooms and truncate them
                 brother_rooms = [ room for room in self.parent.children if room != self ]
                 for brother_room in brother_rooms:
-                    if not brother_room.truncate(expansion_grid):
+                    if not brother_room.invade(expansion_grid):
                         self.grid = backup
                         return False
                 # Truncate also the parent discarded grid
