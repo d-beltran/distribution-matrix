@@ -29,6 +29,7 @@ def add_frame (data : list, title : Optional[str] = None):
     if type(data) != list:
         data = [data]
     segments = get_segments_from_anything(data)
+    # This is for the fillings only, to add color
     rects = get_rects_from_anything(data)
     traced = [ element for element in data if hasattr(element, 'name') ]
     frames.append((segments, rects, traced))
@@ -117,7 +118,7 @@ def represent (queue):
             xs = [segment.a.x, segment.b.x]
             ys = [segment.a.y, segment.b.y]
             zs = segment.z if hasattr(segment, 'z') else None
-            ploted_segments = ax.plot(xs,ys,color=segment.color, zorder=zs)
+            ploted_segments = ax.plot(xs, ys, color=segment.color, zorder=zs)
 
         # Draw all rect areas
         for rect in rects:
@@ -162,6 +163,11 @@ def get_segments_from_anything (things : list):
         # If it is a rectangle or something with a "crossing segment" getter
         if hasattr(thing, 'get_crossing_segment'):
             segments.append(thing.get_crossing_segment())
+        # If it is a grid or something with a segments
+        if hasattr(thing, 'rects'):
+            for rect in thing.rects:
+                segments += rect.segments
+                segments.append(rect.get_crossing_segment())
         # If it is a boundary or something with a polygon
         if hasattr(thing, 'polygon'):
             if thing.polygon:
