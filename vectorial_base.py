@@ -2621,6 +2621,10 @@ class Grid:
 
     # Check the grid to respect minimum size in both x and y dimensions
     def check_minimum (self, minimum : number) -> bool:
+        # If this is an empty grid then return True
+        # Conceptually there is no space not respecting the minimum size if there is no space at all
+        if not self:
+            return True
         # Save for each minimum rectangle the maximum size of maximum rectangles
         rect_max_sizes = { rect: [0,0] for rect in self.rects }
         # Check all maximum rectangles
@@ -2658,7 +2662,7 @@ class Grid:
         # Now that we have the maximum size of all minimum rects we must check all of them fulfill the minimum
         for sizes in rect_max_sizes.values():
             for size in sizes:
-                if size < minimum:
+                if lower(size, minimum):
                     return False
         return True
 
