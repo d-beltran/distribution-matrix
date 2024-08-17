@@ -23,7 +23,15 @@ display_solving_process = False
 
 # Set the number of frames to be displayed before stopping the process
 # This is useful for debugging
-display_frames_limit = 100
+display_frames_limit = 1000
+
+# For debugging
+time_counter = 0
+def kill_in_time (time : int):
+    global time_counter
+    if time_counter >= time:
+        raise RuntimeError('Stop here please :)')
+    time_counter += 1
 
 # A door is a segment in a boundary
 # When boundaries are transformed to walls with tickness, doors become holes in the wall
@@ -538,6 +546,7 @@ class Room:
         self._grid = None
         self._free_grid = None
         self._available_grid = None
+        self._fillable_grid = None
         self._rigid_grid = None
         # Set representation parameters
         self.name = name
@@ -655,13 +664,12 @@ class Room:
     def set_children (self, children : List['Room']):
         for child in children:
             child.parent = self
-            # Everytime childrens are set we must reset the target area
-            child._target_area = None
         self._children = children
         # If new children are added then some of them may have overlapping boundaries
         # e.g. when the stairs rooms are added
-        # For this reason we must reset the free grid
-        self.reset_inner_grids()
+        # For this reason we must reset the free grid and some other inner grids
+        self.reset_free_grid()
+        self.reset_available_grid()
 
     # The children rooms
     children = property(get_children, set_children, None, "The children rooms")
@@ -695,10 +703,17 @@ class Room:
         area_difference = new_area - previous_area
         self._boundary = boundary
         self._grid = None
-        self.reset_inner_grids()
+        # Reset the corresponding inner grids
+        self.reset_free_grid()
+        self.reset_available_grid()
+        self.reset_fillable_grid()
+        # Update the parent
         parent_room = self.parent
         if parent_room:
-            parent_room.reset_inner_grids()
+            # Reset the corresponding inner grids
+            parent_room.reset_free_grid()
+            if self.rigid:
+                parent_room.reset_available_grid()
             # In case the parent boundary was provisional
             if parent_room._child_adaptable_boundary:
                 parent_room.reset_grid()
@@ -735,10 +750,17 @@ class Room:
         self._grid = grid
         # Reset the boundary
         self._boundary = None
-        self.reset_inner_grids()
+        # Reset the corresponding inner grids
+        self.reset_free_grid()
+        self.reset_available_grid()
+        self.reset_fillable_grid()
+        # Update the parent
         parent_room = self.parent
         if parent_room:
-            parent_room.reset_inner_grids()
+            # Reset the corresponding inner grids
+            parent_room.reset_free_grid()
+            if self.rigid:
+                parent_room.reset_available_grid()
             # In case the parent boundary was provisional
             if parent_room._child_adaptable_boundary:
                 parent_room.reset_grid()
@@ -832,8 +854,8 @@ class Room:
         # We assign target areas for non rigid rooms only
         non_rigid_children = [ child for child in self.children if not child.rigid ]
         # Get the available area to fit the children
-        available_area = self.available_area
-        #print(' Available area: ' + str(available_area))
+        fillable_area = self.fillable_area
+        # print(' Fillable area: ' + str(fillable_area))
         # First of all check al children area ranges to make sense
         # Note that this is calculated here and not in the init for a reason:
         # One area could be a percent and the other a number, for instance
@@ -849,19 +871,19 @@ class Room:
         min_areas = [ child.min_area for child in non_rigid_children ]
         overall_min_area = sum(min_areas)
         # Check we have enough area to allocate all children
-        if greater(overall_min_area, available_area):
+        if greater(overall_min_area, fillable_area):
             raise RuntimeError('Parent ' + self.name + ' has not enought area to allocate all its children')
         # Get all maximum areas and calculate the overall maximum area which may be occupied
         max_areas = [ child.max_area for child in non_rigid_children ]
         overall_max_area = sum(max_areas)
         # If the parent is able to allocate all children in their maximum areas then we set all target areas as the maximum
-        if lower(overall_max_area, available_area) or equal(overall_max_area, available_area):
+        if lower(overall_max_area, fillable_area) or equal(overall_max_area, fillable_area):
             for child in non_rigid_children:
                 child._target_area = child.max_area
             return
         # If the parent is not able to allocate all children in their maximum areas then target areas must be calculated
         overall_range = overall_max_area - overall_min_area
-        overall_percent = (available_area - overall_min_area) / overall_range
+        overall_percent = (fillable_area - overall_min_area) / overall_range
         for child in non_rigid_children:
             child_range = child.max_area - child.min_area
             child._target_area = child.min_area + child_range * overall_percent
@@ -874,34 +896,37 @@ class Room:
         return boundary.area
     area = property(get_area, None, None, "Area inside the room boundary")
 
-    # Find the available region in this room
-    # This is the region not occupied by rigid children rooms, the corridor or discarded regions
-    # If the strict argument is passed as True then find the free region in this room
-    # This excludes all children regions
-    def find_available_grid (self, strict : bool = False) -> Grid:
+    # Find different configurations of inner grids
+    # This is the region not occupied by inner elements such as:
+    # All children rooms, rigid children rooms only, the corridor or discarded regions
+    def find_inner_grid (self,
+        remove_children : bool = True,
+        remove_non_rigid_children : bool = False,
+        remove_discarded : bool = False) -> Grid:
         # Return none if there is not boundary yet
         if not self.boundary:
             return None
         # Start including all the room regions
-        available_grid = self.grid
+        inner_grid = self.grid
         # Then remove non free/available regions
         # Remove all children regions if we are strict
         # Remove only rigid children regions otherwise
-        for child in self.children:
-            # Make sure the child has a grid
-            if not child.grid:
-                continue
-            if strict or child.rigid:
-                available_grid -= child.grid
+        if remove_children:
+            for child in self.children:
+                # Make sure the child has a grid
+                if not child.grid:
+                    continue
+                if remove_non_rigid_children or child.rigid:
+                    inner_grid -= child.grid
         # Remove the corridor grid
         if self.corridor_grid:
-            available_grid -= self.corridor_grid
+            inner_grid -= self.corridor_grid
         # Remove the discarded grid
-        if self.discarded_grid:
-            available_grid -= self.discarded_grid
-        return available_grid
+        if remove_discarded and self.discarded_grid:
+            inner_grid -= self.discarded_grid
+        return inner_grid
 
-    # Get the available space inside the room boundary as a rectangles grid
+    # Get the free space inside the room boundary as a rectangles grid
     # i.e. space not filled by children rooms or the corridor
     def get_free_grid (self) -> Optional[Grid]:
         # If free grid is previously calculated then return it
@@ -912,7 +937,7 @@ class Room:
             return self._free_grid
         # Calculate the free grid otheriwse
         # Then save it and return it
-        self._free_grid = self.find_available_grid(strict=True)
+        self._free_grid = self.find_inner_grid(remove_non_rigid_children=True, remove_discarded=True)
         return self._free_grid
 
     # Set the free grid as None for it to be recalculated again next time it is needed
@@ -934,7 +959,7 @@ class Room:
             return self._available_grid
         # Calculate the available grid otheriwse
         # Then save it and return it
-        self._available_grid = self.find_available_grid()
+        self._available_grid = self.find_inner_grid(remove_non_rigid_children=True)
         return self._available_grid
 
     # Set the available grid as None for it to be recalculated again next time it is needed
@@ -949,10 +974,35 @@ class Room:
         return self.available_grid.area
     available_area = property(get_available_area, None, None, "Available space area (read only)")
 
-    # Set a function to reset inner grids: the free and the available grid
-    def reset_inner_grids (self):
-        self.reset_free_grid()
-        self.reset_available_grid()
+    # Get the fillable grid
+    def get_fillable_grid (self) -> Grid:
+        # If fillable grid is previously calculated then return it
+        if self._fillable_grid != None:
+            return self._fillable_grid
+        # Calculate the fillable grid otheriwse
+        # Then save it and return it
+        self._fillable_grid = self.find_inner_grid(remove_children=False)
+        add_frame(self._fillable_grid, 'debug')
+        return self._fillable_grid
+
+    # Set the fillable grid as None for it to be recalculated again next time it is needed
+    def reset_fillable_grid (self):
+        # If the grid is alredy None then there is nothing to do here
+        if self._fillable_grid == None:
+            return
+        # Set the grid as none so the next time it is getted it will be recalculated
+        self._fillable_grid = None
+        # Reset children target areas as well since they will need to be recalculated
+        for child in self.children:
+            child._target_area = None
+
+    # Fillable grid is the grid not occupied by rigid children, the corridor grid or the discarded grid
+    fillable_grid = property(get_fillable_grid, None, reset_fillable_grid, "The room fillable space grid, excluding discarded regions")
+
+    # Fillable space area (read only)
+    def get_fillable_area (self) -> number:
+        return self.fillable_grid.area
+    fillable_area = property(get_fillable_area, None, None, "Fillable space area (read only)")
 
     # Get the corridor size
     def get_corridor_size (self) -> number:
@@ -976,9 +1026,6 @@ class Room:
     # Set the corridor size (regular setter)
     def set_corridor_size (self, new_corridor_size : number):
         self._corridor_size = new_corridor_size
-        # If the corridor is modified then we must update children target areas
-        for child in self.children:
-            child._target_area = None
 
     # The corridor size
     corridor_size = property(get_corridor_size, set_corridor_size, None, "The corridor size")
@@ -989,8 +1036,10 @@ class Room:
     def set_corridor_grid (self, new_corridor_grid : Optional[Grid], skip_update_display : bool = False):
         # Save the new corridor grid
         self._corridor_grid = new_corridor_grid
-        # Reset the free space, since the corridor size will take part of it
-        self.reset_inner_grids()
+        # Reset the corresponding inner grids
+        self.reset_free_grid()
+        self.reset_available_grid()
+        self.reset_fillable_grid()
         # Update rigid and discarded grids
         self.reset_rigid_grid()
         self.update_discarded_grid()
@@ -1032,11 +1081,13 @@ class Room:
         return self._discarded_grid
     # Setter which triggers free/available grid resetting
     def set_discarded_grid (self, new_discarded_grid):
+        # If nothing was changed then stop here, do not reset anything
+        if self._discarded_grid == new_discarded_grid:
+            return
+        # Update the discarded grid
         self._discarded_grid = new_discarded_grid
-        self.reset_inner_grids()
-        # If the corridor is modified then we must update children target areas
-        for child in self.children:
-            child._target_area = None
+        self.reset_available_grid()
+        self.reset_fillable_grid()
     # Set a grid for discarded space
     # This is space which is not suitable to be claimed and thus it is not set free to avoid the solver to try it
     # This space may be generated when setting the corridor and it may be impossible to recover
@@ -3217,7 +3268,7 @@ class Room:
         # We must substract the claimed rect from the other room and make it expand to compensate
         # Make a backup of the current boundary in case the further expansions fail an we have to go back
         backup_boundary = self.boundary
-        self.set_boundary(new_boundary)
+        self.boundary = new_boundary
         # Substract the claimed rect from other rooms
         invaded_region = Grid([new_rect])
         # Make a backup of all other room current boundaries
@@ -3240,6 +3291,12 @@ class Room:
                 for i, modified_room in enumerate(rooms):
                     modified_room.boundary = backup_room_boundaries[i]
                 return False
+        # Check the minimum size in the parent free grid to be respected
+        if not self.parent.free_grid.check_minimum(self.parent_free_limit):
+            self.boundary = backup_boundary
+            for i, modified_room in enumerate(rooms):
+                modified_room.boundary = backup_room_boundaries[i]
+            return False
         return True
 
     # Pull a segment in the boundary
@@ -3485,7 +3542,7 @@ class Room:
             # We must substract the claimed rect from the other room and make it expand to compensate
             # Make a backup of the current boundary in case the further expansions fail and we have to go back
             backup_boundary = self.boundary
-            self.set_boundary(new_boundary)
+            self.boundary = new_boundary
             invaded_region = Grid([new_rect])
             # Substract the claimed rect from other rooms
             # Make a backup of all other room current boundaries
@@ -3521,6 +3578,12 @@ class Room:
                     if protocol == 1:
                         return push_segment(pushed_segment, 2)
                     return False
+            # Check the minimum size in the parent free grid to be respected
+            if not self.parent.free_grid.check_minimum(self.parent_free_limit):
+                self.boundary = backup_boundary
+                for i, modified_room in enumerate(rooms):
+                    modified_room.boundary = backup_room_boundaries[i]
+                return False
             return True
                 
 
@@ -3900,6 +3963,9 @@ class Room:
     # Invade this room by substracting part of its space
     # Then this room must expand to recover the lost area
     def invade (self, region : Grid, force : bool = False, skip_update_display : bool = False) -> bool:
+        # If this room has no boundary then do nothing
+        if not self.boundary:
+            return True
         # Truncate the room boundary but save a backup in case we have to go back further
         backup_boundary = self.boundary
         if not self.truncate(region, force, skip_update_display=skip_update_display):
