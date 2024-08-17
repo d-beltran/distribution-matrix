@@ -3298,7 +3298,7 @@ class Room:
         # In case all substractions and relocations were successfull we can now set the new boundary as the current one
         self.boundary = new_boundary
         # Check the minimum size in the parent free grid to be respected
-        if self.parent.free_grid.check_minimum(self.parent_free_limit):
+        if not self.parent.free_grid.check_minimum(self.parent_free_limit):
             self.restore_backup(backup)
             return False
         return True
