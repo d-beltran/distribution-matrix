@@ -3351,6 +3351,8 @@ class Room:
                 # If a door is no longer in a suitable place and we fail to relocate it we must abort the pull
                 self.restore_backup(backup)
                 return False
+        # Backup this room boundary now
+        backup[self] = self.boundary
         # In case all substractions and relocations were successfull we can now set the new boundary as the current one
         self.boundary = new_boundary
         # Check the minimum size in the parent free grid to be respected
