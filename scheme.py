@@ -981,8 +981,7 @@ class Room:
             return self._fillable_grid
         # Calculate the fillable grid otheriwse
         # Then save it and return it
-        self._fillable_grid = self.find_inner_grid(remove_children=False)
-        add_frame(self._fillable_grid, 'debug')
+        self._fillable_grid = self.find_inner_grid(remove_children=False, remove_discarded=True)
         return self._fillable_grid
 
     # Set the fillable grid as None for it to be recalculated again next time it is needed
