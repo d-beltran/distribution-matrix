@@ -2620,7 +2620,8 @@ class Grid:
         return [ rect for rect in [ left_rect, right_rect, upper_rect, bottom_rect ] if rect != None ]
 
     # Check the grid to respect minimum size in both x and y dimensions
-    def check_minimum (self, minimum : number) -> bool:
+    def check_minimum (self, minimum : number, verbose : bool = False) -> bool:
+        if verbose: print('Grid checking minimum')
         # If this is an empty grid then return True
         # Conceptually there is no space not respecting the minimum size if there is no space at all
         if not self:
@@ -2632,6 +2633,7 @@ class Grid:
             x_size, y_size = max_rect.get_size()
             # If there is at least one maximum rectangle which does not respect minimum size in both x and y dimensions then it is wrong
             if lower(x_size, minimum) and lower(y_size, minimum):
+                if verbose: print(' Failed minimum check: There is at least a maximum rectangle not respecting the minimum size in both dimensions')
                 return False
             # Update the the rects maximum sizes
             for rect in contained_rects:
@@ -2652,17 +2654,22 @@ class Grid:
                 # If the segment is not wide enough it may make a corner with other free regions thus beeing correct
                 # Find out if the free border is making a corner
                 corner_segment = next((other for other in other_segments if other.makes_corner_with(segment)), None)
-                # In case it is, use the hipotenuse of the border to check the minimum size
-                if corner_segment:
-                    size = sqrt( segment.length**2 + corner_segment.length**2 )
-                    if size >= minimum:
-                        continue
-                # Otherwise, we are not respecting the minimum size
-                return False
+                # If there is not corner at all then the segment is not respecting the minimum size
+                if not corner_segment:
+                    if verbose: print(f' Failed minimum check: There is at least an inner segment not respecting the minimum size: {segment}')
+                    return False
+                # In case it is a corner, use the hipotenuse of the border to check the minimum size
+                # DANI: Aquí lo suyo sería encontrar el segmento diagonal, usal su length como size, y loguearlo cuando no cumple el min
+                size = sqrt( segment.length**2 + corner_segment.length**2 )
+                if lower(size, minimum):
+                    if verbose: print(f' Failed minimum check: There is at least an inner diagonal not respecting the minimum size: {size}')
+                    return False
         # Now that we have the maximum size of all minimum rects we must check all of them fulfill the minimum
         for sizes in rect_max_sizes.values():
             for size in sizes:
                 if lower(size, minimum):
+                    # DANI: Seguro que es esto es un problema?
+                    if verbose: print(f' Failed minimum check: There is at least a max rect not respecting one of the minimum sizes')
                     return False
         return True
 
