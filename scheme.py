@@ -2190,6 +2190,13 @@ class Room:
         # Show the relocated doors
         self.update_display(title='Displaying early corridor')
 
+        # Discarded spots may be generated while placing the early corridor
+        # We must try to save those spaces which may be reclaimed by other rooms
+        # It is not always possible to retrieve these regions however
+        if self.discarded_grid:
+            if self.reassign_discarded_regions():
+                self.update_display(title='Displaying discarded grid')
+
         # Get all children doors, both the already stablished and the not stablished ones
         # Add the room door also if this room is the root
         # Otherwise the door room must never be moved since it is already placed according to the parent corridor
@@ -2521,20 +2528,12 @@ class Room:
         # Show the relocated doors
         self.update_display(title='Displaying relocated doors')
 
-        # Discarded spots may be genrated while truncating rooms to place the corrido
+        # Discarded spots may be generated while truncating rooms to place the corridor
         # We must try to save those spaces which may be reclaimed by other rooms
-        # It is not always possible to retrieve save these regions however
+        # It is not always possible to retrieve these regions however
         if self.discarded_grid:
-            # print('WARNING: We are having problematic free spaces after corridor area truncation')
-            # Get the regions of the free space which may not be saved since they are not wide enought for any room
-            # These regions must be between the corridor and the parent boundary, since other regions may be recovered
-            # DANI: Aquí, cuando la boundary sea adaptable, almejor habría que usar la surrounding_grid en lugar de la self.grid
-            # non_corridor_grid = self.grid - self.corridor_grid
-            # non_corridor_reachable_grid = non_corridor_grid.keep_minimum(self.get_children_min_min_size())
-            # self.discarded_grid = non_corridor_grid - non_corridor_reachable_grid
-            self.reassign_discarded_regions()
-            # Show the discarded grid
-            self.update_display(title='Displaying discarded grid')
+            if self.reassign_discarded_regions():
+                self.update_display(title='Displaying discarded grid')
 
         # Check there is enought space to fit children after corridor area substraction
         children_available_area = self.area - self.corridor_grid.area - self.discarded_grid.area
@@ -2638,6 +2637,8 @@ class Room:
     # Reassign discarded regions to colliding rooms
     # Ignore rooms area budget
     def reassign_discarded_regions (self):
+        # Set if there was at leas 1 reasignment
+        any_reasigned = False
         # Keep trying to find new regions to reasssign until there is no more discarded grid
         # This loop will also break if we failed to reassign any region
         while self.discarded_grid:
@@ -2649,9 +2650,13 @@ class Room:
                     reasigned = True
                     # Show the progress
                     # self.update_display(title='Displaying discarded grid reasignation step')
+            # If there was a reasignment then set the global as true
+            if reasigned:
+                any_reasigned = True
             # If there was no reasignment then stop here
-            if not reasigned:
+            else:
                 break
+        return any_reasigned
 
     # Given a boundary which is meant to belong to the discarded grid,
     # Find regions which may be claimed by colliding rooms, the corridor or just free space
