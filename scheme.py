@@ -560,8 +560,6 @@ class Room:
         self.parent_building = parent_building
         # Set an atrribute to sabe the corridor grid when it is set
         self._corridor_grid = Grid()
-        # Set a status variable which becomes true after the corridor has been fully solved
-        self.is_corridor_stablished = False
         # Set the boundary
         # If the boundary has been forced then update the display with the initial segments
         if boundary:
@@ -672,6 +670,12 @@ class Room:
 
     # The children rooms
     children = property(get_children, set_children, None, "The children rooms")
+
+    # Get the brother rooms
+    def get_brother_rooms (self) -> List['Room']:
+        if not self.parent:
+            return None
+        return [ room for room in self.parent.children if room != self ]
 
     # Get the boundary
     def get_boundary (self) -> Boundary:
@@ -842,6 +846,21 @@ class Room:
 
     # Room target area (read only)
     target_area = property(get_target_area, None, None, "Target area to be reached after the solving process")
+
+    # Find out the donable area
+    # i.e. the area over the minimum area
+    def get_donable_area (self) -> number:
+        if self.area < self.min_area:
+            return 0
+        return self.area - self.min_area
+    donable_area = property(get_donable_area, None, None, "Donable area over the minimum area")
+
+    # Find out the donable area proportion
+    # i.e. the area over the minimum area in proportion to the area range between the minimum and the maximum areas
+    def get_donable_area_proportion (self) -> number:
+        area_range = self.max_area - self.min_area
+        return self.donable_area / area_range
+    donable_area_proportion = property(get_donable_area_proportion, None, None, "Donable area over the minimum area in proportion to area range between the minimum and the maximum areas")
 
     # Set a function to set all children target areas at once
     # Note that all children areas have to be assigned together
@@ -2543,14 +2562,11 @@ class Room:
 
         # Now, relocate and reshape children rooms
         for child in self.children:
-            if not child.fit_to_required_area():
+            if not child.fit_to_required_area(conformist=True):
                 raise ValueError(f'{child.name} failed to fit to required area after corridor area truncation')
 
         # Show redistribution after reshaping child rooms
         self.update_display(title='Displaying redistributed rooms')
-
-        # Set the corridor as stablished
-        self.is_corridor_stablished = True
 
     # Reduce the number of corners in this room exterior polygon by reshaping self and children boundaries
     # This function is meant to run in the root room only
@@ -2924,11 +2940,16 @@ class Room:
             return 0
         return min(all_min_sizes)
 
-    # Calculate how much area we need to expand
-    def get_required_area (self) -> number:
+    # Calculate how much area we need to expand or contract
+    # If the conformist flag is passed as true then return 0 when the are is between the maximum and minimum areas
+    def get_required_area (self, conformist : bool = False) -> number:
+        # print(f'Setting required area for {self.name}')
+        # print(f'  Area range: {self.max_area} - {self.min_area}')
+        # print(f'  Target area: {self.target_area}')
+        # print(f'  Current area: {self.area}')
         # If we already have a corridor then we are flexible with the area
         # Target area is not a specific area but a range
-        if self.parent.is_corridor_stablished:
+        if conformist:
             # If we are over the maximum we must reduce the are so we return a negative area
             if self.area > self.max_area:
                 return resolute(self.max_area - self.area)
@@ -2941,8 +2962,8 @@ class Room:
         return resolute(self.target_area - self.area)
 
     # Check if this room is already fit to its required area
-    def is_fit_to_required_area (self) -> bool:
-        required_area = self.get_required_area()
+    def is_fit_to_required_area (self, conformist : bool = False) -> bool:
+        required_area = self.get_required_area(conformist=conformist)
         # print(f'Fitting {self.name} to target area: {self.min_area} - {self.max_area}')
         # print(f'  Current area: {self.area} -> Required area: {required_area}')
         # print(f'  Is fit? {abs(required_area) < minimum_resolution * self.max_area}')
@@ -2951,12 +2972,12 @@ class Room:
     # Expand or contract this room until it reaches the forced area
     # In case it is not able to fit at some point recover the original situation
     # Restricted segments are segments which must remain as are
-    def fit_to_required_area (self, restricted_segments : list = [], verbose : bool = False) -> bool:
+    def fit_to_required_area (self, restricted_segments : list = [], conformist : bool = False, verbose : bool = False) -> bool:
         if verbose: print(f'Fitting {self.name}')
         # Calculate how much area we need to expand
-        required_area = self.get_required_area()
+        required_area = self.get_required_area(conformist=conformist)
         # If the area is already satisfied then stop here
-        if self.is_fit_to_required_area():
+        if self.is_fit_to_required_area(conformist=conformist):
             return True
         # Make a boundary backup of this room and all its brothers
         backup = self.parent.make_children_backup()
@@ -2985,7 +3006,7 @@ class Room:
                 # Expand
                 if expand_step():
                     # Refresh how much area we need to expand and go for the next step
-                    required_area = self.get_required_area()
+                    required_area = self.get_required_area(conformist=conformist)
                     continue
             # If the required are is negative it means we need to contract our room
             if required_area < 0:
@@ -3002,7 +3023,7 @@ class Room:
                 # Contract
                 if contract_step():
                     # Refresh how much area we need to expand and go for the next step
-                    required_area = self.get_required_area()
+                    required_area = self.get_required_area(conformist=conformist)
                     continue
             # In case the fitting failed restore the backup and exit
             if verbose: print(f' Failed to fit {self.name}')
@@ -3133,8 +3154,25 @@ class Room:
                 yield frontier, True
 
         # Find for each brother room the number of colliding rooms we must jump to find free space
+        # If there is no free space then the room with more area to give away in proportion
         # Then use this value to set the "score" of each brother room frontiers and sort them
-        def sort_by_shortest_path (frontiers_group : list) -> list:
+        def sort_by_shortest_path (frontiers_group : list, verbose : bool = False) -> list:
+            if verbose: print('Sorting best frontiers')
+            # Find out if there is free space
+            is_free_space_available = bool(self.parent.free_grid)
+            if verbose: print(f'  There is free space: {is_free_space_available}')
+            # If there is no free space then we must find the most suitable room to give away some area
+            donnor_room = None
+            if not is_free_space_available:
+                print('WARNING: We are running a part of the code which is implemented but not tested')
+                # Find the brother room with the highest donable area proportion
+                all_brothers = self.get_brother_rooms()
+                donable_area_proportions = [ room.donable_area_proportion for room in all_brothers ]
+                max_donable_area_proportion = max(donable_area_proportions)
+                donnor_room_index = donable_area_proportions.index(max_donable_area_proportion)
+                donnor_room = all_brothers[donnor_room_index]
+                if verbose: print(f'  Donnor room: {donnor_room.name}')
+            # Find the immediate colliding rooms
             colliding_rooms = unique([ frontier.rooms[0] for frontier in frontiers_group ])
             # WARNING: We must shuffle the colliding rooms at this point
             # Otherwise frontiers from the same room are always returned first
@@ -3142,6 +3180,14 @@ class Room:
             random.shuffle(colliding_rooms)
             meaningful_frontiers = []
             for colliding_room in colliding_rooms:
+                # If this is the donnor room already then set the scores here already
+                if colliding_room == donnor_room:
+                    colliding_room_frontiers = [ frontier for frontier in frontiers_group if frontier.rooms[0] == colliding_room ]
+                    for frontier in colliding_room_frontiers:
+                        frontier.score = 0
+                        meaningful_frontiers.append(frontier)
+                    continue
+                # Otherwise run the recursive logic
                 previous_rooms = [ self ]
                 current_rooms = [ colliding_room ]
                 counter = 1
@@ -3153,12 +3199,21 @@ class Room:
                     current_frontiers = []
                     for current_room in current_rooms:
                         free_frontiers, brother_frontiers, parent_frontiers = current_room.get_frontiers()
-                        if len(free_frontiers) > 0:
-                            searching_free = False
-                            break
+                        # If there is free space then we finish when we find free space
+                        if is_free_space_available:
+                            if len(free_frontiers) > 0:
+                                searching_free = False
+                                break
+                        # If there is no free space then we finish when we find the target room
+                        else:
+                            # Check if any of the brother frontiers is the donnor room
+                            brother_rooms = set(sum([ frontier.rooms for frontier in brother_frontiers ], []))
+                            if donnor_room in brother_rooms:
+                                searching_free = False
+                                break
                         current_frontiers += brother_frontiers
                     if not searching_free:
-                        # print('ROOM ' + colliding_room.name + ' -> SCORE ' + str(counter))
+                        if verbose: print(f'  Room { colliding_room.name} -> Score {counter}')
                         break
                     previous_rooms = previous_rooms + current_rooms
                     current_rooms = unique([ frontier.rooms[0] for frontier in current_frontiers if frontier.rooms[0] not in previous_rooms ])
@@ -3166,7 +3221,7 @@ class Room:
                         # Froniers which do not lead to free space are meaningless
                         # Trying to expand through them is a waste of time so they will be excluded
                         counter = None
-                        # print('ROOM ' + colliding_room.name + ' -> DEAD END')
+                        if verbose: print(f'  Room { colliding_room.name} -> Dead end')
                         break
                     counter += 1
                 # Set the scores for all frontiers
@@ -4062,7 +4117,7 @@ class Room:
                 for brother_room in brother_rooms:
                     # Invade if we must compase or truncate if not
                     truncator = brother_room.invade if compensate_invaded else brother_room.truncate
-                    print(f' {label} {brother_room.name}')
+                    if verbose: print(f' {label} {brother_room.name}')
                     if not truncator(expansion_grid):
                         if verbose: print(f' Grid expansion failed: Grid was expanded over a brother room which failed to expand -> Restoring backup')
                         self.grid = backup
