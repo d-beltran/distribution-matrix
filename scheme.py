@@ -2885,7 +2885,7 @@ class Room:
                             # There is no need to recover the backup at this point
                             continue
                     # Now push the inside segment
-                    if not child.push_boundary_segment(inside_segment, inside_push_length):
+                    if not child.push_boundary_segment(inside_segment, inside_push_length, easy=True):
                         if verbose: print(f'WARNING: Failed to push {inside_segment}')
                         # Revert the previous push
                         self.restore_backup(backup)
@@ -2942,11 +2942,12 @@ class Room:
 
     # Calculate how much area we need to expand or contract
     # If the conformist flag is passed as true then return 0 when the are is between the maximum and minimum areas
-    def get_required_area (self, conformist : bool = False) -> number:
-        # print(f'Setting required area for {self.name}')
-        # print(f'  Area range: {self.max_area} - {self.min_area}')
-        # print(f'  Target area: {self.target_area}')
-        # print(f'  Current area: {self.area}')
+    def get_required_area (self, conformist : bool = False, verbose : bool = False) -> number:
+        if verbose:
+            print(f'Setting required area for {self.name}')
+            print(f'  Area range: {self.max_area} - {self.min_area}')
+            print(f'  Target area: {self.target_area}')
+            print(f'  Current area: {self.area}')
         # If we already have a corridor then we are flexible with the area
         # Target area is not a specific area but a range
         if conformist:
@@ -2974,8 +2975,11 @@ class Room:
     # Restricted segments are segments which must remain as are
     def fit_to_required_area (self, restricted_segments : list = [], conformist : bool = False, verbose : bool = False) -> bool:
         if verbose: print(f'Fitting {self.name}')
+        # If this is not a conformist call then make sure there is free space available to claim
+        if not conformist and not self.free_grid:
+            raise RuntimeError(f'Trying to fit {self.name} (not conformist) but there is no free space available')
         # Calculate how much area we need to expand
-        required_area = self.get_required_area(conformist=conformist)
+        required_area = self.get_required_area(conformist=conformist, verbose=verbose)
         # If the area is already satisfied then stop here
         if self.is_fit_to_required_area(conformist=conformist):
             return True
@@ -2991,7 +2995,7 @@ class Room:
         # DANI: Es mejor con la multiplicación que sin ella. Le da más flexibilidad a la resolución del puzle acelerando así el proceso
         # DANI: Es muy peligrosos que queden espacios libres sin reclamar (cuando no tenga que haberlos)
         # DANI: Pero una resolución pequeña no hará que no queden espacios libres, simplemente hará que esos espacios sean muy pequeños
-        while not self.is_fit_to_required_area():
+        while not self.is_fit_to_required_area(conformist=conformist):
             if verbose: print(f' Required area: {required_area}')
             # If the required are is positive it means we must expand our room
             if required_area > 0:
@@ -2999,14 +3003,14 @@ class Room:
                 def expand_step () -> bool:
                     # Get the most suitable frontier to expand and try to expand it
                     # If the expansions fails, try with the next one
-                    for frontier, loan_permission in self.get_best_frontiers(restricted_segments):
-                        if self.expand_frontier(frontier, required_area, loan_permission):
+                    for frontier, loan_permission in self.get_best_frontiers(restricted_segments, verbose=verbose):
+                        if self.expand_frontier(frontier, required_area, loan_permission, conformist=conformist):
                             return True
                     return False
                 # Expand
                 if expand_step():
                     # Refresh how much area we need to expand and go for the next step
-                    required_area = self.get_required_area(conformist=conformist)
+                    required_area = self.get_required_area(conformist=conformist, verbose=verbose)
                     continue
             # If the required are is negative it means we need to contract our room
             if required_area < 0:
@@ -3016,14 +3020,14 @@ class Room:
                     # If the contraction fails, try with the next one
                     # DANI: De momento uso la misma lógica que la de la expansión porque no va mal
                     # DANI: i.e. evitar contraer fronteras del padre y priorizar fronteras libres es bueno
-                    for frontier, loan_permission in self.get_best_frontiers(restricted_segments, contraction=True):
+                    for frontier, loan_permission in self.get_best_frontiers(restricted_segments, contraction=True, verbose=verbose):
                         if self.contract_frontier(frontier, -required_area):
                             return True
                     return False
                 # Contract
                 if contract_step():
                     # Refresh how much area we need to expand and go for the next step
-                    required_area = self.get_required_area(conformist=conformist)
+                    required_area = self.get_required_area(conformist=conformist, verbose=verbose)
                     continue
             # In case the fitting failed restore the backup and exit
             if verbose: print(f' Failed to fit {self.name}')
@@ -3041,7 +3045,9 @@ class Room:
     def get_best_frontiers (self,
         restricted_segments : List[Segment] = [],
         contraction : bool = False,
+        verbose : bool = False,
         ) -> Generator[ Tuple[ Segment, bool ], None, None ]:
+        if verbose: print(f'Finding best frontiers for {self.name}')
 
         # Get the exterior polygon of the room boundary
         exterior_polygon = self.boundary.exterior_polygon
@@ -3164,7 +3170,7 @@ class Room:
             # If there is no free space then we must find the most suitable room to give away some area
             donnor_room = None
             if not is_free_space_available:
-                print('WARNING: We are running a part of the code which is implemented but not tested')
+                print('WARNING: We are running a part of the code which is implemented but not tested deeply')
                 # Find the brother room with the highest donable area proportion
                 all_brothers = self.get_brother_rooms()
                 donable_area_proportions = [ room.donable_area_proportion for room in all_brothers ]
@@ -3249,7 +3255,7 @@ class Room:
         random.shuffle(brother_frontiers)
         # In case we are expanding, sort them according to the shortest route to the free space
         if not contraction:
-            brother_frontiers = sort_by_shortest_path(brother_frontiers)
+            brother_frontiers = sort_by_shortest_path(brother_frontiers, verbose=verbose)
         # Sort brother frontiers priorizing single frontiers since they are easier to expand
         # Try all brother frontiers with loaned push not allowed
         # If all of them fail then try with loaned push allowed
@@ -3262,12 +3268,21 @@ class Room:
         if contraction:
             for frontier in parent_frontiers:
                 yield frontier, False
-        print('WARNING: There are no more frontiers available')
+        if verbose: print('WARNING: There are no more frontiers available')
 
     # Push a segment in the boundary
     # Check everything is fine after the push and, if so, return True
     # In case there is any problem the push is not done and this function returns False
-    def push_boundary_segment (self, segment : Segment, push_length : number) -> bool:
+    # If the 'is_loaned' argument is passed then this room area is fitted after brother rooms truncation, before compensation
+    # The conformist argument is forwarded to the 'fit_to_required_area' function
+    # The easy argument is forwarded to the 'truncate' function
+    def push_boundary_segment (self,
+        segment : Segment,
+        push_length : number,
+        is_loaned : bool = False,
+        conformist : bool = False,
+        easy : bool = False,
+    ) -> bool:
         # Get the push direction
         direction = -self.boundary.exterior_polygon.get_border_inside(segment)
         # If the push length at this point is 0 or close to it then we can not push
@@ -3298,39 +3313,59 @@ class Room:
         # Check doors would be respected with the new boundary
         if not self.check_doors(new_boundary.grid):
             return False
-        # In case the boundary is extended over another room,
-        # We must substract the claimed rect from the other room and make it expand to compensate
+        # Check parent doors would be respected with the new boundary
+        if parent_room and parent_room._child_adaptable_boundary and not parent_room.check_doors_side(new_boundary.grid, inside=False):
+            return False
         # Make a backup of the current boundary in case the further expansions fail an we have to go back
         backup_boundary = self.boundary
-        self.boundary = new_boundary
-        # Substract the claimed rect from other rooms
-        invaded_region = Grid([new_rect])
-        # Make a backup of all other room current boundaries
+        # Make a list of all other rooms, both parent and brothers
+        # Get only brother rooms with an already existing boundary
         rooms = []
         if parent_room:
-            rooms.append(parent_room)
-            rooms += [ room for room in parent_room.children if room != self ]
+            rooms = [ parent_room ] + [ room for room in self.get_brother_rooms() if room.boundary ]
+        # Make a backup of all other room current boundaries
         backup_room_boundaries = [ room.boundary for room in rooms ]
-        # Get the claimed region from each region
-        for room in rooms:
-            # If we claimed parent (free) space there is no need to check anything
-            if room == parent_room:
-                continue
-            # Get the overlapping region between the invaded region and each affected room boundary
-            current_room_invaded_regions = room.grid.get_overlap_grid(invaded_region)
-            if not current_room_invaded_regions:
-                continue
-            if not room.invade(current_room_invaded_regions):
-                self.boundary = backup_boundary
-                for i, modified_room in enumerate(rooms):
-                    modified_room.boundary = backup_room_boundaries[i]
-                return False
-        # Check the minimum size in the parent free grid to be respected
-        if not self.parent.free_grid.check_minimum(self.parent_free_limit):
+        # In case the boundary is extended over another room,
+        # We must substract the claimed rect from the other room and make it expand to compensate
+        self.boundary = new_boundary
+        def restore_local_backup ():
             self.boundary = backup_boundary
             for i, modified_room in enumerate(rooms):
                 modified_room.boundary = backup_room_boundaries[i]
+        # Substract the claimed rect from other rooms
+        invaded_region = Grid([new_rect])
+        # Get the claimed region from each room
+        for room in rooms:
+            # If we claimed parent (free) space there is no need to compensate anything
+            if room == parent_room:
+                # In case we expanded over discarded grid make sure it is not discarded anymore
+                room.discarded_grid -= invaded_region
+                continue
+            # In case it is a brother room, truncate it
+            if not room.truncate(invaded_region, easy=easy):
+                # If the truncation failed then 
+                restore_local_backup()
+                return False
+        # Check the minimum size in the parent free grid to be respected
+        if not self.parent.free_grid.check_minimum(self.parent_free_limit):
+            restore_local_backup()
             return False
+        # If this is a loaned push then we must retrieve the area debt at this point
+        # Otherwise, if we invade other rooms it may happen that there is not free space enought for them to expand after
+        if is_loaned and self.get_required_area() < 0:
+            if not self.fit_to_required_area(restricted_segments=new_segments, conformist=conformist):
+                restore_local_backup()
+                return False
+        # Now compensate every brother room for their substracted area
+        for room in rooms:
+            # Parent room is not to be compensated
+            if room == parent_room:
+                continue
+            # Start the compensation
+            if not room.fit_to_required_area(conformist=conformist):
+                restore_local_backup()
+                return False
+        # If everything was fine then the push succeed
         return True
 
     # Pull a segment in the boundary
@@ -3400,7 +3435,12 @@ class Room:
     # Note that the frontier must contain the room it belongs to
     # Set the required (maximum) area it can expand
     # Return True if the expansion was succesful or False if there was no expansion
-    def expand_frontier (self, frontier : Segment, required_area : number, allowed_loan_push : bool = False) -> bool:
+    def expand_frontier (self,
+        frontier : Segment,
+        required_area : number,
+        allowed_loan_push : bool = False,
+        conformist : bool = False
+    ) -> bool:
         # Set the push segment protocol according to the loan permission
         push_protocol = 3 if allowed_loan_push else 1
         # Get the parent room
@@ -3469,9 +3509,6 @@ class Room:
             raise RuntimeError('Frontier ' + str(frontier) + ' has no space in rooms ' + room_names)
         space_contact = next(segment for segment in space.segments if frontier in segment)
         space_forward_limit = space.get_size()[forward]
-
-        # Find the direction of the expansion as a vector
-        forward_direction = space.get_side_direction_to_center(space_contact)
 
         # Get the forward expansion limit according to maximum rectangles
         maximum_forward_limit = max([ rect.get_size()[forward] for rect in contact_max_rects ])
@@ -3560,77 +3597,15 @@ class Room:
                 if corner_push_limit != None:
                     limits.append(corner_push_limit)
                 push_length = min(limits)
-            # If the push length at this point is 0 or close to it then we can not push
-            # This is because of forward limits, not because the area was not big enought
-            if push_length < minimum_resolution:
+            # Now that we have the definitive push length, we actually push the segment
+            is_loaned = protocol == 3
+            if not self.push_boundary_segment(pushed_segment, push_length, is_loaned=is_loaned, conformist=conformist):
+                # If the push failed with a greedy push then try a conservative push
+                if protocol == 1:
+                    return push_segment(pushed_segment, 2)
+                # Otherwise we surrender to push this segment
                 return False
-            # Create the new rect with the definitive length
-            new_point = pushed_segment.a + forward_direction.normalized() * push_length
-            new_side = Segment(pushed_segment.a, new_point)
-            new_rect = Rect.from_segments([pushed_segment, new_side])
-            # Then add the new current rectangle by modifying the current boundary
-            # Add the new rectangle segment regions which do not overlap with current boundary segments
-            # Substract the new rectangle segment regions which overlap with current boundary segments
-            # e.g. the pushed segment will always be an overlapped region
-            new_segments = new_rect.segments
-            current_segments = self.boundary.segments
-            added_segments = [ seg for segment in new_segments for seg in segment.substract_segments(current_segments) ]
-            remaining_segments = [ seg for segment in current_segments for seg in segment.substract_segments(new_segments) ]
-            # Join all previous segments to make new polygons
-            new_exterior_polygon = Polygon.non_canonical([ *added_segments, *remaining_segments ])
-            new_boundary = Boundary(new_exterior_polygon, self.boundary.interior_polygons)
-            # Check doors would be respected with the new boundary
-            if parent_room in rooms and parent_room._child_adaptable_boundary and not parent_room.check_doors_side(new_boundary.grid, inside=False):
-                return False
-            # In case the boundary is extended over another room,
-            # We must substract the claimed rect from the other room and make it expand to compensate
-            # Make a backup of the current boundary in case the further expansions fail and we have to go back
-            backup_boundary = self.boundary
-            self.boundary = new_boundary
-            invaded_region = Grid([new_rect])
-            # Substract the claimed rect from other rooms
-            # Make a backup of all other room current boundaries
-            backup_room_boundaries = [ room.boundary for room in rooms ]
-            # In case we made a loaned push now we may have more area than we need (usually)
-            # We need to return the extra area now
-            # Otherwise, if we invade other rooms it may happen that there is not free space enought for them to expand after
-            # WARNING: Note that this is an exceptional situation and there are a few extra things to take in count
-            # WARNING: At this point there is interior polygons overlap in the parent boundary
-            # WARNING: At this point the room is not coordianted with other rooms or the parent free grid
-            #          The recently pushed segments must remain as they are
-            #          They do not exist for other rooms so me must exlcude them during the fitting to avoid inconsistency
-            if protocol == 3 and self.get_required_area() < 0:
-                #print('LOANED PUSH -> NEW REQUIRED AREA: ' + str(self.get_required_area()))
-                if not self.fit_to_required_area(restricted_segments=new_segments):
-                    if verbose: print('Failed to fit after loaned push -> Restoring backup')
-                    self.boundary = backup_boundary
-                    for i, modified_room in enumerate(rooms):
-                        modified_room.boundary = backup_room_boundaries[i]
-                    return False
-            for room in rooms:
-                # If we claimed parent (free) space there is only need to update the discarded grid and nothing else
-                if room == parent_room:
-                    room.discarded_grid -= invaded_region
-                    continue
-                # Now invade other rooms
-                current_room_invaded_regions = room.grid.get_overlap_grid(invaded_region)
-                if not room.invade(current_room_invaded_regions):
-                    if verbose: print('Failed to invade after push -> Restoring backup')
-                    self.boundary = backup_boundary
-                    for i, modified_room in enumerate(rooms):
-                        modified_room.boundary = backup_room_boundaries[i]
-                    # If the invasion fails then try it again with the next protocol
-                    # If we are in the last protocol then return False
-                    if protocol == 1:
-                        return push_segment(pushed_segment, 2)
-                    return False
-            # Check the minimum size in the parent free grid to be respected
-            if not self.parent.free_grid.check_minimum(self.parent_free_limit):
-                if verbose: print('Failed to respect minimum size after push -> Restoring backup')
-                self.boundary = backup_boundary
-                for i, modified_room in enumerate(rooms):
-                    modified_room.boundary = backup_room_boundaries[i]
-                return False
+            # If the push succeeded
             return True
                 
 
@@ -3937,9 +3912,18 @@ class Room:
 
     # Remove part of the room space and check everything is fine after
     # Use the force argument to skip all checkings and simply truncate the boundary
+    # Use the easy argument to simply fail when minimum size is not respected in the truncated grid
+    # Otherwise it tries to compenaste the grid before surrending, but this is not desired sometimes (e.g. when reducing corners)
     # Use the skip_update_display to avoid this truncate to generate a display frame
     # This is useful when truncating several rooms at the same time, so we do not have to recalculate the parent free grid every time
-    def truncate (self, region : Grid, force : bool = False, check_parent : bool = False, skip_update_display : bool = False, verbose : bool = False) -> bool:
+    def truncate (self,
+        region : Grid,
+        force : bool = False,
+        easy : bool = False,
+        check_parent : bool = False,
+        skip_update_display : bool = False,
+        verbose : bool = False
+    ) -> bool:
         if verbose: print(f'Truncating {self.name}')
         grid = self.grid
         # In case the room has not grid there is no problem at all in the truncation
@@ -3989,6 +3973,11 @@ class Room:
         self.set_grid(truncated_grid, skip_update_display=skip_update_display)
         # Check the truncated grid to still respecting the minimum size
         if not self.grid.check_minimum(self.min_size):
+            # Surrender when the minimum check fails if the easy argument was passed
+            if easy:
+                if verbose: print(' Minimum size failed and grid compensation will not be tried -> Restoring backup')
+                self.set_grid(backup, skip_update_display=skip_update_display)
+                return False
             if verbose: print(' Minimum size conflict when truncating: Grid will be compensated')
             # If not then try to expand the truncated room accordingly to the truncated region to make it respect the minimum
             compensation_grid = self.grid.get_compensation_grid(region, self.min_size)
