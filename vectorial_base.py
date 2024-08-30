@@ -991,23 +991,6 @@ class Rect:
     # The rectangle area (read only)
     area = property(get_area, None, None, "The rectangle area")
 
-    # Given a segment of the current rectangle, get the normalized direction from this segment to the rectangle center
-    def get_side_direction_to_center (self, segment : Segment) -> Vector:
-        segments = self.get_segments()
-        # Left side
-        if segment == segments[0]:
-            return RIGHT
-        # Upper side
-        if segment == segments[1]:
-            return DOWN
-        # Right side
-        if segment == segments[2]:
-            return LEFT
-        # Buttom side
-        if segment == segments[3]:
-            return UP
-        raise ValueError('Segment "' + str(segment) + '" is not part of rectangle "' + str(self) + '"')
-
     # Return a segment which crosses the rectangle in diagonal from bottom left to upper right points
     def get_crossing_segment (self) -> Segment:
         return Segment(self.get_bottom_left_point(), self.get_upper_right_point(), self.segments_color)
