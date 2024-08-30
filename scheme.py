@@ -1,7 +1,7 @@
 from typing import List, Tuple, Dict, Union, Optional
 
+from auxiliar import *
 from scheme_display import add_frame
-
 from vectorial_base import *
 
 import random
@@ -11,7 +11,8 @@ from math import sqrt, inf, tan, atan, degrees, radians
 seed = None
 #seed = 716178
 #seed = 256271
-seed = 51832
+#seed = 51832 # No se resuelve por una esquina problemática
+seed = 679238
 
 if not seed:
     seed = round(random.random() * 999999)
@@ -26,14 +27,6 @@ display_solving_process = False
 # Set the number of frames to be displayed before stopping the process
 # This is useful for debugging
 display_frames_limit = 200
-
-# For debugging
-time_counter = 0
-def kill_in_time (time : int):
-    global time_counter
-    if time_counter >= time:
-        raise RuntimeError('Stop here please :)')
-    time_counter += 1
 
 # A door is a segment in a boundary
 # When boundaries are transformed to walls with tickness, doors become holes in the wall
@@ -4779,6 +4772,8 @@ class Building:
 
     # Solve all floors
     def solve (self, display : bool = False):
+        global display_solving_process
+        display_solving_process = display
         # Solve each floor starting by the floor 0 (the first floor), then solving the superior floors and finally the basements
         sorted_floor_indices = list(range(self.highest_floor_number +1)) + list(range(self.lowest_floor_number, 0))
         for floor_number in sorted_floor_indices:
@@ -4843,11 +4838,4 @@ class Building:
             # Start the whole solving process
             floor.solve(display)
 
-# Exception for when user input is wrong
-class InputError(SystemExit):
-    pass
-
-# Just for better display
-def round_to_hundredths (number : number) -> number:
-    return round(number * 100) / 100
 # -----------------------------------------------------

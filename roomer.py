@@ -1,6 +1,7 @@
 from vectorial_base import *
 from scheme import *
 from scheme_display import setup_display
+from auxiliar import round_to_hundredths
 
 # Import some python libraries to trace and benchmark
 from traceback import print_exc
@@ -38,5 +39,5 @@ if __name__ == '__main__':
 
     # Calculate how much it took to run the whole process and output the result
     end_time = time()
-    total_time = round((end_time - start_time) * 100) / 100
-    print(' -- The process took ' + str(total_time) + ' seconds to run --')
+    total_time = round_to_hundredths(end_time - start_time)
+    print(f' -- The process took {total_time} seconds to run --')
