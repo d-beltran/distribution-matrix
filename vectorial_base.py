@@ -3592,13 +3592,15 @@ def generate_random_polygon (
     # add_frame(polygon.segments, title='Random polygon generator: outcome')
     # Check the polygon is respecting the restrictions
     polygon_area = polygon.area
-    if not equal(polygon_area, area):
+    # The bigger the area the more flexible we must be with area unaccuracies
+    area_difference = abs(polygon_area - area)
+    if area_difference > minimum_resolution * area:
         elements_to_display = grid.get_perimeter_segments('blue') + [ segment.get_colored_segment('green') for segment in bones ]
         add_frame(elements_to_display, 'DEBUG')
-        raise ValueError('The final polygon area (' + str(polygon_area) + ') is not respecting the input area (' + str(area) + ')')
+        raise ValueError(f'The final polygon area ({polygon_area}) is not respecting the input area ({area})')
     polygon_corners = len(polygon.corners)
     if polygon_corners != corners:
-        raise ValueError('The final polygon corners (' + str(polygon_corners) + ') does not match the input corners (' + str(corners) + ')')
+        raise ValueError(f'The final polygon corners ({polygon_corners}) does not match the input corners ({corners})')
     # Return the final polygon
     return polygon
 
