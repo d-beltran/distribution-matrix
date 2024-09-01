@@ -32,6 +32,10 @@ def greater (a : float, b : float) -> bool:
     return a > b + minimum_resolution
 def lower (a : float, b : float) -> bool:
     return a < b - minimum_resolution
+def equal_or_greater (a : float, b : float) -> bool:
+    return equal(a, b) or greater(a, b)
+def equal_or_lower (a : float, b : float) -> bool:
+    return equal(a, b) or lower(a, b)
 
 # Set another function to check if two numbers are very close, out of resolution matters
 # We do the double check because the 'isclose' function may fail for values close to 0
@@ -69,4 +73,11 @@ def pairwise (values : list, retro : bool = False, loyals : bool = False) -> Gen
 def otherwise (values : list) -> Generator[tuple, None, None]:
     for v, value in enumerate(values):
         others = values[0:v] + values[v+1:]
+        yield value, others
+
+# Set a special iteration system
+# Return one value of the array and a new array with the rest of values after for each value
+def afterwise (values : list) -> Generator[tuple, None, None]:
+    for v, value in enumerate(values):
+        others = values[v+1:]
         yield value, others

@@ -1,6 +1,6 @@
+from scheme_display import setup_display
 from vectorial_base import *
 from scheme import *
-from scheme_display import setup_display
 from auxiliar import round_to_hundredths
 
 # Import some python libraries to trace and benchmark
@@ -18,7 +18,7 @@ if __name__ == '__main__':
 
     # Represent current rooms tagged as display = True
     if display:
-        setup_display()
+        setup_display(frames_limit=1000)
 
 
     #test = test_room_1
@@ -32,7 +32,7 @@ if __name__ == '__main__':
 
     # Start the solving process
     try:
-        test.solve(display=display)
+        test.solve()
         print('Done :)')
     except Exception as e:
         print_exc()

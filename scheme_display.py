@@ -5,7 +5,6 @@ from matplotlib.widgets import Slider, Button
 import matplotlib.patches as mpatches
 
 import math
-import numpy as np
 from multiprocessing import Process, Queue
 
 from typing import Optional
@@ -13,6 +12,16 @@ from typing import Optional
 # Remove the slider silly warning
 import warnings
 warnings.filterwarnings("ignore")
+
+# Set the global display options
+# Values here are used by other modules
+display_options = {
+    # Set if the display is actually enabled
+    'enabled': False,
+    # Set the number of frames to be displayed before stopping the process
+    # This is useful for debugging
+    'frames_limit': math.inf
+}
 
 # Set a list with all system values at each recorded step
 frames = []
@@ -28,6 +37,9 @@ def add_frame (data : list, title : Optional[str] = None):
     print(' [ frame ' + str(len(frames)) + ' ] - ' + display_message)
     if type(data) != list:
         data = [data]
+    # Remove duplicates
+    data = list(set(data))
+    # Mine displayable segments from data
     segments = get_segments_from_anything(data)
     # This is for the fillings only, to add color
     rects = get_rects_from_anything(data)
@@ -143,7 +155,13 @@ def represent (queue):
     plt.show()
 
 # Set the heatmap representation in a paralel process so the matrix can keep beeing calculated
-def setup_display ():
+def setup_display (frames_limit : Optional[int] = None):
+    # Set the global display option as true
+    global display_options
+    display_options['enabled'] = True
+    if frames_limit != None:
+        display_options['frames_limit'] = frames_limit
+    # Start the display logic
     queue.put(frames)
     p = Process(target=represent, args=(queue, ))
     p.start()
@@ -243,4 +261,5 @@ def get_rects_from_anything (things : list):
                 # WARNING: Do not write code here!!
         except:
             pass
+    # Remove duplicates
     return rects

@@ -457,6 +457,16 @@ class Segment(Line):
             return self.a
         else:
             raise ValueError('Input point is not one of the segment points')
+        
+    # Given two segments, return the point where they are connected
+    # If they are not connected return None
+    # WARNING: If they connect at both point (i.e. they are identical) then one of the points is returned anyway
+    def get_connecting_point (self, other : 'Segment') -> 'Point':
+        if self.has_point(other.a):
+            return other.a
+        if self.has_point(other.b):
+            return other.b
+        return None
 
     # Check if two segments have a point in common
     # WARNING: They may be overlapped
@@ -2623,7 +2633,8 @@ class Grid:
         return True
 
     # This function is used to generate a new grid without all regions which do not respect a minimum size
-    def keep_minimum (self, minimum : number) -> Optional['Grid']:
+    def keep_minimum (self, minimum : number, verbose : bool = False) -> Optional['Grid']:
+        if verbose: print(f'Keeping minimum at grid {self}')
         # For each maximum rect in the grid which respects both dimesions, keep all its contained rects
         respecting_rects = []
         for max_rect, contained_rects in self.max_rects:
@@ -2635,6 +2646,7 @@ class Grid:
             respecting_rects += contained_rects
         # Return an empty grid if there are not respecting rects at this point
         if len(respecting_rects) == 0:
+            if verbose: print(f'  No rect is respecting the minimum')
             return Grid()
         # Remove duplicates
         respecting_rects = list(set(respecting_rects))

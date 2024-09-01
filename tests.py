@@ -335,6 +335,7 @@ test_building_1 = Building(
 
 # Apartments with 4 floors, no extra free space, first upper floor is copied upwards
 test_building_2 = Building(
+    room_args = { 'height': 20, 'min_size': 10 },
     floors = {
         0: Room(
             name='Primera planta',
@@ -389,5 +390,4 @@ test_building_2 = Building(
             ]
         )
     },
-    room_args = { 'height': 20, 'min_size': 10 }
 )
