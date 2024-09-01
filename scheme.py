@@ -361,7 +361,7 @@ class Door:
         suitable_segments = []
         suitable_points = []
         for segment in available_segments:
-            if segment.length < minimum_segment_length:
+            if lower(segment.length, minimum_segment_length):
                 continue
             # Cut the margins of all available segments for the reminaing segments to be available to store the door point (center)
             elif equal(segment.length, minimum_segment_length):
@@ -2311,7 +2311,14 @@ class Room:
                     # Substract the new corridor region from the children rooms
                     for child in self.children:
                         if not child.truncate(expansion_grid, force=True, skip_update_display=True):
-                            raise ValueError('The space required by the corridor cannot be claimed from ' + child.name)
+                            raise ValueError(f'The space required by the corridor cannot be claimed from {child.name}')
+                    # If there was a door in the expansion segment then we must relocate it
+                    # DANI: Si no recolocas las puertas afectadas aquí se hace después igualmente
+                    # DANI: Pero si te falla en algún punto antes de que se recoloque verás una puerta fuera de sitio
+                    # DANI: Esto puede hacer parecer que hay un problema, así que mejor recolocar la puerta aquí
+                    affected_doors = [ d for d in doors if d.point in expansion_rect ]
+                    for affected_door in affected_doors:
+                        affected_door.check_and_relocate()
                     # Update the corridor boundary segments and corners now that the corridor has been modified
                     corridor_boundary_segments = sum([ boundary.segments for boundary in self.corridor_grid.boundaries ], [])
                     # Also update the door polygon now that the door room may have been truncated
@@ -2321,7 +2328,7 @@ class Room:
                     suitable_points = door.find_suitable_points(available_segments)
                     if len(suitable_points) == 0:
                         self.update_display(title='Debug')
-                        raise RuntimeError('No suitable door space for room ' + door.room.name + ' after corridor expansion')
+                        raise RuntimeError(f'No suitable door space for room {door.room.name} after corridor expansion')
                     # Place the door in a suitable position if not already
                     # It should be already in a rigid door scenario
                     if not door.point or not door.is_point_suitable():
@@ -2338,7 +2345,7 @@ class Room:
                     if door.rigid:
                         # If door is not over the room then there is something very wrong
                         if not door_in_room:
-                            raise ValueError('Door from room ' + door.room.name + ' is rigid and not over the room')
+                            raise ValueError(f'Door from room {door.room.name} is rigid and not over the room')
                         # Expand corridor to reach the door
                         if expand_corridor(door.margined_segment):
                             # If we expanded successfully then skip checking other available segments and proceed
