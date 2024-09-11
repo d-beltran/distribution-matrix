@@ -1,8 +1,5 @@
 RAM
 
-siguen quedando muchos sitios donde se utilize el set_boundary en lugar del set_grid?
-	hay que hacer que el set_boundary delegue en el set_grid y preferir el uso del set_grid, para no tener todos los reset_blabla_grid duplicados
-
 cuidao que las escaleras se pueden poner formando discarded grid, hay que ver como se asigna su posición
 
 [si no se dá la situación difícil] recuperar min size para el parent free space porque sino al final pueden quedar huecos que no respeten
