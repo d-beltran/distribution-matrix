@@ -2734,7 +2734,7 @@ class Room:
             # Set the grid to be claimed by the corridor
             # Note that this is not as simple as creating a rect from these 2 segments
             # We could ignore and interior polygon of the boundary and create a free spot which does not respect the minimum
-            corridor_corner_segments = corridor_corner[1]
+            corridor_corner_segments = corridor_corner.segments
             corridor_region = discarded_boundary.get_border_projection(corridor_corner_segments[0])
             corridor_region += discarded_boundary.get_border_projection(corridor_corner_segments[1])
             # Claim it to the corridor
@@ -4098,7 +4098,7 @@ class Room:
         if not children_only:
             backup[self] = self.grid
         for child in self.children:
-            backup[child] = child.set_grid
+            backup[child] = child.grid
         return backup
 
     # Restore backup of room grids
