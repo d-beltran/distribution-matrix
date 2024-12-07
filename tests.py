@@ -335,7 +335,7 @@ test_building_1 = Building(
 
 # Apartments with 4 floors, no extra free space, first upper floor is copied upwards
 test_building_2 = Building(
-    room_args = { 'height': 20, 'min_size': 10 },
+    room_args = { 'height': 20, 'corridor_size': 10, 'min_size': 20 },
     floors = {
         0: Room(
             name='Primera planta',
@@ -368,12 +368,12 @@ test_building_2 = Building(
                     children=[
                         Room(
                             name='Cocina',
-                            min_area='15%',
+                            min_area='10%',
                             max_area='25%',
                             fill_color='purple'),
                         Room(
                             name='Comedor',
-                            min_area='20%',
+                            min_area='12%',
                             max_area='45%',
                             fill_color='orange'),
                         Room(

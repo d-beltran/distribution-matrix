@@ -13,6 +13,7 @@ seed = None
 #seed = 679238 # Escalera separada de la pared y dejando discarded grid
 #seed = 898828 # Queda free space una vez resuleto todo, sin fallos
 #seed = 562106 # Queda free space una vez resuleto todo, sin fallos
+seed = 322825
 
 if not seed:
     seed = round(random.random() * 999999)
@@ -1035,7 +1036,7 @@ class Room:
             self.reset_grid()
         # Update current display if the flag to skip the update is not passed
         if not skip_update_display:
-            self.update_display(title='Modified corridor grid in room ' + self.name)
+            self.update_display(title=f'Modified corridor grid in room {self.name}')
 
     # Free space grid (read only)
     corridor_grid = property(get_corridor_grid, set_corridor_grid, None, "The room corridor space grid")
@@ -2218,8 +2219,7 @@ class Room:
         # We must try to save those spaces which may be reclaimed by other rooms
         # It is not always possible to retrieve these regions however
         if self.discarded_grid:
-            if self.reassign_discarded_regions():
-                self.update_display(title='Displaying discarded grid')
+            self.reassign_discarded_regions()
 
         # Get all children doors, both the already stablished and the not stablished ones
         # Add the room door also if this room is the root
@@ -2565,14 +2565,13 @@ class Room:
         # We must try to save those spaces which may be reclaimed by other rooms
         # It is not always possible to retrieve these regions however
         if self.discarded_grid:
-            if self.reassign_discarded_regions():
-                self.update_display(title='Displaying discarded grid')
+            self.reassign_discarded_regions()
 
         # Check there is enought space to fit children after corridor area substraction
         children_available_area = self.area - self.corridor_grid.area - self.discarded_grid.area
         children_required_area = sum([ child.min_area for child in self.children ])
         if children_available_area < children_required_area:
-            raise RuntimeError('There is not enought space to fit all children after corridor area substraction')
+            raise RuntimeError(f'There is not enought space {children_available_area} to fit all children {children_required_area} after corridor area substraction')
 
         # Now, relocate and reshape children rooms
         for child in self.children:
