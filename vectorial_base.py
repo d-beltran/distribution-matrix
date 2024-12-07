@@ -2711,13 +2711,11 @@ class Grid:
                 minimum_region = Grid(minimum_rects) 
                 minimum_regions.append(minimum_region)
                 break
-        # DANI: Esto no se ha provado
-        print('DANI: Hay más de una minimum region, comprueba que todo esté bien')
-        # At this point must be always more than one minimum region
-        # Sort minimum regions by area (bigger goes first)
-        minimum_regions.sort(key=lambda x: x.area, reverse=True)
-        # Return the bigger minimum region
-        return minimum_regions[0]
+        # If more than one minimum region is found then return them all as a single grid
+        merged_minimum_region = Grid()
+        for minimum_region in minimum_regions:
+            merged_minimum_region += minimum_region
+        return merged_minimum_region
 
     # Given a substraction grid which has been already substracted, get the expansion grid to not break a minimum size
     # Note that the substraction grid must perfectly collide and not overlap with self grid
