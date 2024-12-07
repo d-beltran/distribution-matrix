@@ -2576,7 +2576,8 @@ class Room:
 
         # Now, relocate and reshape children rooms
         for child in self.children:
-            if not child.fit_to_required_area(conformist=True):
+            conformist_round = equal(self.free_area, 0)
+            if not child.fit_to_required_area(conformist=conformist_round):
                 raise ValueError(f'{child.name} failed to fit to required area after corridor area truncation')
 
         # Show redistribution after reshaping child rooms
