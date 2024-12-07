@@ -248,7 +248,7 @@ def get_rects_from_anything (things : list):
                 discareded_rects = thing.discarded_grid.rects
                 for rect in discareded_rects:
                     rect.fill_color = 'black'
-                    rect.texture = '/'
+                    rect.texture = '///'
                 rects += discareded_rects
         # If it has a free grid (i.e. it is a room)
         # This may fail for a parent free grid in steps where children overlap
