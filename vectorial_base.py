@@ -770,7 +770,16 @@ class Corner(Point):
 # A rectangular area defined by 2 coordinates (Points): 'max' and 'min'
 class Rect:
 
-    def __init__(self, x_min : number, y_min : number, x_max : number, y_max : number, segments_color : str = 'black', fill_color : str = 'white'):
+    def __init__(self,
+        x_min : number,
+        y_min : number,
+        x_max : number,
+        y_max : number,
+        segments_color : str = 'black',
+        fill_color : str = 'white',
+        # Options I know: 'x', 'o', '*', 'O', '.', '/', '\\', '|', '-', '+'
+        texture : Optional[str] = None
+    ):
         self.x_min = resolute(x_min)
         self.y_min = resolute(y_min)
         self.x_max = resolute(x_max)
@@ -782,6 +791,7 @@ class Rect:
             raise ValueError('The rectangle has not 2 dimensions: ' + str(self))
         self.segments_color = segments_color
         self.fill_color = fill_color
+        self.texture = texture
         self.segments = self.get_segments()
         self._area = None
 

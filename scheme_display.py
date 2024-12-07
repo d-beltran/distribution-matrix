@@ -34,7 +34,7 @@ previous_slider_value = None
 # Updater called from the system
 def add_frame (data : list, title : Optional[str] = None):
     display_message = title if title else 'No title'
-    print(' [ frame ' + str(len(frames)) + ' ] - ' + display_message)
+    print(f' [ frame {len(frames)} ] - {display_message}')
     if type(data) != list:
         data = [data]
     # Remove duplicates
@@ -138,6 +138,9 @@ def represent (queue):
             ys = [rect.y_min, rect.y_min, rect.y_max, rect.y_max]
             # WARNING: Use 'facecolor' instead of 'color' to hide separation segments between fills
             ploted_rects = ax.fill(xs, ys, facecolor=rect.fill_color or 'C0', alpha=0.2)
+            # Apply textures for those rects which have one
+            if rect.texture:
+                ploted_rects[0].set_hatch(rect.texture)
 
         # Set the legend with all room names
         handles = []
@@ -245,6 +248,7 @@ def get_rects_from_anything (things : list):
                 discareded_rects = thing.discarded_grid.rects
                 for rect in discareded_rects:
                     rect.fill_color = 'black'
+                    rect.texture = '/'
                 rects += discareded_rects
         # If it has a free grid (i.e. it is a room)
         # This may fail for a parent free grid in steps where children overlap
