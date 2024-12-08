@@ -2575,8 +2575,8 @@ class Room:
 
         # Now, relocate and reshape children rooms
         for child in self.children:
-            conformist_round = equal(self.free_area, 0)
-            if not child.fit_to_required_area(conformist=conformist_round):
+            current_behaviour = 'conformist' if equal(self.free_area, 0) else 'greedy'
+            if not child.fit_to_required_area(behaviour=current_behaviour, verbose=True):
                 raise ValueError(f'{child.name} failed to fit to required area after corridor area truncation')
 
         # Show redistribution after reshaping child rooms
@@ -2896,17 +2896,25 @@ class Room:
         return min(all_min_sizes)
 
     # Calculate how much area we need to expand or contract
-    # If the conformist flag is passed as true then return 0 when the are is between the maximum and minimum areas
-    def get_required_area (self, conformist : bool = False, verbose : bool = False) -> number:
+    # The behaviour argument sets if the area is conformist or exigent:
+    # - exigent: aim for the exact target area
+    # - conformist: required area is 0 as long as the current area is between the maximum and minimum areas
+    # - greedy: become conformist only if the current area is above the target area
+    # - humble: become conformist only if the current area is below the target area
+    def get_required_area (self, behaviour : str, verbose : bool = False) -> number:
         if verbose:
             print(f'Setting required area for {self.name}')
             print(f'  Area range: {self.max_area} - {self.min_area}')
             print(f'  Target area: {self.target_area}')
             print(f'  Current area: {self.area}')
-        # If we already have a corridor then we are flexible with the area
-        # Target area is not a specific area but a range
-        if conformist:
-            # If we are over the maximum we must reduce the are so we return a negative area
+        # If the behaviour is exigent then aim for the exact target area
+        # This is the usual behaviour when the corridor is not yet set
+        if behaviour == 'exigent':
+            return resolute(self.target_area - self.area)
+        # If the behaviour is not exigent then target area is not a specific value but a range of values
+        # This is the usual behaviour when the corridor is already set
+        if behaviour == 'conformist':
+            # If we are over the maximum we must reduce the area so we return a negative area
             if self.area > self.max_area:
                 return resolute(self.max_area - self.area)
             # If area is below the minimum we must expand its area
@@ -2914,12 +2922,31 @@ class Room:
                 return resolute(self.min_area - self.area)
             # If the current area is exactly within the target area range then we are done
             return 0
-        # If the corridor is not yet stablished then we must aim for the target area
-        return resolute(self.target_area - self.area)
+        # If it is greedy then request more area to reach the target area only
+        if behaviour == 'greedy':
+            # If we are over the maximum we must reduce the area so we return a negative area
+            if self.area > self.max_area:
+                return resolute(self.max_area - self.area)
+            # If area is below the minimum we must expand its area
+            if self.area < self.target_area:
+                return resolute(self.target_area - self.area)
+            # If the current area is exactly within the target area range then we are done
+            return 0
+        # If it is humble then request more area to reach the target area only
+        if behaviour == 'humble':
+            # If we are over the maximum we must reduce the area so we return a negative area
+            if self.area > self.target_area:
+                return resolute(self.target_area - self.area)
+            # If area is below the minimum we must expand its area
+            if self.area < self.min_area:
+                return resolute(self.min_area - self.area)
+            # If the current area is exactly within the target area range then we are done
+            return 0
+        raise ValueError(f'Not supported behaviour: {behaviour}')        
 
     # Check if this room is already fit to its required area
-    def is_fit_to_required_area (self, conformist : bool = False) -> bool:
-        required_area = self.get_required_area(conformist=conformist)
+    def is_fit_to_required_area (self, behaviour : str) -> bool:
+        required_area = self.get_required_area(behaviour=behaviour)
         # print(f'Fitting {self.name} to target area: {self.min_area} - {self.max_area}')
         # print(f'  Current area: {self.area} -> Required area: {required_area}')
         # print(f'  Is fit? {abs(required_area) < minimum_resolution * self.max_area}')
@@ -2928,7 +2955,7 @@ class Room:
     # Expand or contract this room until it reaches the forced area
     # In case it is not able to fit at some point recover the original situation
     # Restricted segments are segments which must remain as are
-    def fit_to_required_area (self, restricted_segments : list = [], conformist : bool = False, verbose : bool = False) -> bool:
+    def fit_to_required_area (self, restricted_segments : list = [], behaviour : str = 'exigent', verbose : bool = False) -> bool:
         if verbose: print(f'Fitting {self.name}')
         # A room with no initial boundary/grid is not to be fitted
         if not self.grid:
@@ -2936,13 +2963,13 @@ class Room:
         if self.rigid:
             raise RuntimeError(f'Trying to fit {self.name} but it is rigid')
         # Calculate how much area we need to expand
-        required_area = self.get_required_area(conformist=conformist, verbose=verbose)
+        required_area = self.get_required_area(behaviour=behaviour, verbose=verbose)
         # If the area is already satisfied then stop here
-        if self.is_fit_to_required_area(conformist=conformist):
+        if self.is_fit_to_required_area(behaviour=behaviour):
             return True
-        # If more area is required and this is not a conformist call then make sure there is free space available to claim
-        if required_area > 0 and not conformist and not self.parent.free_grid:
-            raise RuntimeError(f'Trying to fit {self.name} with {required_area} required area (not conformist) but there is no free space available')
+        # If more area is required and this is an exigent call then make sure there is free space available to claim
+        if required_area > 0 and behaviour == 'exigent' and not self.parent.free_grid:
+            raise RuntimeError(f'Trying to fit {self.name} with {required_area} required area (exigent behaviour) but there is no free space available')
         # Make a boundary backup of this room and all its brothers
         backup = self.parent.make_grid_backup(children_only=True)
         # Keep expanding or contracting until the current room reaches the desired area
@@ -2955,7 +2982,7 @@ class Room:
         # DANI: Es mejor con la multiplicación que sin ella. Le da más flexibilidad a la resolución del puzle acelerando así el proceso
         # DANI: Es muy peligrosos que queden espacios libres sin reclamar (cuando no tenga que haberlos)
         # DANI: Pero una resolución pequeña no hará que no queden espacios libres, simplemente hará que esos espacios sean muy pequeños
-        while not self.is_fit_to_required_area(conformist=conformist):
+        while not self.is_fit_to_required_area(behaviour=behaviour):
             if verbose: print(f' Required area: {required_area}')
             # If the required are is positive it means we must expand our room
             if required_area > 0:
@@ -2964,13 +2991,13 @@ class Room:
                     # Get the most suitable frontier to expand and try to expand it
                     # If the expansions fails, try with the next one
                     for frontier, loan_permission in self.get_best_frontiers(restricted_segments, verbose=verbose):
-                        if self.expand_frontier(frontier, required_area, loan_permission, conformist=conformist, verbose=verbose):
+                        if self.expand_frontier(frontier, required_area, loan_permission, behaviour=behaviour, verbose=verbose):
                             return True
                     return False
                 # Expand
                 if expand_step():
                     # Refresh how much area we need to expand and go for the next step
-                    required_area = self.get_required_area(conformist=conformist, verbose=verbose)
+                    required_area = self.get_required_area(behaviour=behaviour, verbose=verbose)
                     continue
             # If the required are is negative it means we need to contract our room
             if required_area < 0:
@@ -2987,7 +3014,7 @@ class Room:
                 # Contract
                 if contract_step():
                     # Refresh how much area we need to expand and go for the next step
-                    required_area = self.get_required_area(conformist=conformist, verbose=verbose)
+                    required_area = self.get_required_area(behaviour=behaviour, verbose=verbose)
                     continue
             # In case the fitting failed restore the backup and exit
             if verbose: print(f' Failed to fit {self.name}')
@@ -3234,13 +3261,13 @@ class Room:
     # Check everything is fine after the push and, if so, return True
     # In case there is any problem the push is not done and this function returns False
     # If the 'is_loaned' argument is passed then this room area is fitted after brother rooms truncation, before compensation
-    # The conformist argument is forwarded to the 'fit_to_required_area' function
+    # The behaviour argument is forwarded to the 'fit_to_required_area' function
     # The easy argument is forwarded to the 'truncate' function
     def push_boundary_segment (self,
         segment : Segment,
         push_length : number,
         is_loaned : bool = False,
-        conformist : bool = False,
+        behaviour : str = 'exigent',
         easy : bool = False,
         check_parent_free_grid : bool = True,
         verbose : bool = False,
@@ -3266,7 +3293,7 @@ class Room:
         new_rect = Rect.from_segments([segment, new_side])
         # Make a grid out of the new rect and expand the grid
         new_grid = Grid([new_rect])
-        return self.expand_grid(new_grid, is_loaned=is_loaned, conformist=conformist, easy=easy, check_parent_free_grid=check_parent_free_grid)
+        return self.expand_grid(new_grid, is_loaned=is_loaned, behaviour=behaviour, easy=easy, check_parent_free_grid=check_parent_free_grid)
     
     # Pull a segment in the boundary
     # Check everything is fine after the pull and, if so, return True
@@ -3302,7 +3329,7 @@ class Room:
         frontier : Segment,
         required_area : number,
         allowed_loan_push : bool = False,
-        conformist : bool = False,
+        behaviour : str = 'exigent',
         verbose : bool = False,
     ) -> bool:
         if verbose: print(f'Expanding frontier {frontier}')
@@ -3465,8 +3492,8 @@ class Room:
                 push_length = min(limits)
             # Now that we have the definitive push length, we actually push the segment
             is_loaned = protocol == 3
-            if not self.push_boundary_segment(pushed_segment, push_length,
-                is_loaned=is_loaned, conformist=conformist, verbose=verbose, check_parent_free_grid=False):
+            if not self.push_boundary_segment(pushed_segment, push_length, behaviour=behaviour,
+                is_loaned=is_loaned, verbose=verbose, check_parent_free_grid=False):
                 # If the push failed with a greedy push then try a conservative push
                 if protocol == 1:
                     return push_segment(pushed_segment, 2, verbose=verbose)
@@ -3896,7 +3923,7 @@ class Room:
         check_overlaps : bool = True,
         compensate_invaded : bool = True,
         is_loaned : bool = False,
-        conformist : bool = False,
+        behaviour : str = 'exigent',
         easy : bool = False,
         verbose : bool = False
     ) -> bool:
@@ -3968,14 +3995,14 @@ class Room:
                     backup[brother_room] = brother_grid_backup
                 # If this is a loaned push then we must retrieve the area debt at this point
                 # Otherwise, if we invade other rooms it may happen that there is not free space enought for them to expand after
-                if is_loaned and self.get_required_area() < 0:
+                if is_loaned and self.get_required_area(behaviour=behaviour) < 0:
                     # Set the new segments to respect during this fitting
                     # Note that if we pull these new segments then we woul be the same as before
                     new_segments = []
                     for boundary in expansion_grid.boundaries:
                         new_segments += boundary.segments
                     # Now run the fitting
-                    if not self.fit_to_required_area(restricted_segments=new_segments, conformist=conformist):
+                    if not self.fit_to_required_area(restricted_segments=new_segments, behaviour=behaviour):
                         if verbose: print(f' Grid expansion failed: Failed to fit self room after loaned expansion -> Restoring backup')
                         self.restore_grid_backup(backup)
                         return False
@@ -3987,7 +4014,7 @@ class Room:
                             continue
                         if verbose: print(f'  Compensating {brother_room.name} area')
                         # Try to fit the brother room
-                        if not brother_room.fit_to_required_area(conformist=conformist):
+                        if not brother_room.fit_to_required_area(behaviour=behaviour):
                             if verbose: print(f' Grid expansion failed: Grid was expanded over a brother room which failed to comepnsate area after truncation -> Restoring backup')
                             self.restore_grid_backup(backup)
                             return False
