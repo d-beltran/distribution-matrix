@@ -2108,7 +2108,7 @@ class Room:
 
             # If there are not excluding regions (not the usual case) then we are done
             if not excluding_regions:
-                self.corridor_grid = corridor_grid
+                self.corridor_grid += corridor_grid
                 return
             
             # Now we must substract excluding regions from the current corridor
@@ -2191,7 +2191,7 @@ class Room:
                 raise ValueError('Corridor was not respecting minimum size')
 
             # Now set the corridor grid officially
-            self.corridor_grid = corridor_grid
+            self.corridor_grid += corridor_grid
 
             # Display the corridor boundaries
             corridor_boundaries = self.corridor_grid.boundaries
