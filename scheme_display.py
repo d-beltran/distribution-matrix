@@ -250,6 +250,13 @@ def get_rects_from_anything (things : list):
                     rect.fill_color = 'black'
                     rect.texture = '///'
                 rects += discareded_rects
+        # If it has a corridor grid (i.e. it is a room)
+        if hasattr(thing, 'corridor_grid'):
+            if thing.corridor_grid != None:
+                corridor_rects = thing.corridor_grid.rects
+                for rect in corridor_rects:
+                    rect.texture = '--'
+                rects += corridor_rects
         # If it has a free grid (i.e. it is a room)
         # This may fail for a parent free grid in steps where children overlap
         try:
