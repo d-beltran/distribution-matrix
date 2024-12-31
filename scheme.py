@@ -1197,11 +1197,11 @@ class Room:
     # The room height
     height = property(get_height, set_height, None, "The room height")
 
-    # Set the children boundaries according to the room configuration
+    # Set children grids according to the room configuration
     # This function triggers the logic to solve room distributions
-    # If the recursive flag is passed then set each child's children boundaries and so on recursively
+    # If the recursive flag is passed then solve each child's children grids and so on recursively
     # All children rooms must have their boundary fully set before solving the next generation of children
-    def set_children_boundaries (self, recursive : bool = False):
+    def solve_children (self, recursive : bool = False):
         rooms = self.children
         # If there are not children then we have nothing to do here
         if len(rooms) == 0:
@@ -1227,10 +1227,10 @@ class Room:
             room.parent_free_limit = parent_free_limit
             # If the children has no boundary it must be built
             if not room.boundary:
-                if not self.set_child_room_boundary(room):
+                if not self.set_child_grid(room):
                     raise SystemExit(f'Child {room.name} has failed to be set')
 
-        # Reshaped children boundaries to reduce unnecessary corners as well
+        # Reshaped children to reduce unnecessary corners as well
         self.reduce_children_corners()
 
         # Now that all children bondaries are set we must set the corridor
@@ -1243,10 +1243,10 @@ class Room:
         # This is because then the reducing corneres process requires real free space to work
         self._child_adaptable_boundary = False
 
-        # If there is a limit of corners in the room (i.e. this is the root room) then reshape children boundaries now
+        # If there is a limit of corners in the room (i.e. this is the root room) then reshape children now
         if self._child_adaptable_boundary and self.max_corners:
             self.reduce_corners()
-        # Reshaped children boundaries to reduce unnecessary corners as well
+        # Reshape children to reduce unnecessary corners as well
         self.reduce_children_corners()
 
         # Relocate the doors to the most suitable placement now that boundaries will change no more
@@ -1258,10 +1258,10 @@ class Room:
         # Show the relocated doors
         self.update_display(title='Relocated doors')
 
-        # Set children boundaries recurisvely if the recursive flag was passed
+        # Solve children recurisvely if the recursive flag was passed
         if recursive:
             for room in rooms:
-                room.set_children_boundaries(recursive=True)
+                room.solve_children(recursive=True)
 
     # Check if a room fits in this room according to its minimum size
     # Check free space by default and all space if the argument 'force' is passed
@@ -1287,16 +1287,16 @@ class Room:
         return fitting_rects
 
     # Set up a child room boundary
-    def set_child_room_boundary (self, room : 'Room', forced : bool = False, verbose : bool = False) -> bool:
+    def set_child_grid (self, room : 'Room', forced : bool = False, verbose : bool = False) -> bool:
         if verbose: print(f'Setting {self.name} child room {room.name} boundary')
         # If self is a child adaptable room
         if self._child_adaptable_boundary:
             # There are no boundary restrictions
-            # All children will be set in one single step, as the maximum initial boundaries
+            # All children will be set in one single step, as the maximum initial grids
             # To do so, we must find a suitable corner and space (rect) for the boundary to be set
             # This space will be as long as the double of the room maximum size, for it to be able to expand without problems
             huge_size = room.max_size * 2
-            # First of all, find all childrens with already set boundaries
+            # First of all, find all children with already set boundaries/grid
             # They are the only reference to place the new room
             brother_boundaries = [ child.boundary for child in self.children if child.boundary ]
             # If this is the first room then there is no reference at all, so we set the first corner as the (0,0) point
@@ -1383,7 +1383,7 @@ class Room:
                 suitable_rects = self.get_room_fitting_rects(room)
                 if len(suitable_rects) == 0:
                     if verbose: print(f'  Room {room.name} fits nowhere in the free space')
-                    return self.set_child_room_boundary(room, forced=True)
+                    return self.set_child_grid(room, forced=True)
             # Shuffle the suitable rects
             random.shuffle(suitable_rects)
             # Sort the suitable rects by minimum size
@@ -1400,7 +1400,7 @@ class Room:
             # Check each site to allow other rooms to grow
             # Pick only corners wich are already in the free grid (no matter if interior or exterior)
             sites = [ (corner, rect) for rect in sorted_suitable_rects for corner in rect.get_corners() ]
-            # Save previous grid to not repeat already checked (and failed) boundaries
+            # Save previous grid to not repeat already checked (and failed) grids
             previous_initial_grid = None
             # Iterate the different corners
             for corner, rect in sites:
@@ -1452,7 +1452,7 @@ class Room:
             # If at this point we still have no boundary it means there is no available place to set the perimeter
             # If this was not forced then retry forcing
             if not forced:
-                return self.set_child_room_boundary(room, forced=True)
+                return self.set_child_grid(room, forced=True)
             return False
 
     # Build a provisional grid from the children room grids
@@ -4157,7 +4157,7 @@ class Room:
     # Solve room distributions
     # The display flag may be passed in order to generate a dynamic graph to display the solving process
     def solve (self):
-        self.set_children_boundaries(recursive=True)
+        self.solve_children(recursive=True)
 
 # The element which connects diferent floors of a building
 class Stairs:
