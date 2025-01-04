@@ -456,9 +456,13 @@ class Door:
             corner_distances = [ point.get_distance_to(corner) for corner in outside_corners ]
             return min(corner_distances)
         suitable_points.sort(key=sort_by_distance_to_wall)
+        most_suitable_point = suitable_points[0]
+        # If the current point is the most suitable point already then exit here
+        if self.point == most_suitable_point:
+            return False
         # Set the most suitable point as the current door point
         # Note that setting the point already resets the segment, the pivot, etc.
-        self.point = suitable_points[0]
+        self.point = most_suitable_point
         return True
 
     # Check if the door is placed in a suitable point already and, if not, try to relocate it
@@ -1201,11 +1205,11 @@ class Room:
     # This function triggers the logic to solve room distributions
     # If the recursive flag is passed then solve each child's children grids and so on recursively
     # All children rooms must have their boundary fully set before solving the next generation of children
-    def solve_children (self, recursive : bool = False):
+    def solve_children (self, recursive : bool = False, verbose : bool = False) -> bool:
         rooms = self.children
         # If there are not children then we have nothing to do here
         if len(rooms) == 0:
-            return
+            return True
         # Before allocating place for any children room, set corridor spaces in front of parent doors
         # This way this space is never claimed since it has to be occupied by the corridor anyway
         # Note that the root room may have non defined doors
@@ -1228,7 +1232,8 @@ class Room:
             # If the children has no boundary it must be built
             if not room.boundary:
                 if not self.set_child_grid(room):
-                    raise SystemExit(f'Child {room.name} has failed to be set')
+                    if verbose: print(f'Child {room.name} has failed to be set')
+                    return False
 
         # Reshaped children to reduce unnecessary corners as well
         self.reduce_children_corners()
@@ -1237,7 +1242,8 @@ class Room:
 
         # Set the corridor
         if len(rooms) > 0:
-            self.set_corridor()
+            if not self.set_corridor():
+                return False
 
         # At this point the boundary is no longer adaptable to child boundaries, in case it was
         # This is because then the reducing corneres process requires real free space to work
@@ -1250,18 +1256,26 @@ class Room:
         self.reduce_children_corners()
 
         # Relocate the doors to the most suitable placement now that boundaries will change no more
+        any_relocated_door = False
         for child in self.children:
             for door in child.doors:
-                if not door.rigid:
-                    door.relocate()
+                if door.rigid:
+                    continue
+                if door.relocate():
+                    any_relocated_door = True
 
         # Show the relocated doors
-        self.update_display(title='Relocated doors')
+        if any_relocated_door:
+            self.update_display(title='Relocated doors')
 
         # Solve children recurisvely if the recursive flag was passed
         if recursive:
             for room in rooms:
-                room.solve_children(recursive=True)
+                if not room.solve_children(recursive=True):
+                    return False
+
+        # We successfully solved it
+        return True
 
     # Check if a room fits in this room according to its minimum size
     # Check free space by default and all space if the argument 'force' is passed
@@ -1319,7 +1333,9 @@ class Room:
                 return True
             # Otherwise, calculate the "pre-corridor" and find the closest point in the current parent "pre-exterior-polygon"
             # First, get the current corridor points
-            corridor_segments, corridor_nodes = self.set_corridor(backbone_only=True)
+            corridor_backbone = self.find_corridor_backbone()
+            corridor_segments = corridor_backbone['segments'] if corridor_backbone else None
+            corridor_nodes = corridor_backbone['nodes'] if corridor_backbone else None
             corridor_points = list(set(sum([ segment.points for segment in corridor_segments ], ()))) + corridor_nodes
             # Now get all points in the exterior polygon which may be closer to the corridor
             # Note that these point may not be a corner in the exterior polygon, but a point in the middle of any segment
@@ -1540,14 +1556,12 @@ class Room:
         minimum_rect = Rect.from_corner(corner, self.min_size, self.min_size)
         return Grid([minimum_rect])
 
-    # Using all boundaries, calculate which segments make the shortest path to connect parent doors and all children rooms
+    # Using both parent and children boundaries, calculate which segments make the shortest path to connect parent doors and all children rooms
     # Missing children doors are also set during this process and they are placed according to make the corridor as short as possible
-    # Finally, the area around the selected corridor segments is claimed to build the actual corridor
-    # The backbone only flag allows to calculate the corridor backbone and return it, thus not caliming any area for the corridor
     # Note that this function may be used several times to find a "pre-corridor" before definitely setting it
     # NEVER FORGET: The algorithm to solve the corridor finds all possible combinations of nodes to know the final result is the shortest possible path
     # NEVER FORGET: Once I tried to add as many nodes as 'candidate doors' and as a result the algorithm was taking hours to solve the problem
-    def set_corridor (self, backbone_only : bool = False, verbose : bool = False) -> Optional[List['Segment']]:
+    def find_corridor_backbone (self, verbose : bool = False) -> Optional[dict]:
         if verbose: print(f'Setting {self.name} corridor')
 
         # Set the corridor nodes
@@ -1745,7 +1759,7 @@ class Room:
         # WARNING: Treating all free regions as one is a problem since it may result in a splitted corridor
         # If a free space region is reached during the solving then include its nodes and segments in the corridor
         # They will be removed further during the corridor expansion, but they must be considered as corridors for colliding rooms to be included
-        free_regions = []
+        corridor_free_regions = []
         free_region_nodes = {}
         if functional_corridor_grid:
             # Define each region of the free space separately
@@ -1766,11 +1780,11 @@ class Room:
                             free_corridor_nodes.append(point)
                             break
                 # Set a region object with the already set segments and nodes
-                free_region = {
+                corridor_free_region = {
                     'corridor_segments': free_corridor_segments,
                     'corridor_nodes': free_corridor_nodes
                 }
-                free_regions.append(free_region)
+                corridor_free_regions.append(corridor_free_region)
                 # Now associate this free region data to each of its nodes so it is easier to find later
                 # Also create a fake 'node room' to be associated to this free regions and make this has a required room
                 # This way we make sure the solver reaches all free regions
@@ -1779,11 +1793,11 @@ class Room:
                 required_rooms.append(free_region_room_hash)
                 for point in free_corridor_nodes:
                     # Set current free region to this node point
-                    free_region_nodes[point] = free_region
+                    free_region_nodes[point] = corridor_free_region
                     # Add the free region room hash to the node data rooms list
                     nodes[point]['rooms'].append(free_region_room_hash)
             # Set the first of the free regions as part of the current corridor already
-            sample_free_region = next(free_region for free_region in free_region_nodes.values())
+            sample_free_region = next(corridor_free_region for corridor_free_region in free_region_nodes.values())
             # Update the current corridor values
             # WARNING: The current_corridor_length is not set since it must be only updated when the corridor is complete
             current_corridor = sample_free_region['corridor_segments']
@@ -1809,7 +1823,7 @@ class Room:
             # Set the free grid as the corridor grid
             # DANI: Esto tal vez se puede replantear. No es necesario y perdemos la free grid (espacio claimable)
             self.corridor_grid = functional_corridor_grid
-            return True
+            return None
 
         # Trak which combinations of path nodes we have tried allready
         # Combinations of path nodes are equivalent to combinations of paths, but easier to compare
@@ -1849,11 +1863,11 @@ class Room:
                 following_node_paths = [ *following_node_data['paths'] ]
                 following_node_path_nodes = [ *following_node_data['path_nodes'] ]
                 # In case we find a free region node we immediately add all its segments and nodes to the corridor
-                free_region = free_region_nodes.get(following_node, None)
-                if free_region:
-                    following_path += free_region['corridor_segments']
-                    following_path_nodes += free_region['corridor_nodes']
-                    for node in free_region['corridor_nodes']:
+                corridor_free_region = free_region_nodes.get(following_node, None)
+                if corridor_free_region:
+                    following_path += corridor_free_region['corridor_segments']
+                    following_path_nodes += corridor_free_region['corridor_nodes']
+                    for node in corridor_free_region['corridor_nodes']:
                         node_data = nodes[node]
                         following_node_paths += node_data['paths']
                         following_node_path_nodes += node_data['path_nodes']
@@ -2002,17 +2016,43 @@ class Room:
 
         # Display the current corridor
         elements_to_display = [ segment.get_colored_segment('red') for segment in current_corridor ]
-        self.update_display(extra=elements_to_display, title='Display the base corridor path')
+        self.update_display(extra=elements_to_display, title='Display the corridor backbone')
 
-        # ------------------------------------------------------------------------------------------------------------------------------
+        # Return all the results inside a dict
+        # It will include not only the backbone but also other intenral varibales which my be used further
+        corridor_backbone = {
+            'segments': current_corridor,
+            'nodes' : current_corridor_nodes,
+            # Save expensive internal vlaues to be forwarded to the set_corridor function
+            'internal': (required_children_rooms, corridor_free_regions)
+        }
+        return corridor_backbone
 
-        # At this point we have the backbone of the corridor
+    # Find the corridor backbone and then claim the area around the selected corridor segments to build the actual corridor
+    # Then set the doors to connect the corridor with every child
+    # Sometime additional area is claimed to grant door placement
+    def set_corridor (self, verbose : bool = False) -> bool:
+        
+        # Find the corridor backbone
+        corridor_backbone = self.find_corridor_backbone(verbose=verbose)
 
-        # In case the 'backbone only' flag was passed we return now the backbone corridor segments and node points
-        if backbone_only:
-            return current_corridor, current_corridor_nodes
+        # If the returned corridor is none then it menas there is no need to stablish a corridor
+        if corridor_backbone == None:
+            return True
 
-        # ------------------------------------------------------------------------------------------------------------------------------
+        # Set other variables to be used
+        # LORE: These variables are defined in the 'find_corridor_backbone' function
+        # LORE: This function and the set_corridor function were one single function before
+
+        # Get the exterior polygon
+        exterior_polygon = self.boundary.exterior_polygon
+        # Get all grids which may contribute to the corridor
+        functional_corridor_grid = self.corridor_grid + self.free_grid
+        # Get the actual corridor backbone
+        current_corridor = corridor_backbone['segments']
+        current_corridor_nodes = corridor_backbone['nodes']
+        # Inherit some internal variables from the corridor backbone function
+        required_children_rooms, corridor_free_regions = corridor_backbone['internal']
 
         # Build the corridor by claiming area around the corridor path
         # To do so we must set a boundary
@@ -2055,12 +2095,12 @@ class Room:
             # Always leave a minimal corridor fragment from the free space for the grid to be continuous
             if functional_corridor_grid:
                 # Iterate over the different free grids and remove its segments from the corridor
-                for free_region in free_regions:
-                    for segment in free_region['corridor_segments']:
+                for corridor_free_region in corridor_free_regions:
+                    for segment in corridor_free_region['corridor_segments']:
                         corridor -= segment
                 # Now that we have the corridor alone we can search for corridor fragments to connect
-                for free_region in free_regions:
-                    for segment in free_region['corridor_segments']:
+                for corridor_free_region in corridor_free_regions:
+                    for segment in corridor_free_region['corridor_segments']:
                         # Skip segments not connected to the remaining corridor
                         if not corridor.is_connected_to_segment(segment):
                             continue
@@ -2210,7 +2250,7 @@ class Room:
         # Note that, at this point, other rooms do not expand to compensate the lost area yet
         for child in self.children:
             if not child.truncate(self.corridor_grid, force=True, skip_update_display=True):
-                raise ValueError('The space required by the corridor cannot be claimed from ' + child.name)
+                raise ValueError(f'The space required by the corridor cannot be claimed from {child.name}')
 
         # Show the relocated doors
         self.update_display(title='Displaying early corridor')
@@ -2353,7 +2393,7 @@ class Room:
                             # There should be always a point in common with the reference segment
                             common_point = next((point for point in available_segment.points if point in corridor_reference_segment.points), None)
                             if common_point == None:
-                                raise ValueError('There is no common point between ' + door.room.name + ' expansion segment and the corridor reference segment')
+                                raise ValueError(f'There is no common point between {door.room.name} expansion segment and the corridor reference segment')
                             other_point = next(point for point in available_segment.points if point != common_point)
                             # Now find the segment over the corridor which must be covered by the room expansion to fit the door
                             expansion_direction = (common_point + other_point).normalized()
@@ -2390,7 +2430,7 @@ class Room:
                         if not overlap_point:
                             extra = [ s.get_colored_segment('blue') for s in corridor_boundary_segments ] + [ s.get_colored_segment('green') for s in door_polygon.segments ]
                             self.update_display(title='Debug', extra=extra)
-                            raise RuntimeError('There is no overlap point between the corridor and the ' + door.room.name + '. This should never happen.')
+                            raise RuntimeError(f'There is no overlap point between the corridor and the {door.room.name}. This should never happen.')
                         # Now find the two segments in the corridor boundary which include the overlap corner
                         corridor_reference_segments = [ segment for segment in corridor_polygon.segments if overlap_point in segment ]
                         # Set the expansion size as the whole door margined width
@@ -2528,13 +2568,13 @@ class Room:
                         self.update_display(title='Displaying expanded corridor')
                         break
                     else:
-                        raise RuntimeError('Failed to expand corridor for reaching room ' + door.room.name)
+                        raise RuntimeError(f'Failed to expand corridor for reaching room {door.room.name}')
                 # If there is no segment overlap between corridor and door room then we must rely in a point overlap
                 # This point will be a corner for both the corridor and the door room and it must always be there
                 corridor_outside_corners = sum([ boundary.outside_corners for boundary in self.corridor_grid.boundaries ], [])
                 overlap_point = next((corner for corner in corridor_outside_corners if corner in door_polygon.corners), None)
                 if not overlap_point:
-                    raise RuntimeError('There is no overlap point between the corridor and the ' + door.room.name + ' door. This should never happen.')
+                    raise RuntimeError(f'There is no overlap point between the corridor and the {door.room.name} door. This should never happen.')
                 # Now find the two segments in the corridor boundary which include the overlap corner
                 reference_segments = [ segment for segment in corridor_boundary_segments if overlap_point in segment ]
                 # Set the expansion size as the whole door margined width
@@ -2571,16 +2611,19 @@ class Room:
         children_available_area = self.area - self.corridor_grid.area - self.discarded_grid.area
         children_required_area = sum([ child.min_area for child in self.children ])
         if children_available_area < children_required_area:
-            raise RuntimeError(f'There is not enought space {children_available_area} to fit all children {children_required_area} after corridor area substraction')
+            if verbose: print(f'There is not enought space {children_available_area} to fit all children {children_required_area} after corridor area substraction')
+            return False
 
         # Now, relocate and reshape children rooms
         for child in self.children:
             current_behaviour = 'conformist' if equal(self.free_area, 0) else 'greedy'
             if not child.fit_to_required_area(behaviour=current_behaviour, verbose=True):
-                raise ValueError(f'{child.name} failed to fit to required area after corridor area truncation')
+                if verbose: print(f'{child.name} failed to fit to required area after corridor area truncation')
+                return False
 
         # Show redistribution after reshaping child rooms
         self.update_display(title='Displaying redistributed rooms')
+        return True
 
     # Reduce the number of corners in this room exterior polygon by reshaping self and children boundaries
     # This function is meant to run in the root room only
@@ -4156,8 +4199,8 @@ class Room:
 
     # Solve room distributions
     # The display flag may be passed in order to generate a dynamic graph to display the solving process
-    def solve (self):
-        self.solve_children(recursive=True)
+    def solve (self) -> bool:
+        return self.solve_children(recursive=True)
 
 # The element which connects diferent floors of a building
 class Stairs:
@@ -4605,9 +4648,9 @@ class Building:
     def _fix_inherited_ghost_corridor_regions (self, floor : Room):
         # Find these inherited ghost corridor regions
         # Get all free regions not respecting the parent free limit (i.e. the highest minimum size among its children)
-        free_regions = floor.free_grid
-        correct_regions = free_regions.keep_minimum(floor.parent_free_limit)
-        wrong_regions = free_regions - correct_regions
+        corridor_free_regions = floor.free_grid
+        correct_regions = corridor_free_regions.keep_minimum(floor.parent_free_limit)
+        wrong_regions = corridor_free_regions - correct_regions
         if not wrong_regions:
             return
         # Keep only those which respect the corridor size

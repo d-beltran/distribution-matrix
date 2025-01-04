@@ -32,8 +32,10 @@ if __name__ == '__main__':
 
     # Start the solving process
     try:
-        test.solve()
-        print('Done :)')
+        if test.solve():
+            print('Done :)')
+        else:
+            print('Failed :(')
     except Exception as e:
         print_exc()
 
