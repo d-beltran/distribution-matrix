@@ -13,7 +13,11 @@ seed = None
 #seed = 679238 # Escalera separada de la pared y dejando discarded grid
 #seed = 898828 # Queda free space una vez resuleto todo, sin fallos
 #seed = 562106 # Queda free space una vez resuleto todo, sin fallos
-seed = 322825
+#seed = 322825 # No resuelve, pero es que merece la pena seguir
+#seed = 725292 # Truncated lavabo
+#seed = 532391 # DUMB
+#seed = 561325 # SUPER DUMB
+seed = 314614 # DUMBEST
 
 if not seed:
     seed = round(random.random() * 999999)
@@ -2643,7 +2647,7 @@ class Room:
                     self.restore_grid_backup(backup)
                     continue
                 # Relocate children to fit in the new boundary
-                truncated_children = [ child for child in self.children if not child.is_fit_to_required_area()  ]
+                truncated_children = [ child for child in self.children if not child.is_fit_to_required_area(behaviour='exigent')  ]
                 child_conflict = False
                 for child in truncated_children:
                     if not child.fit_to_required_area():
@@ -2846,7 +2850,7 @@ class Room:
                         self.restore_grid_backup(backup)
                         continue
                     # Relocate children to fit in the new boundary
-                    truncated_children = [ child for child in self.children if not child.is_fit_to_required_area()  ]
+                    truncated_children = [ child for child in self.children if not child.is_fit_to_required_area(behaviour='exigent')  ]
                     child_conflict = False
                     for child in truncated_children:
                         # Save a backup of the current child in case we have to recover its boundary later
