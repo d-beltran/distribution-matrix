@@ -3,8 +3,6 @@ from typing import Union, Optional, List, Set, Tuple, Generator, Callable
 from auxiliar import *
 from scheme_display import add_frame
 
-from functools import reduce
-
 import itertools
 
 from math import sqrt, sin, cos, degrees, radians, acos
@@ -2395,7 +2393,7 @@ class Grid:
             boundary_segments = [ segm for segm in segments if segments.count(segm) == 1 ]
             # Now get groups of connected segments (i.e. polygons)
             # A group must contain an exterior polygon and it may contain also several interior polygons
-            polygons = list(connect_segments(boundary_segments))
+            polygons = list(connect_boundary_segments(boundary_segments))
             # The external polygon is the polygon with the biggest box
             sorted_polygons = sorted(polygons)
             exterior_polygon = sorted_polygons[-1]
@@ -3260,9 +3258,12 @@ def merge_grids (grids : List[Grid]) -> Grid:
         final_grid += grid
     return final_grid
 
-# Find groups of connected segments in a list of segments
+# Find groups of connected segments in a list of boundary segments
+# Boundary segments are segments which may belong either to internal or external boundaries, we don't know
+# All we know is these segments are connected between them
+# This means there is not an isolated segment or segment point
 # Yield any closed polygon when it is found
-def connect_segments (segments : List[Segment]) -> Generator[Polygon, None, None]:
+def connect_boundary_segments (segments : List[Segment]) -> Generator[Polygon, None, None]:
     remaining_segments = [ *segments ]
     first_segment = remaining_segments[0]
     remaining_segments.remove(first_segment)
@@ -3291,6 +3292,11 @@ def connect_segments (segments : List[Segment]) -> Generator[Polygon, None, None
             yield Polygon.non_canonical(current_polygon_segments)
             # Remove the recently yielded segments from the previous segments list
             polygon_segments = polygon_segments[0:closing_segment_index]
+            # If we are out of polygon segments but there are still reamining segments to connect then add one to the list
+            if len(polygon_segments) == 0 and len(remaining_segments) > 0:
+                first_segment = remaining_segments[0]
+                remaining_segments.remove(first_segment)
+                polygon_segments = [ first_segment ]
 
 # Given a list of polygons, try to group them by boundaries
 # i.e. polygons which are contained inside other polygons are considered interior polygons of the boundary
