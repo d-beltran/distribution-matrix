@@ -460,9 +460,13 @@ class Door:
             corner_distances = [ point.get_distance_to(corner) for corner in outside_corners ]
             return min(corner_distances)
         suitable_points.sort(key=sort_by_distance_to_wall)
+        most_suitable_point = suitable_points[0]
+        # If the current point is the most suitable point already then exit here
+        if self.point == most_suitable_point:
+            return False
         # Set the most suitable point as the current door point
         # Note that setting the point already resets the segment, the pivot, etc.
-        self.point = suitable_points[0]
+        self.point = most_suitable_point
         return True
 
     # Check if the door is placed in a suitable point already and, if not, try to relocate it
@@ -1203,15 +1207,15 @@ class Room:
     # The room height
     height = property(get_height, set_height, None, "The room height")
 
-    # Set the children boundaries according to the room configuration
+    # Set children grids according to the room configuration
     # This function triggers the logic to solve room distributions
-    # If the recursive flag is passed then set each child's children boundaries and so on recursively
+    # If the recursive flag is passed then solve each child's children grids and so on recursively
     # All children rooms must have their boundary fully set before solving the next generation of children
-    def set_children_boundaries (self, recursive : bool = False):
+    def solve_children (self, recursive : bool = False, verbose : bool = False) -> bool:
         rooms = self.children
         # If there are not children then we have nothing to do here
         if len(rooms) == 0:
-            return
+            return True
         # Before allocating place for any children room, set corridor spaces in front of parent doors
         # This way this space is never claimed since it has to be occupied by the corridor anyway
         # Note that the root room may have non defined doors
@@ -1231,43 +1235,56 @@ class Room:
             other_rooms = [ self ] + [ other for other in rooms if other != room ]
             parent_free_limit = max([ other.min_size for other in other_rooms ])
             room.parent_free_limit = parent_free_limit
+            # If the room already has boundary at this point then ignore it
+            if room.boundary: continue
             # If the children has no boundary it must be built
-            if not room.boundary:
-                if not self.set_child_room_boundary(room):
-                    raise SystemExit(f'Child {room.name} has failed to be set')
+            # Use the proper function depending on if this is a child adaptable boundary parent
+            child_grid_setter = self.set_child_grid_adaptable if self._child_adaptable_boundary else self.set_child_grid
+            if not child_grid_setter(room):
+                if verbose: print(f'Child {room.name} has failed to be set')
+                return False
 
-        # Reshaped children boundaries to reduce unnecessary corners as well
+        # Reshaped children to reduce unnecessary corners as well
         self.reduce_children_corners()
 
         # Now that all children bondaries are set we must set the corridor
 
         # Set the corridor
         if len(rooms) > 0:
-            self.set_corridor()
+            if not self.set_corridor():
+                return False
 
         # At this point the boundary is no longer adaptable to child boundaries, in case it was
         # This is because then the reducing corneres process requires real free space to work
         self._child_adaptable_boundary = False
 
-        # If there is a limit of corners in the room (i.e. this is the root room) then reshape children boundaries now
+        # If there is a limit of corners in the room (i.e. this is the root room) then reshape children now
         if self._child_adaptable_boundary and self.max_corners:
             self.reduce_corners()
-        # Reshaped children boundaries to reduce unnecessary corners as well
+        # Reshape children to reduce unnecessary corners as well
         self.reduce_children_corners()
 
         # Relocate the doors to the most suitable placement now that boundaries will change no more
+        any_relocated_door = False
         for child in self.children:
             for door in child.doors:
-                if not door.rigid:
-                    door.relocate()
+                if door.rigid:
+                    continue
+                if door.relocate():
+                    any_relocated_door = True
 
         # Show the relocated doors
-        self.update_display(title='Relocated doors')
+        if any_relocated_door:
+            self.update_display(title='Relocated doors')
 
-        # Set children boundaries recurisvely if the recursive flag was passed
+        # Solve children recurisvely if the recursive flag was passed
         if recursive:
             for room in rooms:
-                room.set_children_boundaries(recursive=True)
+                if not room.solve_children(recursive=True):
+                    return False
+
+        # We successfully solved it
+        return True
 
     # Check if a room fits in this room according to its minimum size
     # Check free space by default and all space if the argument 'force' is passed
@@ -1292,174 +1309,173 @@ class Room:
         fitting_rects = list(grid.generate_fitting_rects(size, size))
         return fitting_rects
 
-    # Set up a child room boundary
-    def set_child_room_boundary (self, room : 'Room', forced : bool = False, verbose : bool = False) -> bool:
-        if verbose: print(f'Setting {self.name} child room {room.name} boundary')
-        # If self is a child adaptable room
-        if self._child_adaptable_boundary:
-            # There are no boundary restrictions
-            # All children will be set in one single step, as the maximum initial boundaries
-            # To do so, we must find a suitable corner and space (rect) for the boundary to be set
-            # This space will be as long as the double of the room maximum size, for it to be able to expand without problems
-            huge_size = room.max_size * 2
-            # First of all, find all childrens with already set boundaries
-            # They are the only reference to place the new room
-            brother_boundaries = [ child.boundary for child in self.children if child.boundary ]
-            # If this is the first room then there is no reference at all, so we set the first corner as the (0,0) point
-            # Then the "available space" will be a fake rect which is huge enough for this room to set its whole boundary
-            if len(brother_boundaries) == 0:
-                space = Rect(0, 0, huge_size, huge_size)
-                # This is the "real" corner, which include its segments
-                initial_point = Point(0,0)
-                corner = space.get_corner(initial_point)
-                room.grid = room.build_maximum_initial_grid(corner, space)
-                return True
-            # If there are other childs with boundaries already then we must find the best location for the new room
-            # It has to be next to its brother rooms, in a point which minimizes the corridor length further
-            # If there is one brother only then it makes not sense to find a corridor
-            if len(brother_boundaries) == 1:
-                space = Rect(-huge_size, 0, 0, huge_size)
-                reference_point = Point(0,0)
-                corner = space.get_corner(reference_point)
-                room.grid = room.build_maximum_initial_grid(corner, space)
-                return True
-            # Otherwise, calculate the "pre-corridor" and find the closest point in the current parent "pre-exterior-polygon"
-            # First, get the current corridor points
-            corridor_segments, corridor_nodes = self.set_corridor(backbone_only=True)
-            corridor_points = list(set(sum([ segment.points for segment in corridor_segments ], ()))) + corridor_nodes
-            # Now get all points in the exterior polygon which may be closer to the corridor
-            # Note that these point may not be a corner in the exterior polygon, but a point in the middle of any segment
-            # This should be easy to find since the current parent is made of rectangular rooms together
-            boundary_segments = sum([ boundary.exterior_polygon.segments for boundary in brother_boundaries ], [])
-            exterior_polygon_segments = get_non_overlap_segments(boundary_segments)
-            exterior_polygon_segment_points = list(set(sum([ segment.points for segment in exterior_polygon_segments ], ())))
-            # Now calculate the actual exterior polygon from the segments we found before
-            # This polygon will be useful to know the direction towards we must expand the new child further
-            exterior_polygon = Polygon.non_canonical(exterior_polygon_segments)
-            # Find the point in the current exterior polygon which is close to any point in the current corridor
-            # Note that this point may not be a corner in the exterior polygon
-            minimum_distance_point = None
-            # If we find a point in the polygon which is already in the corridor then we are done
-            common_point = next(( point for point in exterior_polygon_segment_points if point in corridor_points ), None)
-            if common_point:
-                minimum_distance_point = common_point
-            # Otherwise iterate all point combinations to find the closest ones
-            minimum_distance = inf
-            for exterior_polygon_segment_point in exterior_polygon_segment_points:
-                for corridor_point in corridor_points:
-                    distance = exterior_polygon_segment_point.get_distance_to(corridor_point)
-                    if distance < minimum_distance:
-                        minimum_distance = distance
-                        minimum_distance_point = exterior_polygon_segment_point
-            # Now find which directions we must expand
-            # In case the point is a corner (it will always be an inside corner) we will have both directions already
-            corner = exterior_polygon.get_corner(minimum_distance_point)
-            if corner:
-                direction_a = -corner.segments[0].direction
-                direction_b = corner.segments[1].direction
-                space_segment_a = Segment(corner + direction_a * huge_size, corner)
-                space_segment_b = Segment(corner, corner + direction_b * huge_size)
-                corner = Corner(corner.x, corner.y, space_segment_a, space_segment_b)
-                space = Rect.from_corner(corner)
-                room.grid = room.build_maximum_initial_grid(corner, space)
-                return True
-            # In case the point is in a segment we have only one direction to expand and we can choose the other
-            polygon_segment = exterior_polygon.get_border_element(minimum_distance_point)
-            direction_a = -exterior_polygon.get_border_inside(polygon_segment)
-            direction_b = direction_a.rotate(90)
-            space_segment_a = Segment(minimum_distance_point + direction_a * huge_size, minimum_distance_point)
-            space_segment_b = Segment(minimum_distance_point, minimum_distance_point + direction_b * huge_size)
-            corner = Corner(minimum_distance_point.x, minimum_distance_point.y, space_segment_a, space_segment_b)
+    # Set up a child room boundary with no parent boundary
+    def set_child_grid_adaptable (self, room : 'Room') -> bool:
+        # There are no boundary restrictions
+        # All children will be set in one single step, as the maximum initial grids
+        # To do so, we must find a suitable corner and space (rect) for the boundary to be set
+        # This space will be as long as the double of the room maximum size, for it to be able to expand without problems
+        huge_size = room.max_size * 2
+        # First of all, find all children with already set boundaries/grid
+        # They are the only reference to place the new room
+        brother_boundaries = [ child.boundary for child in self.children if child.boundary ]
+        # If this is the first room then there is no reference at all, so we set the first corner as the (0,0) point
+        # Then the "available space" will be a fake rect which is huge enough for this room to set its whole boundary
+        if len(brother_boundaries) == 0:
+            space = Rect(0, 0, huge_size, huge_size)
+            # This is the "real" corner, which include its segments
+            initial_point = Point(0,0)
+            corner = space.get_corner(initial_point)
+            room.grid = room.build_maximum_initial_grid(corner, space)
+            return True
+        # If there are other childs with boundaries already then we must find the best location for the new room
+        # It has to be next to its brother rooms, in a point which minimizes the corridor length further
+        # If there is one brother only then it makes not sense to find a corridor
+        if len(brother_boundaries) == 1:
+            space = Rect(-huge_size, 0, 0, huge_size)
+            reference_point = Point(0,0)
+            corner = space.get_corner(reference_point)
+            room.grid = room.build_maximum_initial_grid(corner, space)
+            return True
+        # Otherwise, calculate the "pre-corridor" and find the closest point in the current parent "pre-exterior-polygon"
+        # First, get the current corridor points
+        corridor_backbone = self.find_corridor_backbone()
+        corridor_segments = corridor_backbone['segments'] if corridor_backbone else None
+        corridor_nodes = corridor_backbone['nodes'] if corridor_backbone else None
+        corridor_points = list(set(sum([ segment.points for segment in corridor_segments ], ()))) + corridor_nodes
+        # Now get all points in the exterior polygon which may be closer to the corridor
+        # Note that these point may not be a corner in the exterior polygon, but a point in the middle of any segment
+        # This should be easy to find since the current parent is made of rectangular rooms together
+        boundary_segments = sum([ boundary.exterior_polygon.segments for boundary in brother_boundaries ], [])
+        exterior_polygon_segments = get_non_overlap_segments(boundary_segments)
+        exterior_polygon_segment_points = list(set(sum([ segment.points for segment in exterior_polygon_segments ], ())))
+        # Now calculate the actual exterior polygon from the segments we found before
+        # This polygon will be useful to know the direction towards we must expand the new child further
+        exterior_polygon = Polygon.non_canonical(exterior_polygon_segments)
+        # Find the point in the current exterior polygon which is close to any point in the current corridor
+        # Note that this point may not be a corner in the exterior polygon
+        minimum_distance_point = None
+        # If we find a point in the polygon which is already in the corridor then we are done
+        common_point = next(( point for point in exterior_polygon_segment_points if point in corridor_points ), None)
+        if common_point:
+            minimum_distance_point = common_point
+        # Otherwise iterate all point combinations to find the closest ones
+        minimum_distance = inf
+        for exterior_polygon_segment_point in exterior_polygon_segment_points:
+            for corridor_point in corridor_points:
+                distance = exterior_polygon_segment_point.get_distance_to(corridor_point)
+                if distance < minimum_distance:
+                    minimum_distance = distance
+                    minimum_distance_point = exterior_polygon_segment_point
+        # Now find which directions we must expand
+        # In case the point is a corner (it will always be an inside corner) we will have both directions already
+        corner = exterior_polygon.get_corner(minimum_distance_point)
+        if corner:
+            direction_a = -corner.segments[0].direction
+            direction_b = corner.segments[1].direction
+            space_segment_a = Segment(corner + direction_a * huge_size, corner)
+            space_segment_b = Segment(corner, corner + direction_b * huge_size)
+            corner = Corner(corner.x, corner.y, space_segment_a, space_segment_b)
             space = Rect.from_corner(corner)
             room.grid = room.build_maximum_initial_grid(corner, space)
             return True
-        # If the parent has a defined boundary
+        # In case the point is in a segment we have only one direction to expand and we can choose the other
+        polygon_segment = exterior_polygon.get_border_element(minimum_distance_point)
+        direction_a = -exterior_polygon.get_border_inside(polygon_segment)
+        direction_b = direction_a.rotate(90)
+        space_segment_a = Segment(minimum_distance_point + direction_a * huge_size, minimum_distance_point)
+        space_segment_b = Segment(minimum_distance_point, minimum_distance_point + direction_b * huge_size)
+        corner = Corner(minimum_distance_point.x, minimum_distance_point.y, space_segment_a, space_segment_b)
+        space = Rect.from_corner(corner)
+        room.grid = room.build_maximum_initial_grid(corner, space)
+        return True
+
+    # Set up a child room boundary between parent and brother bundaries
+    def set_child_grid (self, room : 'Room', forced : bool = False, verbose : bool = False) -> bool:
+        if verbose: print(f'Setting {self.name} child room {room.name} boundary')
+        # Find a suitable maximum free rectangle to deploy a starting base grid
+        # The minimum base grid is a square with both sides as long as the room minimum size
+        # If there are no suitable rects it means this child fits nowhere in the free space
+        # This may happen with the last childs, when previous childs have take almost all space
+        # In this case we take as availbale space all the room space and then we invade overlapped children
+        if forced:
+            suitable_rects = self.get_room_fitting_rects(room, forced=True)
+            if len(suitable_rects) == 0:
+                # DANI: Esto no debería pasar nunca. Debería preveerse de antes
+                raise RuntimeError(f'The room {room.name} fits nowhere')
         else:
-            # Find a suitable maximum free rectangle to deploy a starting base grid
-            # The minimum base grid is a square with both sides as long as the room minimum size
-            # If there are no suitable rects it means this child fits nowhere in the free space
-            # This may happen with the last childs, when previous childs have take almost all space
-            # In this case we take as availbale space all the room space and then we invade overlapped children
+            suitable_rects = self.get_room_fitting_rects(room)
+            if len(suitable_rects) == 0:
+                if verbose: print(f'  Room {room.name} fits nowhere in the free space')
+                return self.set_child_grid(room, forced=True)
+        # Shuffle the suitable rects
+        random.shuffle(suitable_rects)
+        # Sort the suitable rects by minimum size
+        def sort_by_size(rect):
+            return min(rect.get_size())
+        sorted_suitable_rects = sorted( suitable_rects, key=sort_by_size )
+        # Make a backup in case we have to force since other rooms will be modified
+        if forced:
+            backup = self.make_grid_backup(children_only=True)
+        # Try to set up the new room in all possible sites until we find one
+        # Each 'site' means each corner in each suitable rectangle
+        # Check each site to allow other rooms to grow
+        # Pick only corners wich are already in the free grid (no matter if interior or exterior)
+        sites = [ (corner, rect) for rect in sorted_suitable_rects for corner in rect.get_corners() ]
+        # Save previous grid to not repeat already checked (and failed) grids
+        previous_initial_grid = None
+        # Iterate the different corners
+        for corner, rect in sites:
+            # In case we force the base grid we must check which children were invaded
+            # In addition, the base grid must be as small as possible
+            initial_grid = None
             if forced:
-                suitable_rects = self.get_room_fitting_rects(room, forced=True)
-                if len(suitable_rects) == 0:
-                    # DANI: Esto no debería pasar nunca. Debería preveerse de antes
-                    raise RuntimeError(f'The room {room.name} fits nowhere')
+                initial_grid = room.build_minimum_initial_grid(corner)
+            # Otherwise we set freely the maximum possible grid
             else:
-                suitable_rects = self.get_room_fitting_rects(room)
-                if len(suitable_rects) == 0:
-                    if verbose: print(f'  Room {room.name} fits nowhere in the free space')
-                    return self.set_child_room_boundary(room, forced=True)
-            # Shuffle the suitable rects
-            random.shuffle(suitable_rects)
-            # Sort the suitable rects by minimum size
-            def sort_by_size(rect):
-                return min(rect.get_size())
-            sorted_suitable_rects = sorted( suitable_rects, key=sort_by_size )
-
-            # Make a backup in case we have to force since other rooms will be modified
-            if forced:
-                backup = self.make_grid_backup(children_only=True)
-
-            # Try to set up the new room in all possible sites until we find one
-            # Each 'site' means each corner in each suitable rectangle
-            # Check each site to allow other rooms to grow
-            # Pick only corners wich are already in the free grid (no matter if interior or exterior)
-            sites = [ (corner, rect) for rect in sorted_suitable_rects for corner in rect.get_corners() ]
-            # Save previous grid to not repeat already checked (and failed) boundaries
-            previous_initial_grid = None
-            # Iterate the different corners
-            for corner, rect in sites:
-                # In case we force the base grid we must check which children were invaded
-                # In addition, the base grid must be as small as possible
-                initial_grid = None
-                if forced:
-                    initial_grid = room.build_minimum_initial_grid(corner)
-                # Otherwise we set freely the maximum possible grid
-                else:
-                    initial_grid = room.build_maximum_initial_grid(corner, rect)
-                # There must be always an initial grid at this point
-                if not initial_grid:
-                    raise RuntimeError('Something went wrong with initial grid')
-                # A few tests to avoid inconvinient but not fatal scenarios
-                # They are not mandatory and thus they will be skipped if this is forced
-                if not forced:
-                    # If we can, should check parent free grid is not getting more splitted than it is
-                    current_splits = len(self.free_grid.boundaries)
-                    new_hypothetical_free_grid = self.free_grid - initial_grid
-                    new_splits = len(new_hypothetical_free_grid.boundaries)
-                    if new_splits > current_splits:
-                        if verbose: print(f'  Free space is getting more splitted than it was')
-                        continue
-                    # If we can, should check parent doors are not gettin occupied
-                    if not self.check_doors_side(initial_grid, inside=True):
-                        if verbose: print(f'  Not respecting some {self.name} door space')
-                        continue
-                # At this point, check if the grid is equal to a previous tried (and failed) grid
-                # This may happend with the 4 corners of the same rect
-                if previous_initial_grid == initial_grid:
-                    if verbose: print(f'  Grid already tried and failed')
-                    continue
-                # Save the current grid to skip it in further iterations in case it fails
-                previous_initial_grid = initial_grid
-                # Now actually set the inital grid
-                if not room.expand_grid(initial_grid):
-                    if verbose: print(f'  Failed to set {room.name} initial grid')
-                    continue
-                # Proceed with the expansion of this child room until it reaches its forced area
-                if not room.fit_to_required_area():
-                    if verbose: print(f'  Failed to fit {room.name} required area')
-                    # If the expansion failed then clean the grid (i.e. the initial grid)
-                    room.grid = None
-                    if forced:
-                        self.restore_grid_backup(backup)
-                    continue
-                return True
-            # If at this point we still have no boundary it means there is no available place to set the perimeter
-            # If this was not forced then retry forcing
+                initial_grid = room.build_maximum_initial_grid(corner, rect)
+            # There must be always an initial grid at this point
+            if not initial_grid:
+                raise RuntimeError('Something went wrong with initial grid')
+            # A few tests to avoid inconvinient but not fatal scenarios
+            # They are not mandatory and thus they will be skipped if this is forced
             if not forced:
-                return self.set_child_room_boundary(room, forced=True)
-            return False
+                # If we can, should check parent free grid is not getting more splitted than it is
+                current_splits = len(self.free_grid.boundaries)
+                new_hypothetical_free_grid = self.free_grid - initial_grid
+                new_splits = len(new_hypothetical_free_grid.boundaries)
+                if new_splits > current_splits:
+                    if verbose: print(f'  Free space is getting more splitted than it was')
+                    continue
+                # If we can, should check parent doors are not gettin occupied
+                if not self.check_doors_side(initial_grid, inside=True):
+                    if verbose: print(f'  Not respecting some {self.name} door space')
+                    continue
+            # At this point, check if the grid is equal to a previous tried (and failed) grid
+            # This may happend with the 4 corners of the same rect
+            if previous_initial_grid == initial_grid:
+                if verbose: print(f'  Grid already tried and failed')
+                continue
+            # Save the current grid to skip it in further iterations in case it fails
+            previous_initial_grid = initial_grid
+            # Now actually set the inital grid
+            if not room.expand_grid(initial_grid, check_parent_free_grid=False):
+                if verbose: print(f'  Failed to set {room.name} initial grid')
+                continue
+            # Proceed with the expansion of this child room until it reaches its forced area
+            if not room.fit_to_required_area():
+                if verbose: print(f'  Failed to fit {room.name} required area')
+                # If the expansion failed then clean the grid (i.e. the initial grid)
+                room.grid = None
+                if forced:
+                    self.restore_grid_backup(backup)
+                continue
+            return True
+        # If at this point we still have no boundary it means there is no available place to set the perimeter
+        # If this was not forced then retry forcing
+        if not forced:
+            return self.set_child_grid(room, forced=True)
+        return False
 
     # Build a provisional grid from the children room grids
     # This function is meant to be used only when the parent (self) room has an adaptable boundary
@@ -1546,14 +1562,12 @@ class Room:
         minimum_rect = Rect.from_corner(corner, self.min_size, self.min_size)
         return Grid([minimum_rect])
 
-    # Using all boundaries, calculate which segments make the shortest path to connect parent doors and all children rooms
+    # Using both parent and children boundaries, calculate which segments make the shortest path to connect parent doors and all children rooms
     # Missing children doors are also set during this process and they are placed according to make the corridor as short as possible
-    # Finally, the area around the selected corridor segments is claimed to build the actual corridor
-    # The backbone only flag allows to calculate the corridor backbone and return it, thus not caliming any area for the corridor
     # Note that this function may be used several times to find a "pre-corridor" before definitely setting it
     # NEVER FORGET: The algorithm to solve the corridor finds all possible combinations of nodes to know the final result is the shortest possible path
     # NEVER FORGET: Once I tried to add as many nodes as 'candidate doors' and as a result the algorithm was taking hours to solve the problem
-    def set_corridor (self, backbone_only : bool = False, verbose : bool = False) -> Optional[List['Segment']]:
+    def find_corridor_backbone (self, verbose : bool = False) -> Optional[dict]:
         if verbose: print(f'Setting {self.name} corridor')
 
         # Set the corridor nodes
@@ -1751,7 +1765,7 @@ class Room:
         # WARNING: Treating all free regions as one is a problem since it may result in a splitted corridor
         # If a free space region is reached during the solving then include its nodes and segments in the corridor
         # They will be removed further during the corridor expansion, but they must be considered as corridors for colliding rooms to be included
-        free_regions = []
+        corridor_free_regions = []
         free_region_nodes = {}
         if functional_corridor_grid:
             # Define each region of the free space separately
@@ -1772,11 +1786,11 @@ class Room:
                             free_corridor_nodes.append(point)
                             break
                 # Set a region object with the already set segments and nodes
-                free_region = {
+                corridor_free_region = {
                     'corridor_segments': free_corridor_segments,
                     'corridor_nodes': free_corridor_nodes
                 }
-                free_regions.append(free_region)
+                corridor_free_regions.append(corridor_free_region)
                 # Now associate this free region data to each of its nodes so it is easier to find later
                 # Also create a fake 'node room' to be associated to this free regions and make this has a required room
                 # This way we make sure the solver reaches all free regions
@@ -1785,11 +1799,11 @@ class Room:
                 required_rooms.append(free_region_room_hash)
                 for point in free_corridor_nodes:
                     # Set current free region to this node point
-                    free_region_nodes[point] = free_region
+                    free_region_nodes[point] = corridor_free_region
                     # Add the free region room hash to the node data rooms list
                     nodes[point]['rooms'].append(free_region_room_hash)
             # Set the first of the free regions as part of the current corridor already
-            sample_free_region = next(free_region for free_region in free_region_nodes.values())
+            sample_free_region = next(corridor_free_region for corridor_free_region in free_region_nodes.values())
             # Update the current corridor values
             # WARNING: The current_corridor_length is not set since it must be only updated when the corridor is complete
             current_corridor = sample_free_region['corridor_segments']
@@ -1815,7 +1829,7 @@ class Room:
             # Set the free grid as the corridor grid
             # DANI: Esto tal vez se puede replantear. No es necesario y perdemos la free grid (espacio claimable)
             self.corridor_grid = functional_corridor_grid
-            return True
+            return None
 
         # Trak which combinations of path nodes we have tried allready
         # Combinations of path nodes are equivalent to combinations of paths, but easier to compare
@@ -1855,11 +1869,11 @@ class Room:
                 following_node_paths = [ *following_node_data['paths'] ]
                 following_node_path_nodes = [ *following_node_data['path_nodes'] ]
                 # In case we find a free region node we immediately add all its segments and nodes to the corridor
-                free_region = free_region_nodes.get(following_node, None)
-                if free_region:
-                    following_path += free_region['corridor_segments']
-                    following_path_nodes += free_region['corridor_nodes']
-                    for node in free_region['corridor_nodes']:
+                corridor_free_region = free_region_nodes.get(following_node, None)
+                if corridor_free_region:
+                    following_path += corridor_free_region['corridor_segments']
+                    following_path_nodes += corridor_free_region['corridor_nodes']
+                    for node in corridor_free_region['corridor_nodes']:
                         node_data = nodes[node]
                         following_node_paths += node_data['paths']
                         following_node_path_nodes += node_data['path_nodes']
@@ -2008,17 +2022,43 @@ class Room:
 
         # Display the current corridor
         elements_to_display = [ segment.get_colored_segment('red') for segment in current_corridor ]
-        self.update_display(extra=elements_to_display, title='Display the base corridor path')
+        self.update_display(extra=elements_to_display, title='Display the corridor backbone')
 
-        # ------------------------------------------------------------------------------------------------------------------------------
+        # Return all the results inside a dict
+        # It will include not only the backbone but also other intenral varibales which my be used further
+        corridor_backbone = {
+            'segments': current_corridor,
+            'nodes' : current_corridor_nodes,
+            # Save expensive internal vlaues to be forwarded to the set_corridor function
+            'internal': (required_children_rooms, corridor_free_regions)
+        }
+        return corridor_backbone
 
-        # At this point we have the backbone of the corridor
+    # Find the corridor backbone and then claim the area around the selected corridor segments to build the actual corridor
+    # Then set the doors to connect the corridor with every child
+    # Sometime additional area is claimed to grant door placement
+    def set_corridor (self, verbose : bool = False) -> bool:
+        
+        # Find the corridor backbone
+        corridor_backbone = self.find_corridor_backbone(verbose=verbose)
 
-        # In case the 'backbone only' flag was passed we return now the backbone corridor segments and node points
-        if backbone_only:
-            return current_corridor, current_corridor_nodes
+        # If the returned corridor is none then it menas there is no need to stablish a corridor
+        if corridor_backbone == None:
+            return True
 
-        # ------------------------------------------------------------------------------------------------------------------------------
+        # Set other variables to be used
+        # LORE: These variables are defined in the 'find_corridor_backbone' function
+        # LORE: This function and the set_corridor function were one single function before
+
+        # Get the exterior polygon
+        exterior_polygon = self.boundary.exterior_polygon
+        # Get all grids which may contribute to the corridor
+        functional_corridor_grid = self.corridor_grid + self.free_grid
+        # Get the actual corridor backbone
+        current_corridor = corridor_backbone['segments']
+        current_corridor_nodes = corridor_backbone['nodes']
+        # Inherit some internal variables from the corridor backbone function
+        required_children_rooms, corridor_free_regions = corridor_backbone['internal']
 
         # Build the corridor by claiming area around the corridor path
         # To do so we must set a boundary
@@ -2061,12 +2101,12 @@ class Room:
             # Always leave a minimal corridor fragment from the free space for the grid to be continuous
             if functional_corridor_grid:
                 # Iterate over the different free grids and remove its segments from the corridor
-                for free_region in free_regions:
-                    for segment in free_region['corridor_segments']:
+                for corridor_free_region in corridor_free_regions:
+                    for segment in corridor_free_region['corridor_segments']:
                         corridor -= segment
                 # Now that we have the corridor alone we can search for corridor fragments to connect
-                for free_region in free_regions:
-                    for segment in free_region['corridor_segments']:
+                for corridor_free_region in corridor_free_regions:
+                    for segment in corridor_free_region['corridor_segments']:
                         # Skip segments not connected to the remaining corridor
                         if not corridor.is_connected_to_segment(segment):
                             continue
@@ -2216,7 +2256,7 @@ class Room:
         # Note that, at this point, other rooms do not expand to compensate the lost area yet
         for child in self.children:
             if not child.truncate(self.corridor_grid, force=True, skip_update_display=True):
-                raise ValueError('The space required by the corridor cannot be claimed from ' + child.name)
+                raise ValueError(f'The space required by the corridor cannot be claimed from {child.name}')
 
         # Show the relocated doors
         self.update_display(title='Displaying early corridor')
@@ -2359,7 +2399,7 @@ class Room:
                             # There should be always a point in common with the reference segment
                             common_point = next((point for point in available_segment.points if point in corridor_reference_segment.points), None)
                             if common_point == None:
-                                raise ValueError('There is no common point between ' + door.room.name + ' expansion segment and the corridor reference segment')
+                                raise ValueError(f'There is no common point between {door.room.name} expansion segment and the corridor reference segment')
                             other_point = next(point for point in available_segment.points if point != common_point)
                             # Now find the segment over the corridor which must be covered by the room expansion to fit the door
                             expansion_direction = (common_point + other_point).normalized()
@@ -2396,7 +2436,7 @@ class Room:
                         if not overlap_point:
                             extra = [ s.get_colored_segment('blue') for s in corridor_boundary_segments ] + [ s.get_colored_segment('green') for s in door_polygon.segments ]
                             self.update_display(title='Debug', extra=extra)
-                            raise RuntimeError('There is no overlap point between the corridor and the ' + door.room.name + '. This should never happen.')
+                            raise RuntimeError(f'There is no overlap point between the corridor and the {door.room.name}. This should never happen.')
                         # Now find the two segments in the corridor boundary which include the overlap corner
                         corridor_reference_segments = [ segment for segment in corridor_polygon.segments if overlap_point in segment ]
                         # Set the expansion size as the whole door margined width
@@ -2534,13 +2574,13 @@ class Room:
                         self.update_display(title='Displaying expanded corridor')
                         break
                     else:
-                        raise RuntimeError('Failed to expand corridor for reaching room ' + door.room.name)
+                        raise RuntimeError(f'Failed to expand corridor for reaching room {door.room.name}')
                 # If there is no segment overlap between corridor and door room then we must rely in a point overlap
                 # This point will be a corner for both the corridor and the door room and it must always be there
                 corridor_outside_corners = sum([ boundary.outside_corners for boundary in self.corridor_grid.boundaries ], [])
                 overlap_point = next((corner for corner in corridor_outside_corners if corner in door_polygon.corners), None)
                 if not overlap_point:
-                    raise RuntimeError('There is no overlap point between the corridor and the ' + door.room.name + ' door. This should never happen.')
+                    raise RuntimeError(f'There is no overlap point between the corridor and the {door.room.name} door. This should never happen.')
                 # Now find the two segments in the corridor boundary which include the overlap corner
                 reference_segments = [ segment for segment in corridor_boundary_segments if overlap_point in segment ]
                 # Set the expansion size as the whole door margined width
@@ -2577,16 +2617,19 @@ class Room:
         children_available_area = self.area - self.corridor_grid.area - self.discarded_grid.area
         children_required_area = sum([ child.min_area for child in self.children ])
         if children_available_area < children_required_area:
-            raise RuntimeError(f'There is not enought space {children_available_area} to fit all children {children_required_area} after corridor area substraction')
+            if verbose: print(f'There is not enought space {children_available_area} to fit all children {children_required_area} after corridor area substraction')
+            return False
 
         # Now, relocate and reshape children rooms
         for child in self.children:
             current_behaviour = 'conformist' if equal(self.free_area, 0) else 'greedy'
             if not child.fit_to_required_area(behaviour=current_behaviour, verbose=True):
-                raise ValueError(f'{child.name} failed to fit to required area after corridor area truncation')
+                if verbose: print(f'{child.name} failed to fit to required area after corridor area truncation')
+                return False
 
         # Show redistribution after reshaping child rooms
         self.update_display(title='Displaying redistributed rooms')
+        return True
 
     # Reduce the number of corners in this room exterior polygon by reshaping self and children boundaries
     # This function is meant to run in the root room only
@@ -4161,8 +4204,8 @@ class Room:
 
     # Solve room distributions
     # The display flag may be passed in order to generate a dynamic graph to display the solving process
-    def solve (self):
-        self.set_children_boundaries(recursive=True)
+    def solve (self) -> bool:
+        return self.solve_children(recursive=True)
 
 # The element which connects diferent floors of a building
 class Stairs:
@@ -4610,9 +4653,9 @@ class Building:
     def _fix_inherited_ghost_corridor_regions (self, floor : Room):
         # Find these inherited ghost corridor regions
         # Get all free regions not respecting the parent free limit (i.e. the highest minimum size among its children)
-        free_regions = floor.free_grid
-        correct_regions = free_regions.keep_minimum(floor.parent_free_limit)
-        wrong_regions = free_regions - correct_regions
+        corridor_free_regions = floor.free_grid
+        correct_regions = corridor_free_regions.keep_minimum(floor.parent_free_limit)
+        wrong_regions = corridor_free_regions - correct_regions
         if not wrong_regions:
             return
         # Keep only those which respect the corridor size
