@@ -1073,6 +1073,8 @@ class Room:
             return self._discarded_grid
         # Otherwise we must calculate it
         self._discarded_grid = Grid()
+        # If there is no grid at all then there is no discarded grid
+        if not self.grid: return self._discarded_grid
         # Find regions between the whole grid and the rigid grid respecting the minimum size
         non_rigid_grid = self.grid - self.rigid_grid
         safe_grid = non_rigid_grid.keep_minimum(self.min_size)
@@ -1441,7 +1443,7 @@ class Room:
                 # Save the current grid to skip it in further iterations in case it fails
                 previous_initial_grid = initial_grid
                 # Now actually set the inital grid
-                if not room.expand_grid(initial_grid, check_parent_free_grid=False):
+                if not room.expand_grid(initial_grid):
                     if verbose: print(f'  Failed to set {room.name} initial grid')
                     continue
                 # Proceed with the expansion of this child room until it reaches its forced area
@@ -2815,7 +2817,7 @@ class Room:
                     outside_pull_length = middle_segment.length - inside_push_length
                     # Pull the outside segment
                     # Pull before push, so we have enought area to recover after the push
-                    if not child.pull_boundary_segment(outside_segment, outside_pull_length, check_parent_free_grid=False, verbose=verbose):
+                    if not child.pull_boundary_segment(outside_segment, outside_pull_length, verbose=verbose):
                         if verbose: print(f'  Failed to pull corner outside segment {outside_segment}')
                         # Before we give up we try to pull a more conservative distance
                         # It may happen that the resulting grid is not respecting the minimum size
@@ -2844,7 +2846,7 @@ class Room:
                             # There is no need to recover the backup at this point
                             continue
                     # Now push the inside segment
-                    if not child.push_boundary_segment(inside_segment, inside_push_length, easy=True, check_parent_free_grid=False, verbose=verbose):
+                    if not child.push_boundary_segment(inside_segment, inside_push_length, easy=True, verbose=verbose):
                         if verbose: print(f'  Failed to push corner inside segment {inside_segment}')
                         # Revert the previous push
                         self.restore_grid_backup(backup)
@@ -3497,7 +3499,7 @@ class Room:
             # Now that we have the definitive push length, we actually push the segment
             is_loaned = protocol == 3
             if not self.push_boundary_segment(pushed_segment, push_length, behaviour=behaviour,
-                is_loaned=is_loaned, verbose=verbose, check_parent_free_grid=False):
+                is_loaned=is_loaned, verbose=verbose):
                 # If the push failed with a greedy push then try a conservative push
                 if protocol == 1:
                     return push_segment(pushed_segment, 2, verbose=verbose)
@@ -3660,7 +3662,7 @@ class Room:
                 #print('WARNING: The pull length is too small: ' + str(pull_length))
                 return False
             # We must substract the new rect from this room and check everything is fine after
-            if not self.pull_boundary_segment(pulled_segment, pull_length, check_parent_free_grid=False):
+            if not self.pull_boundary_segment(pulled_segment, pull_length):
                 # If the pull failed with the greedy protocol then try it again with the moderate protocol
                 # Pass the already tried length so the pull is not repeated
                 if protocol != 2:
@@ -3903,12 +3905,11 @@ class Room:
         # Note that parent grid is not checked in situtations where the truncated region is to be claimed by other room rigth away
         # DANI: Esto tiene un problema y es resolver un pull cuando ya está toda el area consumida -> se hace eterno
         # DANI: No se me ocurre solución sencilla así que de momento lo quito y ya
-        if check_parent_free_grid:
-            if not self.parent.free_grid.check_minimum(self.parent_free_limit):
-                if verbose: print(f' Minimum size ({self.parent_free_limit}) is not respected in parent free space -> Restoring backup')
-                # add_frame(self.parent.free_grid, title='Debug -> ' + self.parent.name)
-                self.restore_grid_backup(backup)
-                return False
+        if check_parent_free_grid and not self.parent.free_grid.check_minimum(self.parent_free_limit):
+            if verbose: print(f' Minimum size ({self.parent_free_limit}) is not respected in parent free space -> Restoring backup')
+            # add_frame(self.parent.free_grid, title='Debug -> ' + self.parent.name)
+            self.restore_grid_backup(backup)
+            return False
         # If we made it this far then the truncation succeeded
         if verbose: print(f'Truncating {self.name}, succeeded')
         return True
@@ -3929,7 +3930,7 @@ class Room:
         is_loaned : bool = False,
         behaviour : str = 'exigent',
         easy : bool = False,
-        verbose : bool = False
+        verbose : bool = True
     ) -> bool:
         if verbose: print(f'Expanding room {self.name} at {expansion_grid}')
         new_grid = None
