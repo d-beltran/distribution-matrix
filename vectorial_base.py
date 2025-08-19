@@ -2758,7 +2758,8 @@ class Grid:
             rect.vertical_check = False
 
         # Save all maximum rectangles in a list to be returned at the end
-        maximum_rectangles = []
+        maximum_rectangles_result = []
+        already_checked_maximum_rects = set()
 
         # Group rectangles first horizontally and then vertically
         for rect in self.rects:
@@ -2806,8 +2807,9 @@ class Grid:
             # Create a new rect which contains all group rects
             maximum_rect = merge_rectangles(group)
             # Add the new maximum rectnagle to the list if it is not there already
-            if maximum_rect not in maximum_rectangles:
-                maximum_rectangles.append((maximum_rect, group))
+            if maximum_rect not in already_checked_maximum_rects:
+                already_checked_maximum_rects.add(maximum_rect)
+                maximum_rectangles_result.append((maximum_rect, group))
 
         # Now repeat the process in the inverse order (first vertically, then horizontally)
         for rect in self.rects:
@@ -2855,10 +2857,11 @@ class Grid:
             # Create a new rect which contains all group rects
             maximum_rect = merge_rectangles(group)
             # Add the new maximum rectnagle to the list if it is not there already
-            if maximum_rect not in maximum_rectangles:
-                maximum_rectangles.append((maximum_rect, group))
+            if maximum_rect not in already_checked_maximum_rects:
+                already_checked_maximum_rects.add(maximum_rect)
+                maximum_rectangles_result.append((maximum_rect, group))
 
-        return maximum_rectangles
+        return maximum_rectangles_result
 
     # One by one for each *available rectangle, where available rectangles are the splitted rectangles
     # Get as many rectanges as possible which are connected horizontally to the current rectangle
