@@ -786,7 +786,7 @@ class Rect:
         self.y = (y_min, y_max)
         self.x_size, self.y_size = self.get_size()
         if resolute(self.x_size) < minimum_resolution or resolute(self.y_size) < minimum_resolution:
-            raise ValueError('The rectangle has not 2 dimensions: ' + str(self))
+            raise ValueError(f'The rectangle has not 2 dimensions: {self}')
         self.segments_color = segments_color
         self.fill_color = fill_color
         self.texture = texture
@@ -835,10 +835,10 @@ class Rect:
         return cls.from_segments([hsegment, vsegment], segments_color, fill_color)
 
     def __str__(self):
-        return 'X: ' + str(self.x_min) + '/' + str(self.x_max) + ', Y: ' + str(self.y_min) + '/' + str(self.y_max)
+        return f'<Rect X: {self.x_min} <-> {self.x_max}, Y: {self.y_min} <-> {self.y_max}'
 
     def __repr__(self):
-        return 'X: ' + str(self.x_min) + '/' + str(self.x_max) + ', Y: ' + str(self.y_min) + '/' + str(self.y_max)
+        return str(self)
 
     def __eq__(self, other):
         if isinstance(other, self.__class__):
@@ -914,6 +914,16 @@ class Rect:
         point3 = self.get_upper_right_point()
         point4 = self.get_bottom_right_point()
         return [ point1, point2, point3, point4 ]
+    
+    # Get rectangle segments
+    def get_left_segment (self) -> Segment:
+        return Segment(self.get_bottom_left_point(), self.get_upper_left_point())
+    def get_top_segment (self) -> Segment:
+        return Segment(self.get_upper_left_point(), self.get_upper_right_point())
+    def get_right_segment (self) -> Segment:
+        return Segment(self.get_upper_right_point(), self.get_bottom_right_point())
+    def get_bottom_segment (self) -> Segment:
+        return Segment(self.get_bottom_right_point(), self.get_bottom_left_point())
 
     # Return all rectangle segments in a 'polygon-friendly' order
     def get_segments (self, color : Optional[str] = None) -> List[Segment]:
@@ -1238,6 +1248,11 @@ class Polygon:
 
     def __init__(self, segments : list, color = 'black'):
         self.segments = segments
+        # Mark every segment as it belongs to this polygon
+        for segment in segments:
+            segment._polygon = self
+        # Count the number of segments
+        self.segments_count = len(segments)
         # Check the polygon is closed and segments are not diagonal
         self.check()
         # Save display parameters
@@ -1442,50 +1457,6 @@ class Polygon:
         for segment in self.segments:
             if segment.is_diagonal():
                 raise RuntimeError('The polygon has diagonal segments, which are not supported')
-
-    # Set the polygon corners as points with additional stored values
-    # The 'segments' variable defines the two segments of the polygon which form the corner itself
-    # The 'inside' variable defines if the corner is "pointing" to the inside of the polygon
-    # (e.g. rectangles have no inside corners while an 'L' has one inside corner)
-    # DANI: OBSOLETO -> Ahora se usa la función 'setup'
-    # DANI: Este sistema no soporta lineas diagonales aunque es más rápido
-    def set_corners_obsolete (self):
-        # For each segment, save the end point and if the direction of the next segment is left
-        # Count how many corners are there in one direction (left in this case)
-        precorners = []
-        left_count = 0
-        for current, nextone in pairwise(self.segments, retro=True):
-            point = current.b
-            # Given two continue segments which inevitably form a corner, set if the second segment goes "left" (true) or "right" (false) relative to the first segment
-            # https://stackoverflow.com/questions/13221873/determining-if-one-2d-vector-is-to-the-right-or-left-of-another
-            a = current.vector
-            b = nextone.vector
-            dot = a.x * -b.y + a.y * b.x
-            lefted_corner = dot < 0
-            left_count += int(lefted_corner)
-            precorners.append((point, [current, nextone], lefted_corner))
-
-        # Get the numeric difference between corners in one direction and the other
-        difference = 2*left_count - len(precorners)
-
-        # There should be always 4 more corners in one direction than in the other (may be left or right)
-        if abs(difference) != 4:
-            # If you see this error there may be splitted segments in your polygon
-            # Use the non-canonical class method to set your polygon
-            raise RuntimeError('There is something wrong with the polygon')
-
-        # Check if are more corners in the counted direction (true) or the other (false)
-        lefted_polygon = difference > 0
-
-        # Now set the real corners and save them in the global variable 'corners'
-        # Corners with the minoritarian direction will be set as 'inside = True'
-        corners = []
-        for precorner in precorners:
-            point, segments, lefted_corner = precorner
-            inside = lefted_corner != lefted_polygon
-            corner = Corner(*point.coords, *segments, inside)
-            corners.append(corner)
-        return corners
 
     # Understand which is the inside and which is the outside of the polygon
     # Set the polygon corners as points with additional stored values
@@ -1728,6 +1699,17 @@ class Polygon:
                 if overlap:
                     return True
         return False
+    
+    # Given a segment which is found in the polygon, return the two connected segments
+    def get_segment_connected_segments (self, segment : 'Segment') -> Tuple[ 'Segment' ]:
+        # Find the index of the input segment
+        segment_index = get_index(self.segments, segment)
+        if segment_index == None: raise ValueError(f'Segment {segment} not found in polygon {self}')
+        # Get previous and next segments based on the segment index
+        last_segment_index = self.segments_count - 1
+        previous_segment_index = segment_index - 1 if segment_index > 0 else last_segment_index
+        next_segment_index = segment_index + 1 if segment_index < last_segment_index else 0
+        return self.segments[previous_segment_index], self.segments[next_segment_index]
 
     # Split the space inside the perimeter in a list of rectangles in a grid friendly format
     def split_in_rectangles (self) -> List[Rect]:
@@ -1876,6 +1858,13 @@ class Boundary:
     def __init__(self, exterior_polygon : Polygon, interior_polygons : List[Polygon] = [], color = 'black', fill_color = 'white'):
         self.exterior_polygon = exterior_polygon
         self.interior_polygons = interior_polygons
+        # Mark these polygons according to what they are respect to this boundary
+        exterior_polygon._boundary = self
+        exterior_polygon._boundary_interior = False
+        for interior_polygon in interior_polygons:
+            interior_polygon._boundary = self
+            interior_polygon._boundary_interior = True
+        # Get all polygons, polygon segments and corners together
         self.polygons = [ exterior_polygon, *interior_polygons ]
         self.segments = [ segment for polygon in self.polygons for segment in polygon.segments ]
         self.corners = [ corner for polygon in self.polygons for corner in polygon.corners ]
@@ -1895,10 +1884,12 @@ class Boundary:
             self.check()
 
     def __str__ (self):
-        return 'Boundary (area: ' + str(self.area) + ')' 
+        return f'Boundary (area: {self.area})'
     def __repr__ (self):
-        return 'Boundary (area: ' + str(self.area) + ')' 
+        return str(self) 
 
+    # Check if something (a point, or a segment) is in any segments of any polygon
+    # Note that this is not used to check if something is within the boundary. To do so use the boundary grid
     def __contains__(self, other) -> bool:
         return any( other in polygon for polygon in self.polygons)
 
@@ -2097,6 +2088,10 @@ class Boundary:
                 overall_overlap_segments += overlap_segments
         return list(set(overall_overlap_segments))
 
+    # Given a segment which is found in the boundary, return the two connected segments
+    def get_segment_connected_segments (self, segment : 'Segment') -> Tuple[ 'Segment' ]:
+        return segment._polygon.get_segment_connected_segments(segment)
+
     # Given a segment which overlaps any polygon, get a vector which is perpendicular to this segment and points inside of the boundary
     def get_border_inside (self, segment : Segment) -> Vector:
         boundary_segment = self.get_segment_from_segment(segment)
@@ -2207,11 +2202,11 @@ class Grid:
                 other_corners = other_rect.get_points()
                 for corner in rect_corners:
                     if corner in other_rect and corner not in other_corners:
-                        print('WARNING: Conflict rects ' + str(rect) + ' and ' + str(other_rect))
+                        print(f'WARNING: Conflict rects {rect} and {other_rect}')
                         raise RuntimeError('Grid rects are wrong')
                 if rect.get_overlap_rect(other_rect, borders = False):
                     #add_frame(self.rects)
-                    print('WARNING: Overlapping rects ' + str(rect) + ' and ' + str(other_rect))
+                    print(f'WARNING: Overlapping rects {rect} and {other_rect}')
                     raise RuntimeError('Grid rects are wrong')
 
     # Find redundant columns/rows of rectangles and merge them to make the grid more efficient
@@ -2510,26 +2505,132 @@ class Grid:
 
     # Search all maximum rectangles which fulfill the specified minimum x and y sizes
     # Fitting rects are returned as a generator
-    # If only the x size parameter is passed it is assumed to be both x and y size
-    def generate_fitting_rects (self, x_fit_size : number, y_fit_size : Optional[number] = None) -> Generator[Rect, None, None]:
-        if not y_fit_size:
-            y_fit_size = x_fit_size
+    def generate_fitting_regions (self, x_fit_size : number, y_fit_size : number) -> Generator[Rect, None, None]:
         for max_rect in self.max_rects:
             rect = max_rect[0]
             x_size, y_size = rect.get_size()
             if x_fit_size <= x_size and y_fit_size <= y_size:
                 yield rect
 
+    # Search all regions where a rect with given dimensions could be placed respecting a given margin
+    # Note that every corner pointing outside has a fixed place where the rect may fit or not
+    # Note that every segment, event the smallest, has a region along where a rect may fit. This region may be interrupted
+    # Note that there may be an additional fitting region separated from the perimeter
+    # Fitting regions are returned as a generator since checking all of them may be expensive while one match is usually enought
+    # This logic will never yield rects which split the grid in two
+    # Note that there may be fitting spots which would split the grid but finding them would be more expensive. See figure 10.
+    def generate_fitting_regions_with_margin (self, x_fit_size : number, y_fit_size : number, margin : number) -> Generator[Rect, None, None]:
+        # Keep track of already yielded rects to not repeat them
+        yielded_rects = set()
+        # Calculate one side marginated x and y sizes
+        marginated_x_fit_size = x_fit_size + margin
+        marginated_y_fit_size = y_fit_size + margin
+        # Start by checking the outside corners
+        for boundary in self.boundaries:
+            for outside_corner in boundary.outside_corners:
+                # Set the candidate rect
+                candidate_rect = Rect.from_corner(outside_corner, x_fit_size, y_fit_size)
+                # Check if the candidate rect would perfectly fit in any the x or the y size
+                # Thus we support scenarios where the rect is perfectly fit between 3 or 4 segments
+                # DANI: El código no se ha provado en este escenario
+                # To do so we just check that the new candidate rect projected lines (thus not extended from the corner) are in the boundary
+                # Note that if they where over a remote segment while there are other segments inside the rect there would be no problem
+                # The candidate grid is further checked to be inside the boundary grid
+                candidate_projected_segments = [ segment for segment in candidate_rect.segments if outside_corner not in segment.points ]
+                horizontal_projected_segment = next((segment for segment in candidate_projected_segments if segment.is_horizontal()), None)
+                if horizontal_projected_segment == None: raise ValueError('There should be an horizontal segment. This function does not support diagonals')
+                vertical_projected_segment = next((segment for segment in candidate_projected_segments if segment.is_vertical()), None)
+                if vertical_projected_segment == None: raise ValueError('There should be an horizontal segment. This function does not support diagonals')
+                marginated_x_size = x_fit_size if horizontal_projected_segment in boundary else marginated_x_fit_size
+                marginated_y_size = y_fit_size if vertical_projected_segment in boundary else marginated_y_fit_size
+                # Project a margined rect out of this corner
+                marginated_rect = Rect.from_corner(outside_corner, marginated_x_size, marginated_y_size)
+                # Now check if the marginated rect fits
+                if marginated_rect not in boundary.grid: continue
+                # If it does then yield the candidate rect
+                # Check we did not yield this rect already though
+                if candidate_rect in yielded_rects: continue
+                yielded_rects.add(candidate_rect)
+                yield candidate_rect
+        # Set a function to project the margined grid inside the boundary
+        def all_inside (segment : Segment, direction : Vector) -> number:
+            if direction == segment.direction: return 0 # For the ends
+            if direction == segment._polygon._boundary.get_border_inside(segment): return margin # For the inside
+            return 0 # For the outside
+        # Now check the segments
+        for boundary in self.boundaries:
+            for segment in boundary.segments:
+                # Set the segment-close candidate region
+                # The region must be elongated at the ends, as long as the size to be fitted
+                # However this elongation must happen only if the corner is an inside corner
+                # In the other hand, we must shrink the ends of outside corners as much as the margin
+                left = right = bottom = top = None
+                if segment.is_horizontal():
+                    # Set left and right
+                    left_corner, right_corner = sorted(segment.points, key=lambda point: point.x)
+                    if boundary.get_corner(left_corner).inside: left = left_corner.x - x_fit_size
+                    else: left = left_corner.x + margin
+                    if boundary.get_corner(right_corner).inside: right = right_corner.x + x_fit_size
+                    else: right = right_corner.x - margin
+                    # It may happen in short segments surrounded by outside corners that margins make left be higher than right
+                    # In this cases it means there is no space at all for the fitting region, so skip it
+                    if left >= right: continue
+                    # Set top and bottom
+                    sample_point = segment.points[0]
+                    projected_point = sample_point + boundary.get_border_inside(segment) * y_fit_size
+                    bottom = min(sample_point.y, projected_point.y)
+                    top = max(sample_point.y, projected_point.y)
+                elif segment.is_vertical():
+                    # Set top and bottom
+                    bottom_corner, top_corner = sorted(segment.points, key=lambda point: point.y)
+                    if boundary.get_corner(bottom_corner).inside: bottom = bottom_corner.y - y_fit_size
+                    else: bottom = bottom_corner.y + margin
+                    if boundary.get_corner(top_corner).inside: top = top_corner.y + y_fit_size
+                    else: top = top_corner.y - margin
+                    # It may happen in short segments surrounded by outside corners that margins make bottom be higher than top
+                    # In this cases it means there is no space at all for the fitting region, so skip it
+                    if bottom >= top: continue
+                    # Set left and right
+                    sample_point = segment.points[0]
+                    projected_point = sample_point + boundary.get_border_inside(segment) * x_fit_size
+                    left = min(sample_point.x, projected_point.x)
+                    right = max(sample_point.x, projected_point.x)
+                else: raise ValueError('This function does not support diagonals')
+                # Set the candidate region
+                candidate_region = Rect(x_min = left, y_min = bottom, x_max = right, y_max = top)
+                candidate_grid = Grid([candidate_region])
+                # Set the marginated region to be excluded
+                # This is obtained by projecting every segment in the boundary inside as much as the margin
+                # However we will discard the current segment and its two neighbour segments
+                # Note that their effect is already considered
+                neighbour_segments = boundary.get_segment_connected_segments(segment)
+                discarded_segments = set([ segment, *neighbour_segments ])
+                margined_segments = [ segment for segment in boundary.segments if segment not in discarded_segments ]
+                margined_grid = Path(margined_segments).get_margined_grid(all_inside)
+                # Substract the conflict grid from the candidate grid
+                fitting_grid = candidate_grid - margined_grid
+                # Now find maximum rects wide enough inside the fitting grid
+                for rect in fitting_grid.generate_fitting_regions(x_fit_size, y_fit_size):
+                    yield rect
+        # Finally check the region separated from any segment
+        margined_segments = sum([ boundary.segments for boundary in self.boundaries ], [])
+        margined_grid = Path(margined_segments).get_margined_grid(all_inside)
+        # Substract the conflict grid from the candidate grid
+        fitting_grid = self - margined_grid
+        # Now find maximum rects wide enough inside the fitting grid
+        for rect in fitting_grid.generate_fitting_regions(x_fit_size, y_fit_size):
+            yield rect
+
     # Get the grid of available space to allocate a given x and y sizes
     # If only the x size parameter is passed it is assumed to be both x and y size
     def get_fitting_space (self, x_fit_size : number, y_fit_size : Optional[number] = None) -> 'Grid':
-        maximum_rects = list(self.generate_fitting_rects(x_fit_size, y_fit_size))
+        maximum_rects = list(self.generate_fitting_regions(x_fit_size, y_fit_size))
         return Grid.non_canonical(maximum_rects)
 
     # Generate rectangles with the specific input size in different places along the grid
     def generate_fitting_spots (self, x_fit_size : number, y_fit_size : Optional[number] = None) -> Generator[Rect, None, None]:
         # Iterate over the fitting rects
-        for rect in self.generate_fitting_rects(x_fit_size, y_fit_size):
+        for rect in self.generate_fitting_regions(x_fit_size, y_fit_size):
             # Yield lower left corner spot
             yield Rect(rect.x_min, rect.y_min, rect.x_min + x_fit_size, rect.y_min + y_fit_size)
             # Yield lower right corner spot
@@ -2588,7 +2689,7 @@ class Grid:
 
     # Check the grid to respect minimum size in both x and y dimensions
     def check_minimum (self, minimum : number, verbose : bool = False) -> bool:
-        if verbose: print('Grid checking minimum')
+        if verbose: print(f'Grid checking minimum ({minimum})')
         # If this is an empty grid then return True
         # Conceptually there is no space not respecting the minimum size if there is no space at all
         if not self:
@@ -2600,7 +2701,10 @@ class Grid:
             x_size, y_size = max_rect.get_size()
             # If there is at least one maximum rectangle which does not respect minimum size in both x and y dimensions then it is wrong
             if lower(x_size, minimum) and lower(y_size, minimum):
-                if verbose: print(' Failed minimum check: There is at least a maximum rectangle not respecting the minimum size in both dimensions')
+                if verbose:
+                    print(f'Grid checking minimum ({minimum}) failed:')
+                    print(f'  There is at least a maximum rectangle not respecting the minimum size in both dimensions')
+                    print(f'  Rect {max_rect} with X size {x_size} and Y size {y_size}')
                 return False
             # Update the the rects maximum sizes
             for rect in contained_rects:
@@ -2623,20 +2727,26 @@ class Grid:
                 corner_segment = next((other for other in other_segments if other.makes_corner_with(segment)), None)
                 # If there is not corner at all then the segment is not respecting the minimum size
                 if not corner_segment:
-                    if verbose: print(f' Failed minimum check: There is at least an inner segment not respecting the minimum size: {segment}')
+                    if verbose:
+                        print(f'Grid checking minimum ({minimum}) failed:')
+                        print(f'  There is at least an inner segment not respecting the minimum size: {segment}')
                     return False
                 # In case it is a corner, use the hipotenuse of the border to check the minimum size
                 # DANI: Aquí lo suyo sería encontrar el segmento diagonal, usal su length como size, y loguearlo cuando no cumple el min
                 size = sqrt( segment.length**2 + corner_segment.length**2 )
                 if lower(size, minimum):
-                    if verbose: print(f' Failed minimum check: There is at least an inner diagonal not respecting the minimum size: {size}')
+                    if verbose:
+                        print(f'Grid checking minimum ({minimum}) failed:')
+                        print(f'  There is at least an inner diagonal not respecting the minimum size: {size}')
                     return False
         # Now that we have the maximum size of all minimum rects we must check all of them fulfill the minimum
         for sizes in rect_max_sizes.values():
             for size in sizes:
                 if lower(size, minimum):
                     # DANI: Seguro que es esto es un problema?
-                    if verbose: print(f' Failed minimum check: There is at least a max rect not respecting one of the minimum sizes')
+                    if verbose:
+                        print(f'Grid checking minimum ({minimum}) failed:')
+                        print(f'  There is at least a max rect not respecting the minimum size is one side ({size})')
                     return False
         return True
 
@@ -3036,10 +3146,10 @@ class Path:
         self._nodes = None
 
     def __str__ (self) -> str:
-        return '<Path ' + str(self.segments) + '>'
+        return f'<Path ({len(self.segments)} segments)>'
 
     def __repr__ (self) -> str:
-        return '<Path ' + str(self.segments) + '>'
+        return str(self)
 
     def __bool__ (self) -> bool:
         return len(self.segments) > 0
@@ -3054,7 +3164,7 @@ class Path:
             new_segments = self._segments.copy()
             new_segments.add(other)
             return Path(new_segments)
-        raise ValueError('Path addition of ' + str(other.__class__) + ' is not supported')
+        raise ValueError(f'Path addition of {other.__class__} is not supported')
 
     # Substract segments from the path
     def __sub__ (self, other):
@@ -3062,7 +3172,7 @@ class Path:
             new_segments = self._segments.copy()
             new_segments.remove(other)
             return Path(new_segments)
-        raise ValueError('Path substraction of ' + str(other.__class__) + ' is not supported')
+        raise ValueError(f'Path substraction of {other.__class__} is not supported')
 
     # Get the segments
     def get_segments (self) -> List[Segment]:

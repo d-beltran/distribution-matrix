@@ -1,4 +1,4 @@
-from typing import Union, Generator
+from typing import Union, Generator, Optional
 from math import isclose
 
 # Auxiliar functions widely used along the whole code
@@ -81,3 +81,10 @@ def afterwise (values : list) -> Generator[tuple, None, None]:
     for v, value in enumerate(values):
         others = values[v+1:]
         yield value, others
+
+# Get the first match index of a value in a list
+# If there is no match then return None instead of crashing as the list.index() would
+def get_index (values : list, target_value) -> Optional[int]:
+    for v, value in enumerate(values):
+        if value == target_value: return v
+    return None
