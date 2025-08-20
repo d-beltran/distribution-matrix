@@ -60,7 +60,7 @@ def represent (queue):
 
     # Slider
     axslider = plt.axes([0.25, .03, 0.50, 0.02])
-    slider = Slider(axslider, 'Frame', 0, len(frames), valinit=len(frames), valstep=1)
+    slider = Slider(axslider, label='Frame', valmin=0, valmax=len(frames), valinit=len(frames), valstep=1, valfmt='%0.0f')
 
     def previous_frame (event):
         slider.set_val(slider.val - 1)
