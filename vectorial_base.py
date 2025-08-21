@@ -2071,13 +2071,13 @@ class Boundary:
                 return boundary_segment
         return None
 
-    # Find overlap segments between self polygon segments and other segment
+    # Find overlap segments between self boundary segments and other segment
     # If the other segment is inside the area of the polygon it will not be considered
-    def get_segment_overlap_segments (self, other : 'Segment') -> Generator[Segment, None, None]:
+    def get_segment_overlap_segments (self, other : 'Segment', whole_segments : bool = False) -> Generator[Segment, None, None]:
         for segment in self.segments:
             overlap_segment = segment.get_overlap_segment(other)
             if overlap_segment:
-                yield overlap_segment
+                yield segment if whole_segments else overlap_segment
 
     # Given a group of segments, find overlaps with the boundary segments
     def get_segments_overlap_segments (self, segments : List[Segment]) -> List[Segment]:
@@ -2522,41 +2522,38 @@ class Grid:
     def generate_fitting_regions_with_margin (self, x_fit_size : number, y_fit_size : number, margin : number) -> Generator[Rect, None, None]:
         # Keep track of already yielded rects to not repeat them
         yielded_rects = set()
-        # Calculate one side marginated x and y sizes
-        marginated_x_fit_size = x_fit_size + margin
-        marginated_y_fit_size = y_fit_size + margin
-        # Start by checking the outside corners
-        for boundary in self.boundaries:
-            for outside_corner in boundary.outside_corners:
-                # Set the candidate rect
-                candidate_rect = Rect.from_corner(outside_corner, x_fit_size, y_fit_size)
-                # Check if the candidate rect would perfectly fit in any the x or the y size
-                # Thus we support scenarios where the rect is perfectly fit between 3 or 4 segments
-                # DANI: El código no se ha provado en este escenario
-                # To do so we just check that the new candidate rect projected lines (thus not extended from the corner) are in the boundary
-                # Note that if they where over a remote segment while there are other segments inside the rect there would be no problem
-                # The candidate grid is further checked to be inside the boundary grid
-                candidate_projected_segments = [ segment for segment in candidate_rect.segments if outside_corner not in segment.points ]
-                horizontal_projected_segment = next((segment for segment in candidate_projected_segments if segment.is_horizontal()), None)
-                if horizontal_projected_segment == None: raise ValueError('There should be an horizontal segment. This function does not support diagonals')
-                vertical_projected_segment = next((segment for segment in candidate_projected_segments if segment.is_vertical()), None)
-                if vertical_projected_segment == None: raise ValueError('There should be an horizontal segment. This function does not support diagonals')
-                marginated_x_size = x_fit_size if horizontal_projected_segment in boundary else marginated_x_fit_size
-                marginated_y_size = y_fit_size if vertical_projected_segment in boundary else marginated_y_fit_size
-                # Project a margined rect out of this corner
-                marginated_rect = Rect.from_corner(outside_corner, marginated_x_size, marginated_y_size)
-                # Now check if the marginated rect fits
-                if marginated_rect not in boundary.grid: continue
-                # If it does then yield the candidate rect
-                # Check we did not yield this rect already though
-                if candidate_rect in yielded_rects: continue
-                yielded_rects.add(candidate_rect)
-                yield candidate_rect
         # Set a function to project the margined grid inside the boundary
         def all_inside (segment : Segment, direction : Vector) -> number:
             if direction == segment.direction: return 0 # For the ends
             if direction == segment._polygon._boundary.get_border_inside(segment): return margin # For the inside
             return 0 # For the outside
+        # Start by checking the outside corners
+        for boundary in self.boundaries:
+            for outside_corner in boundary.outside_corners:
+                # Set the candidate rect
+                candidate_rect = Rect.from_corner(outside_corner, x_fit_size, y_fit_size)
+                # Set the marginated region to be excluded
+                # This is obtained by projecting every segment in the boundary inside as much as the margin
+                # However we will discard the current corner segment
+                discarded_segments = set(outside_corner.segments)
+                # Now check if the candidate rect would be in touch with other boundary segments
+                # If so, there would be no need to respect the margins with them
+                candidate_projected_segments = [ segment for segment in candidate_rect.segments if outside_corner not in segment.points ]
+                for projected_segment in candidate_projected_segments:
+                    for contact_segment in boundary.get_segment_overlap_segments(projected_segment):
+                        discarded_segments.add(contact_segment)
+                # Finally set the marginated region
+                margined_segments = [ segment for segment in boundary.segments if segment not in discarded_segments ]
+                margined_grid = Path(margined_segments).get_margined_grid(all_inside)
+                # Substract the marginated grid from the whole grid
+                fitting_grid = boundary.grid - margined_grid
+                # Check if our candidate rect fits within
+                if candidate_rect not in fitting_grid: continue
+                # If it does then yield the candidate rect
+                # Check we did not yield this rect already though
+                if candidate_rect in yielded_rects: continue
+                yielded_rects.add(candidate_rect)
+                yield candidate_rect
         # Now check the segments
         for boundary in self.boundaries:
             for segment in boundary.segments:
