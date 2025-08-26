@@ -2503,6 +2503,89 @@ class Grid:
         substract_rects = self.get_substract_overlaps(overlaps)
         return Grid.non_canonical(substract_rects)
 
+    # Generate regions which would fix a not-respecting minimum region in the grid
+    # Note that a region not respecting the minimum size may be fixed in different ways
+    # The 'yield_whole_grid' determines either if the function yields only the region required to fix the problem or the whole affected minimum grid
+    def generate_minimum_fixing_regions (self, minimum : number, yield_whole_grid : bool) -> Generator['Grid', None, None]:
+        # Iterate boundary segments
+        for boundary in self.boundaries:
+            for segment in boundary.segments:
+                # Set the segment-close minimum region
+                # The region must be elongated at the ends, as long as the minimum size, if the ends are inside corners
+                left = right = bottom = top = None
+                if segment.is_horizontal():
+                    # Set left and right
+                    left_corner, right_corner = sorted(segment.points, key=lambda point: point.x)
+                    if boundary.get_corner(left_corner).inside: left = left_corner.x - minimum
+                    else: left = left_corner.x
+                    if boundary.get_corner(right_corner).inside: right = right_corner.x + minimum
+                    else: right = right_corner.x
+                    # Set top and bottom
+                    sample_point = segment.points[0]
+                    projected_point = sample_point + boundary.get_border_inside(segment) * minimum
+                    bottom = min(sample_point.y, projected_point.y)
+                    top = max(sample_point.y, projected_point.y)
+                elif segment.is_vertical():
+                    # Set top and bottom
+                    bottom_corner, top_corner = sorted(segment.points, key=lambda point: point.y)
+                    if boundary.get_corner(bottom_corner).inside: bottom = bottom_corner.y - minimum
+                    else: bottom = bottom_corner.y
+                    if boundary.get_corner(top_corner).inside: top = top_corner.y + minimum
+                    else: top = top_corner.y
+                    # Set left and right
+                    sample_point = segment.points[0]
+                    projected_point = sample_point + boundary.get_border_inside(segment) * minimum
+                    left = min(sample_point.x, projected_point.x)
+                    right = max(sample_point.x, projected_point.x)
+                else: raise ValueError('This function does not support diagonals')
+                # Set the minimum region
+                minimum_region = Rect(x_min = left, y_min = bottom, x_max = right, y_max = top)
+                minimum_grid = Grid([minimum_region])
+                # Yield the part of the minimum grid which is not already in the grid, if any
+                if yield_whole_grid:yield minimum_grid
+                else:
+                    fixing_grid = minimum_grid - self
+                    if fixing_grid: yield fixing_grid
+
+    # Given another smaller grid and a margin, claim the minimal extra space required for the grid to fit while respecting margins
+    # Iteratively check if self margin is not respected in self grid and, if so, add the conflictive region to the other grid
+    # Iteratively check if the other margin is not respected and, if so, expand it as needed
+    def force_fit (self, grid : 'Grid', self_margin : number, grid_margin : number) -> 'Grid':
+        # Make sure the starting self grid is respecting the margin
+        # Otherwise this function makes no sense
+        if not self.check_minimum(self_margin):
+            raise ValueError('Self grid must respect the margins already in order to force fit another grid')
+        # Set the new fitted grid to be returned at the end
+        fitted_grid = grid
+        # Set the new truncated grid after we fit the other
+        truncated_grid = self - grid
+        while True:
+            # Set which are the fixing regions to be claimed according to if the margin problem is in self or in the other grid
+            fixing_regions = None
+            # If self grid is not respecting the margin then claim the problematic region for the other grid
+            if not truncated_grid.check_minimum(self_margin):
+                fixing_regions = truncated_grid.generate_minimum_fixing_regions(self_margin, yield_whole_grid=True)
+            # If the other gird is not respecting the margin then expand it until this is fixed
+            elif not fitted_grid.check_minimum(grid_margin):
+                fixing_regions = fitted_grid.generate_minimum_fixing_regions(grid_margin, yield_whole_grid=False)
+            # If there is no problem at all the we are done
+            else: break
+            # Get a region which would fix one of the margin non-respecting regions
+            fixed = False
+            for fixing_grid in fixing_regions:
+                # Make sure the fixing gird is inside the current grid
+                if fixing_grid not in self: continue
+                # Claim this space for the fitted region
+                fitted_grid += fixing_grid
+                truncated_grid -= fixing_grid
+                fixed = True
+                break
+            # If the fixing region was claimed then restart the checkings again
+            if fixed: continue
+            # If we already tried all fixing regions and failed then we surrender
+            raise ValueError('There are no fixing regions inside the fitting grid')
+        return fitted_grid
+
     # Search all maximum rectangles which fulfill the specified minimum x and y sizes
     # Fitting rects are returned as a generator
     def generate_fitting_regions (self, x_fit_size : number, y_fit_size : number) -> Generator[Rect, None, None]:
@@ -2519,6 +2602,8 @@ class Grid:
     # Fitting regions are returned as a generator since checking all of them may be expensive while one match is usually enought
     # This logic will never yield rects which split the grid in two
     # Note that there may be fitting spots which would split the grid but finding them would be more expensive. See figure 10.
+    # DANI: La gran limitación es que hay espacios donde un rect no encaja por el margen pero es questión de alargarlo
+    # DANI: Esta función es demasiado estricta con que el rect tiene que encajar con las medidas exactas
     def generate_fitting_regions_with_margin (self, x_fit_size : number, y_fit_size : number, margin : number) -> Generator[Rect, None, None]:
         # Keep track of already yielded rects to not repeat them
         yielded_rects = set()
@@ -2620,7 +2705,7 @@ class Grid:
 
     # Get the grid of available space to allocate a given x and y sizes
     # If only the x size parameter is passed it is assumed to be both x and y size
-    def get_fitting_space (self, x_fit_size : number, y_fit_size : Optional[number] = None) -> 'Grid':
+    def get_fitting_space (self, x_fit_size : number, y_fit_size : number) -> 'Grid':
         maximum_rects = list(self.generate_fitting_regions(x_fit_size, y_fit_size))
         return Grid.non_canonical(maximum_rects)
 
@@ -2747,7 +2832,7 @@ class Grid:
                     return False
         return True
 
-    # This function is used to generate a new grid without all regions which do not respect a minimum size
+    # This function is used to produce a new grid without all regions which do not respect a minimum size
     def keep_minimum (self, minimum : number, verbose : bool = False) -> Optional['Grid']:
         if verbose: print(f'Keeping minimum at grid {self}')
         # For each maximum rect in the grid which respects both dimesions, keep all its contained rects
