@@ -775,6 +775,7 @@ class Rect:
         y_max : number,
         segments_color : str = 'black',
         fill_color : str = 'white',
+        opacity : number = 0.2,
         # Options I know: 'x', 'o', '*', 'O', '.', '/', '\\', '|', '-', '+'
         texture : Optional[str] = None
     ):
@@ -789,6 +790,7 @@ class Rect:
             raise ValueError(f'The rectangle has not 2 dimensions: {self}')
         self.segments_color = segments_color
         self.fill_color = fill_color
+        self.opacity = opacity
         self.texture = texture
         self.segments = self.get_segments()
         self._area = None

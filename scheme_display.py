@@ -7,7 +7,7 @@ import matplotlib.patches as mpatches
 import math
 from multiprocessing import Process, Queue
 
-from typing import Optional
+from typing import Optional, List
 
 # Remove the slider silly warning
 import warnings
@@ -137,7 +137,7 @@ def represent (queue):
             xs = [rect.x_min, rect.x_max, rect.x_max, rect.x_min]
             ys = [rect.y_min, rect.y_min, rect.y_max, rect.y_max]
             # WARNING: Use 'facecolor' instead of 'color' to hide separation segments between fills
-            ploted_rects = ax.fill(xs, ys, facecolor=rect.fill_color or 'C0', alpha=0.2)
+            ploted_rects = ax.fill(xs, ys, facecolor=rect.fill_color or 'C0', alpha=rect.opacity)
             # Apply textures for those rects which have one
             if rect.texture:
                 ploted_rects[0].set_hatch(rect.texture)
@@ -172,7 +172,7 @@ def setup_display (frames_limit : Optional[int] = None):
 # --------------------------------------------------------------------------------------------------
 
 # Mine all possible segments from a list of different vectorial_base elements
-def get_segments_from_anything (things : list):
+def get_segments_from_anything (things : list) -> List['Segment']:
     segments = []
     for thing in things:
         # If it is a segment or something with a and b (i.e. something "segmentalizable")
@@ -205,11 +205,6 @@ def get_segments_from_anything (things : list):
             if thing.corridor_grid != None:
                 corridor_segments = sum([ boundary.segments for boundary in thing.corridor_grid.boundaries ], [])
                 segments += corridor_segments
-        # If it has a discarded grid (i.e. it is a room)
-        if hasattr(thing, 'discarded_grid'):
-            if thing.discarded_grid != None:
-                discareded_segments = sum([ boundary.segments for boundary in thing.discarded_grid.boundaries ], [])
-                segments += discareded_segments
         # If it is a room or something with doors
         if hasattr(thing, 'doors'):
             doors = thing.doors
@@ -229,7 +224,7 @@ def get_segments_from_anything (things : list):
     return segments
 
 # Mine all possible rectangles from a list of different vectorial_base elements
-def get_rects_from_anything (things : list):
+def get_rects_from_anything (things : list) -> List['Rect']:
     rects = []
     for thing in things:
         # If it is a rectangle or something with x_min and y_min
@@ -239,15 +234,15 @@ def get_rects_from_anything (things : list):
         if hasattr(thing, 'rects'):
             rects += thing.rects
         # If it is a boundary
-        if hasattr(thing, 'grid'):
-            if thing.grid:
-                rects += thing.grid.rects
+        # if hasattr(thing, 'grid'):
+        #     if thing.grid:
+        #         rects += thing.grid.rects
         # If it has a discarded grid (i.e. it is a room)
         if hasattr(thing, 'discarded_grid'):
             if thing.discarded_grid != None:
                 discareded_rects = thing.discarded_grid.rects
                 for rect in discareded_rects:
-                    rect.fill_color = 'black'
+                    rect.fill_color = thing.fill_color
                     rect.texture = '///'
                 rects += discareded_rects
         # If it has a corridor grid (i.e. it is a room)
@@ -262,7 +257,7 @@ def get_rects_from_anything (things : list):
         try:
             if hasattr(thing, 'free_grid'):
                 # WARNING: Do not put any code below this part or it may not be run in some frames
-                # This part is prote to fail
+                # This part is prone to fail
                 if thing.boundary:
                     free_grid_rects = thing.free_grid.rects
                     for rect in free_grid_rects:
