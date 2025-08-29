@@ -35,10 +35,10 @@ class Point:
         self.coords = self.x, self.y
 
     def __str__(self):
-        return '(x: ' + str(self.x) + ', y: ' + str(self.y) + ')'
+        return f'(x: {self.x}, y: {self.y})'
 
     def __repr__(self):
-        return '(x: ' + str(self.x) + ', y: ' + str(self.y) + ')'
+        return str(self)
 
     def __eq__(self, other):
         if isinstance(other, self.__class__) or issubclass(self.__class__, other.__class__):
@@ -87,10 +87,10 @@ class Vector:
         return cls(x,y)
 
     def __str__(self):
-        return '(x: ' + str(self.x) + ', y: ' + str(self.y) + ')'
+        return f'(x: {self.x}, y: {self.y})'
 
     def __repr__(self):
-        return '(x: ' + str(self.x) + ', y: ' + str(self.y) + ')'
+        return str(self)
 
     def __eq__(self, other):
         if isinstance(other, self.__class__):
@@ -220,10 +220,10 @@ class Line:
         self.vector = vector
 
     def __str__(self):
-        return 'x,y = ' + str(self.point) + ' + t' + str(self.vector)
+        return f'x,y = {self.point} + t {self.vector}'
 
     def __repr__(self):
-        return 'x,y = ' + str(self.point) + ' + t' + str(self.vector)
+        return str(self)
 
     # In order to compare lines we must use the slope and the intercept
     # This is because lines with different points and vectors may be the same line
@@ -397,15 +397,14 @@ class Segment(Line):
         self.points = a, b
 
     def __str__(self):
-        return 'A: ' + str(self.a) + ' -> B: ' + str(self.b)
+        return f'A: {self.a} -> B: {self.b}'
 
     def __repr__(self):
-        return 'A: ' + str(self.a) + ' -> B: ' + str(self.b)
+        return f'A: {self.a} -> B: {self.b}'
 
     def __eq__(self, other):
-        if isinstance(other, self.__class__):
-            return (self.a == other.a and self.b == other.b) or (self.a == other.b and self.b == other.a)
-        return False
+        if not isinstance(other, self.__class__): return False
+        return (self.a == other.a and self.b == other.b) or (self.a == other.b and self.b == other.a)
 
     def __hash__(self):
         return hash(self.get_hash())
@@ -1555,7 +1554,12 @@ class Polygon:
         return None
 
     # Get a specific polygon segment by specifying a segment that overlaps partial or totally this segment
-    def get_segment_from_segment (self, segment : Segment) -> Optional[Segment]:
+    def get_segment_polygon_segment (self, segment : Segment) -> Optional[Segment]:
+        # Find if the segment is already one of he segments in the polygon
+        for polygon_segment in self.segments:
+            if polygon_segment == segment:
+                return polygon_segment
+        # Find any possible overlap
         for polygon_segment in self.segments:
             overlap = polygon_segment.get_overlap_segment(segment)
             if overlap:
@@ -1564,7 +1568,7 @@ class Polygon:
 
     # Given a segment which overlaps the polygon, get a vector which is perpendicular to this segment and points into de inside of the polygon
     def get_border_inside (self, segment : Segment) -> Vector:
-        polygon_segment = self.get_segment_from_segment(segment)
+        polygon_segment = self.get_segment_polygon_segment(segment)
         if not polygon_segment:
             raise ValueError('The segment is not in the polyigon')
         angle = 90 if self.clockwise else -90
@@ -2066,7 +2070,10 @@ class Boundary:
         return None
 
     # Get a specific boundary segment by specifying a segment that overlaps partial or totally this segment
-    def get_segment_from_segment (self, segment : Segment) -> Optional[Segment]:
+    def get_segment_boundary_segment (self, segment : Segment) -> Optional[Segment]:
+        for boundary_segment in self.segments:
+            if boundary_segment == segment:
+                return boundary_segment
         for boundary_segment in self.segments:
             overlap = boundary_segment.get_overlap_segment(segment)
             if overlap:
@@ -2084,10 +2091,9 @@ class Boundary:
     # Given a group of segments, find overlaps with the boundary segments
     def get_segments_overlap_segments (self, segments : List[Segment]) -> List[Segment]:
         overall_overlap_segments = []
-        for segment in self.segments:
-            for other_segment in segments:
-                overlap_segments = list(self.get_segment_overlap_segments(other_segment))
-                overall_overlap_segments += overlap_segments
+        for segment in segments:
+            overlap_segments = list(self.get_segment_overlap_segments(segment))
+            overall_overlap_segments += overlap_segments
         return list(set(overall_overlap_segments))
 
     # Given a segment which is found in the boundary, return the two connected segments
@@ -2096,7 +2102,7 @@ class Boundary:
 
     # Given a segment which overlaps any polygon, get a vector which is perpendicular to this segment and points inside of the boundary
     def get_border_inside (self, segment : Segment) -> Vector:
-        boundary_segment = self.get_segment_from_segment(segment)
+        boundary_segment = self.get_segment_boundary_segment(segment)
         if not boundary_segment:
             raise ValueError('The segment is not in the boundary')
         boundary_polygon = next(polygon for polygon in self.polygons if boundary_segment in polygon.segments)
@@ -2154,10 +2160,10 @@ class Grid:
         self._boundaries = None
 
     def __str__ (self) -> str:
-        return '<Grid ' + str(self.rects) + '>'
+        return f'<Grid {self.rects}>'
 
     def __repr__ (self) -> str:
-        return '<Grid ' + str(self.rects) + '>'
+        return str(self)
 
     def __bool__ (self) -> bool:
         return len(self._rects) > 0
@@ -2412,6 +2418,16 @@ class Grid:
     # Get all boundaries in all segments
     def get_boundary_segments (self):
         return [ segment for boundary in self.boundaries for segment in boundary.segments ]
+    
+    # Get both the x and y ranges of the grid
+    def get_x_min (self):
+        return min([ rect.x_min for rect in self.rects ])
+    def get_x_max (self):
+        return max([ rect.x_max for rect in self.rects ])
+    def get_y_min (self):
+        return min([ rect.y_min for rect in self.rects ])
+    def get_y_max (self):
+        return max([ rect.y_max for rect in self.rects ])
 
     # Check if a rect is overlapping at some rect in this grid
     def is_rect_overlapping (self, rect : Rect) -> bool:
@@ -2436,17 +2452,6 @@ class Grid:
     def get_overlap_grid (self, grid : 'Grid') -> 'Grid':
         overlap_rects = self.get_overlap_rects(grid)
         return Grid.non_canonical(overlap_rects)
-
-    # Return the merge space between two grids splitted in rectangles
-    # Note that these rectangles will not follow the grid standard rules
-    # DANI: Esto antes se usaba en el get_merge_grid pero ahora ya no se usa en ningún lado
-    def get_merge_rects (self, grid : 'Grid') -> List[Rect]:
-        merge_rects = []
-        for rect in self.rects:
-            for other in grid.rects:
-                join_rects = rect.join_rect(other)
-                merge_rects += join_rects
-        return unique(merge_rects)
 
     # Return the resulting grid after merging self grid to other grid
     # If you are sure grids do not overlap then set check_overlaps as False to avoid a lot of calculus
@@ -2505,88 +2510,125 @@ class Grid:
         substract_rects = self.get_substract_overlaps(overlaps)
         return Grid.non_canonical(substract_rects)
 
-    # Generate regions which would fix a not-respecting minimum region in the grid
-    # Note that a region not respecting the minimum size may be fixed in different ways
-    # The 'yield_whole_grid' determines either if the function yields only the region required to fix the problem or the whole affected minimum grid
-    def generate_minimum_fixing_regions (self, minimum : number, yield_whole_grid : bool) -> Generator['Grid', None, None]:
+    # Generate inner regions around every segment in the grid boundaries as thick as a given margin
+    def generate_margin_regions (self, margin : number) -> Generator[Tuple['Segment','Grid'], None, None]:
         # Iterate boundary segments
         for boundary in self.boundaries:
             for segment in boundary.segments:
-                # Set the segment-close minimum region
-                # The region must be elongated at the ends, as long as the minimum size, if the ends are inside corners
+                # Set the segment-close margin region
+                # The region must be elongated at the ends, as long as the margin size, if the ends are inside corners
                 left = right = bottom = top = None
                 if segment.is_horizontal():
                     # Set left and right
                     left_corner, right_corner = sorted(segment.points, key=lambda point: point.x)
-                    if boundary.get_corner(left_corner).inside: left = left_corner.x - minimum
+                    if boundary.get_corner(left_corner).inside: left = left_corner.x - margin
                     else: left = left_corner.x
-                    if boundary.get_corner(right_corner).inside: right = right_corner.x + minimum
+                    if boundary.get_corner(right_corner).inside: right = right_corner.x + margin
                     else: right = right_corner.x
                     # Set top and bottom
                     sample_point = segment.points[0]
-                    projected_point = sample_point + boundary.get_border_inside(segment) * minimum
+                    projected_point = sample_point + boundary.get_border_inside(segment) * margin
                     bottom = min(sample_point.y, projected_point.y)
                     top = max(sample_point.y, projected_point.y)
                 elif segment.is_vertical():
                     # Set top and bottom
                     bottom_corner, top_corner = sorted(segment.points, key=lambda point: point.y)
-                    if boundary.get_corner(bottom_corner).inside: bottom = bottom_corner.y - minimum
+                    if boundary.get_corner(bottom_corner).inside: bottom = bottom_corner.y - margin
                     else: bottom = bottom_corner.y
-                    if boundary.get_corner(top_corner).inside: top = top_corner.y + minimum
+                    if boundary.get_corner(top_corner).inside: top = top_corner.y + margin
                     else: top = top_corner.y
                     # Set left and right
                     sample_point = segment.points[0]
-                    projected_point = sample_point + boundary.get_border_inside(segment) * minimum
+                    projected_point = sample_point + boundary.get_border_inside(segment) * margin
                     left = min(sample_point.x, projected_point.x)
                     right = max(sample_point.x, projected_point.x)
                 else: raise ValueError('This function does not support diagonals')
-                # Set the minimum region
-                minimum_region = Rect(x_min = left, y_min = bottom, x_max = right, y_max = top)
-                minimum_grid = Grid([minimum_region])
-                # Yield the part of the minimum grid which is not already in the grid, if any
-                if yield_whole_grid:yield minimum_grid
-                else:
-                    fixing_grid = minimum_grid - self
-                    if fixing_grid: yield fixing_grid
+                # Set the margin region
+                margin_region = Rect(x_min = left, y_min = bottom, x_max = right, y_max = top)
+                margin_grid = Grid([margin_region])
+                # Return a tuple including both the original segment and the margin
+                yield segment, margin_grid
+
+    # Generate regions which would fix a not-respecting minimum region in the grid
+    # Note that a region not respecting the minimum size may be fixed in different ways
+    def generate_minimum_fixing_regions (self, minimum : number) -> Generator['Grid', None, None]:
+        # Iterate minimum regions
+        for segment, minimum_grid in self.generate_margin_regions(minimum):
+            fixing_grid = minimum_grid - self
+            if fixing_grid: yield fixing_grid
+        
+    # Generate regions which do not respect a given minimum size in the grid
+    # If the non respecting region has 2 dimensions (two opposed inside corners) then the region returned represents the conflict in 1 dimension only
+    # In this scenario it would be necessary to fix the problem in two steps
+    # For this reason it is important to call this function multiple times as a grid is being fixed
+    def generate_minimum_conflict_regions (self, minimum : number) -> Generator['Grid', None, None]:
+        # Iterate minimum regions
+        for segment, minimum_grid in self.generate_margin_regions(minimum):
+            # If there is a part of this region which is not in the grid then we have a conflict
+            non_existing_grid = minimum_grid - self
+            if not non_existing_grid: continue
+            # Now we must get the part of the rect which is smaller than the minimum
+            if segment.is_horizontal():
+                x_min = non_existing_grid.get_x_min()
+                x_max = non_existing_grid.get_x_max()
+                y_min = minimum_grid.get_y_min()
+                y_max = minimum_grid.get_y_max()
+            elif segment.is_vertical():
+                x_min = minimum_grid.get_x_min()
+                x_max = minimum_grid.get_x_max()
+                y_min = non_existing_grid.get_y_min()
+                y_max = non_existing_grid.get_y_max()
+            else: raise ValueError('This function does not support diagonals')
+            conflict_region = Rect(x_min = x_min, y_min = y_min, x_max = x_max, y_max = y_max)
+            conflict_grid = Grid([conflict_region])
+            yield conflict_grid            
 
     # Given another smaller grid and a margin, claim the minimal extra space required for the grid to fit while respecting margins
     # Iteratively check if self margin is not respected in self grid and, if so, add the conflictive region to the other grid
     # Iteratively check if the other margin is not respected and, if so, expand it as needed
-    def force_fit (self, grid : 'Grid', self_margin : number, grid_margin : number) -> 'Grid':
+    def force_fit (self, fitted_grid : 'Grid', self_margin : number, grid_margin : number, debug : bool = False) -> 'Grid':
         # Make sure the starting self grid is respecting the margin
         # Otherwise this function makes no sense
         if not self.check_minimum(self_margin):
             raise ValueError('Self grid must respect the margins already in order to force fit another grid')
         # Set the new fitted grid to be returned at the end
-        fitted_grid = grid
+        final_fitted_grid = fitted_grid
         # Set the new truncated grid after we fit the other
-        truncated_grid = self - grid
+        final_self_grid = self - fitted_grid
         while True:
+            if debug:
+                debug_segments = []
+                debug_segments += [ rect.get_colored_rect('blue') for rect in final_self_grid.rects ]
+                debug_segments += [ rect.get_colored_rect('green') for rect in final_fitted_grid.rects ]
+                add_frame(debug_segments, title='Force fit debug')
             # Set which are the fixing regions to be claimed according to if the margin problem is in self or in the other grid
             fixing_regions = None
             # If self grid is not respecting the margin then claim the problematic region for the other grid
-            if not truncated_grid.check_minimum(self_margin):
-                fixing_regions = truncated_grid.generate_minimum_fixing_regions(self_margin, yield_whole_grid=True)
+            if not final_self_grid.check_minimum(self_margin):
+                fixing_regions = final_self_grid.generate_minimum_conflict_regions(self_margin)
             # If the other gird is not respecting the margin then expand it until this is fixed
-            elif not fitted_grid.check_minimum(grid_margin):
-                fixing_regions = fitted_grid.generate_minimum_fixing_regions(grid_margin, yield_whole_grid=False)
+            elif not final_fitted_grid.check_minimum(grid_margin):
+                fixing_regions = final_fitted_grid.generate_minimum_fixing_regions(grid_margin)
             # If there is no problem at all the we are done
             else: break
             # Get a region which would fix one of the margin non-respecting regions
             fixed = False
             for fixing_grid in fixing_regions:
+                # This may happen in then event of two oposing inside corners which are aligned in one dimension
+                # Just ignore this region and let other region fix the actual problem
+                if fixing_grid in final_fitted_grid: continue
                 # Make sure the fixing gird is inside the current grid
                 if fixing_grid not in self: continue
                 # Claim this space for the fitted region
-                fitted_grid += fixing_grid
-                truncated_grid -= fixing_grid
+                final_fitted_grid += fixing_grid
+                final_self_grid -= fixing_grid
                 fixed = True
                 break
             # If the fixing region was claimed then restart the checkings again
             if fixed: continue
             # If we already tried all fixing regions and failed then we surrender
             raise ValueError('There are no fixing regions inside the fitting grid')
-        return fitted_grid
+        return final_fitted_grid
 
     # Search all maximum rectangles which fulfill the specified minimum x and y sizes
     # Fitting rects are returned as a generator
@@ -2776,8 +2818,7 @@ class Grid:
         if verbose: print(f'Grid checking minimum ({minimum})')
         # If this is an empty grid then return True
         # Conceptually there is no space not respecting the minimum size if there is no space at all
-        if not self:
-            return True
+        if not self: return True
         # Save for each minimum rectangle the maximum size of maximum rectangles
         rect_max_sizes = { rect: [0,0] for rect in self.rects }
         # Check all maximum rectangles
@@ -2817,8 +2858,8 @@ class Grid:
                     return False
                 # In case it is a corner, use the hipotenuse of the border to check the minimum size
                 # DANI: Aquí lo suyo sería encontrar el segmento diagonal, usal su length como size, y loguearlo cuando no cumple el min
-                size = sqrt( segment.length**2 + corner_segment.length**2 )
-                if lower(size, minimum):
+                diagonal_size = sqrt( segment.length**2 + corner_segment.length**2 )
+                if lower(diagonal_size, minimum):
                     if verbose:
                         print(f'Grid checking minimum ({minimum}) failed:')
                         print(f'  There is at least an inner diagonal not respecting the minimum size: {size}')
@@ -3157,6 +3198,11 @@ class Grid:
                 new_group += [ rect for rect in connected_rects if rect not in new_group ]
             rects_to_group = [ rect for rect in rects_to_group if rect not in new_group ]
             yield new_group
+
+    # Check if the grid is unified, meaning that there is not more than one group of connected rectangles
+    def is_unified (self) -> bool:
+        first_group = next(self.find_connected_rect_groups())
+        return len(first_group) == len(self.rects)
 
     # Generate individual grids of connected rects only
     def find_connected_grids (self) -> Generator['Grid', None, None]:
