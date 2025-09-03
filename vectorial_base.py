@@ -2174,6 +2174,8 @@ class Grid:
             return False
         return set(self.rects) == set(other.rects)
 
+    def __hash__(self):
+        return hash(tuple(sort_rects(self.rects)))
 
     def __contains__ (self, other) -> bool:
         if isinstance(other, Point):
@@ -2754,7 +2756,7 @@ class Grid:
         return Grid.non_canonical(maximum_rects)
 
     # Generate rectangles with the specific input size in different places along the grid
-    def generate_fitting_spots (self, x_fit_size : number, y_fit_size : Optional[number] = None) -> Generator[Rect, None, None]:
+    def generate_fitting_spots (self, x_fit_size : number, y_fit_size : number) -> Generator[Rect, None, None]:
         # Iterate over the fitting rects
         for rect in self.generate_fitting_regions(x_fit_size, y_fit_size):
             # Yield lower left corner spot
@@ -3436,6 +3438,10 @@ def sort_by_x (point : Point) -> number:
     return point.x
 def sort_by_y (point : Point) -> number:
     return point.y
+def sort_by_x_min (rect : Rect) -> number:
+    return rect.x_min
+def sort_by_y_min (rect : Rect) -> number:
+    return rect.y_min
 
 # Set a function to sort aligned* points by their positions
 # * By aligned I mean in the same line
@@ -3444,6 +3450,10 @@ def sort_by_y (point : Point) -> number:
 # WARNING: If points are not aligned the result is unpredictable
 def sort_points (points : List[Point]) -> List[Point]:
     return sorted( sorted( points, key=sort_by_x), key=sort_by_y)
+
+# Sort rectangles according to their x and y minima
+def sort_rects (rects : List[Rect]) -> List[Rect]:
+    return sorted( sorted( rects, key=sort_by_x_min), key=sort_by_y_min)
 
 # Set a function to merge multiple rects into a single big rect
 # Do it by finding the most maximum x and y values

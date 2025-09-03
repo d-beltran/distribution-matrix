@@ -514,9 +514,6 @@ class Room:
         fill_color : str = 'white',
         # Set other rooms inside this room
         children : List['Room'] = [],
-        # Set the parent room from the inputs
-        # Note that this can be done only when the parent has been previously initialized
-        parent : Optional['Room'] = None,
         # Set the parent building (if any)
         # The parent building may be used to guess some default values
         # However the parent building is not mandatory even in the root room
@@ -551,7 +548,6 @@ class Room:
         # Set up the hierarchy of rooms
         # Parent is never assigned from the instance itself, but it is assigned by the parent
         self._parent = None
-        self.parent = parent
         # Save the parent building
         self.parent_building = parent_building
         # Set an atrribute to sabe the corridor grid when it is set
@@ -566,9 +562,15 @@ class Room:
         # This variable may be true only in the root room (if this is not the root then it will become False further)
         # Note that all the logic changes drastically whether the root room has or not a predefined boundary
         self._child_adaptable_boundary = boundary == None and min_area == None and max_area == None
+        # Make sure there are no duplicates
+        unique_children = unique(children)
+        if len(children) != len(unique_children):
+            raise InputError(f'Duplicated child in room {self.name}: ' + ', '.join([ child.name for child in children]))
         # Set the children rooms
-        self._children = None
-        self.children = children
+        self._children = children
+        # Set every child parent as self to maintain coherence
+        for child in children:
+            child._parent = self
         # Check input minimum and maximum area formats to make sense
         for value in [ min_area, max_area ]:
             # A numeric value is accepted
@@ -644,63 +646,42 @@ class Room:
             raise InputError('Parameter max_corners is supported only in the root room')
 
     def __str__(self):
-        return '<Room "' + str(self.name) + '">'
+        return f'<Room "{self.name}">'
 
     def __repr__(self):
-        return '<Room "' + str(self.name) + '">'
+        return str(self)
 
     # Get the parent room (normal getter)
     def get_parent (self) -> 'Room':
         return self._parent
-    # Set the parent room
-    def set_parent (self, parent : 'Room'):
-        self._parent = parent
-        # If there is no parent then there is nothing else to do here
-        if parent == None:
-            return
-        # Update parent children to maintain coherence
-        parent._children.append(self)
-        # Reset the corresponding parent grids
-        if self.grid:
-            parent.reset_free_grid()
-            parent.reset_available_grid()
-            if self.rigid:
-                parent.reset_rigid_grid()
-                parent.reset_discarded_grid()
 
     # The parent room
-    parent = property(get_parent, set_parent, None, "The parent room")
+    parent = property(get_parent, None, None, "The parent room")
 
     # Get the children rooms (normal getter)
     def get_children (self) -> List['Room']:
         return self._children
 
-    # Set the children rooms
-    # Update hierarchy
-    def set_children (self, children : List['Room']):
-        # Make sure there are no duplicates
-        unique_children = unique(children)
-        if len(children) != len(unique_children):
-            raise RuntimeError(f'Duplicated child in room {self.name}: ' + ', '.join([ child.name for child in children]))
-        # Set every child parent as self to maintain coherence
-        for child in children:
-            child._parent = self
-        self._children = children
-        # If new children are added then some of them may have overlapping boundaries
-        # e.g. when the stairs rooms are added
-        # For this reason we must reset the free grid and some other inner grids
-        self.reset_free_grid()
-        self.reset_available_grid()
-        self.reset_rigid_grid()
-        self.reset_discarded_grid()
-
     # The children rooms
-    children = property(get_children, set_children, None, "The children rooms")
+    children = property(get_children, None, None, "The children rooms")
+
+    # Add a single child room
+    def add_child (self, child_room : 'Room'):
+        if child_room in self.children: raise ValueError(f'Room {child_room.name} is already a child')
+        child_room._parent = self
+        self._children.append(child_room)
+        if child_room.grid:
+            self.reset_free_grid()
+            self.reset_available_grid()
+            self.reset_rigid_grid()
+            self.reset_discarded_grid()
+        if child_room.doors:
+            print(child_room)
+            child_room.reserve_doors_parent_required_space()
 
     # Get the brother rooms
     def get_brother_rooms (self) -> List['Room']:
-        if not self.parent:
-            return []
+        if not self.parent: return []
         return [ room for room in self.parent.children if room != self ]
 
     # Get the boundary
@@ -840,13 +821,14 @@ class Room:
             return self.area
         # We must calculate target areas
         if not self.parent:
-            raise RuntimeError('Can not calculate target area since parent room is not defined in room '  + self.name)
+            raise RuntimeError(f'Can not calculate target area since parent room is not defined in room {self.name}')
         self.parent.set_children_target_areas()
+        if self._target_area == None: raise ValueError(f'Target area not set in {self.name}')
         # Before returning the target area make a fast checking
         # If target area does not cover the minimum size then it makes no sense
-        if self.min_size and self.target_area and self.target_area < self.min_size**2:
+        if self.min_size and self._target_area and self._target_area < self.min_size**2:
             print(f'Target area {self.target_area} is not reachable with a minimum size of {self.min_size}')
-            raise InputError('Room area is not sufficient for the minimum size in room ' + self.name)
+            raise InputError(f'Room area is not sufficient for the minimum size in room {self.name}')
         return self._target_area
 
     # Room target area (read only)
@@ -870,9 +852,10 @@ class Room:
     # Set a function to set all children target areas at once
     # Note that all children areas have to be assigned together
     def set_children_target_areas (self, verbose : bool = False):
-         # We assign target areas for non rigid rooms only
+        if len(self.children) == 0: raise ValueError(f'Room {self.name} has no children')
+        # We assign target areas for non rigid rooms only
         non_rigid_children = [ child for child in self.children if not child.rigid ]
-        if verbose: print('Setting children target areas of ' + ', '.join([ child.name for child in non_rigid_children ]))
+        if verbose: print(f'Setting {self.name} children target areas: ' + ', '.join([ child.name for child in non_rigid_children ]))
         # First of all check all children area ranges to make sense
         # Note that this is calculated here and not in the init for a reason:
         # One area could be a percent and the other a number, for instance
@@ -1177,9 +1160,22 @@ class Room:
         self._doors = new_doors
         for door in self._doors:
             door.room = self
-            # If any door is rigid then we can already assign a corridor region to this door
-            if door.rigid:
-                self.parent.corridor_grid += Grid([door.get_required_space(inside=False)])
+        #self.reserve_doors_self_required_space()
+        self.reserve_doors_parent_required_space()
+
+    # Get the required outside space for rigid doors and make it part of the parent corridor already
+    # DANI: No se ha provado
+    def reserve_doors_self_required_space (self):
+        for door in self._doors:
+            if not door.rigid: continue
+            self.corridor_grid += Grid([door.get_required_space(inside=True)])
+
+    # Get the required inside space for rigid doors and make it part of the self corridor already
+    def reserve_doors_parent_required_space (self):
+        if not self.parent: return
+        for door in self._doors:
+            if not door.rigid: continue
+            self.parent.corridor_grid += Grid([door.get_required_space(inside=False)])
 
     # The room doors
     doors = property(get_doors, set_doors, None, "The room doors")
@@ -1211,11 +1207,12 @@ class Room:
     # This function triggers the logic to solve room distributions
     # If the recursive flag is passed then solve each child's children grids and so on recursively
     # All children rooms must have their boundary fully set before solving the next generation of children
-    def solve_children (self, recursive : bool = False, verbose : bool = False) -> bool:
-        rooms = self.children
+    def solve_children (self, recursive : bool = False, verbose : bool = True) -> bool:
+        if verbose: print(f'Solving {self.name} children: ' + ', '.join([ child.name for child in self.children ]))
+        # Make a new list out of self children in order to not mutate the original
+        rooms = [ *self.children ]
         # If there are not children then we have nothing to do here
-        if len(rooms) == 0:
-            return True
+        if len(rooms) == 0: return True
         # Before allocating place for any children room, set corridor spaces in front of parent doors
         # This way this space is never claimed since it has to be occupied by the corridor anyway
         # Note that the root room may have non defined doors
@@ -1226,9 +1223,9 @@ class Room:
         if self._child_adaptable_boundary:
             random.shuffle(rooms)
         else:
-            def sort_by_size (room):
-                return room.min_size
-            rooms.sort( key=sort_by_size, reverse=True )
+            def sort_by_target_area (room):
+                return room.target_area
+            rooms.sort( key=sort_by_target_area, reverse=True )
         # Set up each room by giving them a position and correct size to match the forced area
         for room in rooms:
             # Configure the child room to respect the parent free min size limit according to its brothers
@@ -1391,23 +1388,26 @@ class Room:
         if not fitting_grid:
             if forced: raise RuntimeError(f'The room {room.name} has no fitting space to start with')
             return self.set_child_grid(room, forced=True)
-        # Get a random outside corner from the fitting space and set the initial boundary there
-        target_boundary = fitting_grid.boundaries[0]
-        target_corner = target_boundary.get_outside_corners()[0]
-        initial_child_rect = Rect.from_corner(target_corner, room.min_size, room.min_size)
-        initial_child_grid = Grid([initial_child_rect])
-        # Fit in the target parent grid in case there is any non-respected minimum size
-        fitted_initial_child_grid = target_parent_grid.force_fit(initial_child_grid, self.min_size, room.min_size)
-        # Now claim the actual initial grid
-        if not room.expand_grid(fitted_initial_child_grid, check_parent_free_grid=False):
-            if verbose: print(f'  Failed to set {room.name} initial grid')
-            return False
-        # Proceed with the expansion of this child room until it reaches its forced area
-        if not room.fit_to_required_area():
-            if verbose: print(f'  Failed to fit {room.name} required area')
-            room.grid = None # Reset the room grid
-            return False
-        return True
+        # Keep track already tried initial grids so we do not loose time repeating the same
+        tried_fitted_initial_grids = set()
+        # Get a random spot from the fitting space and set the initial boundary there
+        for spot in fitting_grid.generate_fitting_spots(room.min_size, room.min_size):
+            initial_child_grid = Grid([spot])
+            # Fit in the target parent grid in case there is any non-respected minimum size
+            fitted_initial_child_grid = target_parent_grid.force_fit(initial_child_grid, self.min_size, room.min_size)
+            if fitted_initial_child_grid in tried_fitted_initial_grids: continue
+            tried_fitted_initial_grids.add(fitted_initial_child_grid)
+            # Now claim the actual initial grid
+            if not room.expand_grid(fitted_initial_child_grid, check_parent_free_grid=False):
+                continue
+            # Proceed with the expansion of this child room until it reaches its forced area
+            if not room.fit_to_required_area(behaviour='conformist', verbose=True):
+                room.grid = None # Reset the room grid
+                continue
+            if verbose: print(f'Setting {self.name} child room {room.name} boundary succeeded')
+            return True
+        if verbose: print(f'Setting {self.name} child room {room.name} boundary failed: No suitable spot was found')
+        return False
         
     # Build a provisional grid from the children room grids
     # This function is meant to be used only when the parent (self) room has an adaptable boundary
@@ -2189,7 +2189,7 @@ class Room:
         # Set a function to substract the corridor region from the rest of child rooms
         # Note that, at this point, other rooms do not expand to compensate the lost area yet
         for child in self.children:
-            if not child.truncate(self.corridor_grid, force=True, skip_update_display=True):
+            if not child.truncate_grid(self.corridor_grid, force=True, skip_update_display=True):
                 raise ValueError(f'The space required by the corridor cannot be claimed from {child.name}')
 
         # Show the relocated doors
@@ -2258,7 +2258,7 @@ class Room:
                     self.corridor_grid += expansion_grid
                     # Substract the new corridor region from the children rooms
                     for child in self.children:
-                        if not child.truncate(expansion_grid, force=True, skip_update_display=True):
+                        if not child.truncate_grid(expansion_grid, force=True, skip_update_display=True):
                             raise ValueError(f'The space required by the corridor cannot be claimed from {child.name}')
                     # If there was a door in the expansion segment then we must relocate it
                     # DANI: Si no recolocas las puertas afectadas aquí se hace después igualmente
@@ -3276,7 +3276,7 @@ class Room:
         new_rect = Rect.from_segments([segment, new_side])
         # Make a grid out of the new rect and expand the grid
         new_grid = Grid([new_rect])
-        return self.expand_grid(new_grid, is_loaned=is_loaned, behaviour=behaviour, easy=easy, check_parent_free_grid=check_parent_free_grid)
+        return self.expand_grid(new_grid, is_loaned=is_loaned, behaviour=behaviour, easy=easy, check_parent_free_grid=check_parent_free_grid, force=is_loaned)
     
     # Pull a segment in the boundary
     # Check everything is fine after the pull and, if so, return True
@@ -3302,7 +3302,7 @@ class Room:
         # Make a grid out of the new rect
         removed_region = Grid([new_rect])
         # Truncate self grid
-        return self.truncate(removed_region, force=force_child_truncation, check_parent_free_grid=check_parent_free_grid, verbose=verbose)
+        return self.truncate_grid(removed_region, force=force_child_truncation, check_parent_free_grid=check_parent_free_grid, verbose=verbose)
 
     # Try to expand a specific room frontier
     # Note that the frontier must contain the room it belongs to
@@ -3537,12 +3537,17 @@ class Room:
             if new_point not in reduced_frontier:
                 if verbose: print(f'Expanding frontier {frontier} failed: the frontier has been fully consumed')
                 return False
-            # Set the reduced frontier
-            reduced_frontier = Segment(new_point, other_point)
-            # If the frontier is smaller than the minimum size then stop here
-            if lower(reduced_frontier.length, self.min_size):
-                if verbose: print(f'Expanding frontier {frontier} failed: the reduced frontier ({reduced_frontier}) is not wide enought ({reduced_frontier.length})')
+            # Calculate the distance between the two points
+            # WARNING: Note that the distance may be 0 and thus delcaring the segment here would fail
+            reduced_size = new_point.get_distance_to(other_point)
+            if equal(reduced_size, 0):
+                if verbose: print(f'Expanding frontier {frontier} failed: the reduced frontier is non-existent')
                 return False
+            # If the frontier is smaller than the minimum size then stop here
+            if lower(reduced_size, self.min_size):
+                if verbose: print(f'Expanding frontier {frontier} failed: the reduced frontier is not wide enought ({reduced_size})')
+                return False
+            reduced_frontier = Segment(new_point, other_point)
 
         return push_segment(reduced_frontier, push_protocol, verbose=verbose)
 
@@ -3552,12 +3557,6 @@ class Room:
     # Return True if the contraction was succesful or False if there was no contraction
     def contract_frontier (self, frontier : Segment, required_area : number, verbose : bool = False) -> bool:
         if verbose: print(f'Contracting frontier {frontier}')
-        # Get the parent room
-        parent_room = self.parent
-        # Get the exterior polygon of the room boundary
-        exterior_polygon = self.boundary.exterior_polygon
-        # Get the inside corners
-        inside_corners = [ corner for corner in exterior_polygon.corners if corner.inside == True ]
         # Find the maximum rectangles which are in contact with our frontier
         grid = self.grid
         max_rects = grid.max_rects
@@ -3576,11 +3575,9 @@ class Room:
         if frontier.is_vertical():
             rects = [ column[0] for column in grid.columns ]
             forward = 0
-            sides = 1
         elif frontier.is_horizontal():
             rects = [ row[0] for row in grid.rows ]
             forward = 1
-            sides = 0
         else:
             raise ValueError('ERROR: diagonal segments are not supported for room expansion')
 
@@ -3785,12 +3782,12 @@ class Room:
         return succeed
 
     # Remove part of the room space and check everything is fine after
-    # Use the force argument to skip all checkings and simply truncate the boundary
+    # Use the force argument to skip all checkings and simply truncate the grid
     # Use the easy argument to simply fail when minimum size is not respected in the truncated grid
     # Otherwise it tries to compenaste the grid before surrending, but this is not desired sometimes (e.g. when reducing corners)
-    # Use the skip_update_display to avoid this truncate to generate a display frame
+    # Use the skip_update_display to avoid this truncattion to generate a display frame
     # This is useful when truncating several rooms at the same time, so we do not have to recalculate the parent free grid every time
-    def truncate (self,
+    def truncate_grid (self,
         region : Grid,
         force : bool = False,
         easy : bool = False,
@@ -3801,8 +3798,7 @@ class Room:
         if verbose: print(f'Truncating {self.name}')
         grid = self.grid
         # In case the room has not grid there is no problem at all in the truncation
-        if not grid:
-            return True
+        if not grid: return True
         # Save the removed region in a new variable wich may be further mutated
         removed_region = region
         # Calculate the boundary of this room after substracting the invaded region
@@ -3813,9 +3809,9 @@ class Room:
             return True
         # If the grid has been fully consumed then go back
         if not truncated_grid:
-            if verbose: print(' Failed to truncate: The room would be fully consumed')
+            if verbose: print(' Failed to truncate grid: The room would be fully consumed')
             return False
-        # In case the truncate was forced remove all regions in the truncated grid which do not respect the minimum size
+        # If the truncation was forced then remove as much extra regions as needed to keep the minimum margin
         if force:
             # Find regions in the truncated grid respecting the minimum size
             safe_grid = truncated_grid.keep_minimum(self.min_size)
@@ -3831,18 +3827,18 @@ class Room:
         truncated_boundaries = truncated_grid.find_boundaries()
         # In case the room has been splitted in 2 parts as a result of the invasion we go back
         if not force and len(truncated_boundaries) > 1:
-            if verbose: print(' Failed to truncate: The room would be splitted')
+            if verbose: print(' Failed to truncate grid: The room would be splitted')
             return False
         truncated_boundary = truncated_boundaries[0]
         # Check doors to be respected
         if not force and not self.check_doors_required_spaces(truncated_grid):
             if verbose: print(' Door conflict when truncating: Doors will be relocated')
             if not self.relocate_doors(truncated_boundary):
-                if verbose: print(' Failed to truncate: The room would not respect door spaces')
+                if verbose: print(' Failed to truncate grid: The room would not respect door spaces')
                 return False
         # DANI: Es posible que se coma toda la habitación??
         if not force and len(truncated_boundaries) == 0:
-            if verbose: print(' Failed to truncate: The room has been fully consumed')
+            if verbose: print(' Failed to truncate grid: The room has been fully consumed')
             return False
         # Start saving a backup of self and children boundaries
         backup = {}
@@ -3854,8 +3850,8 @@ class Room:
                 continue
             # Save a backup of the current child in case we have to recover its boundary later
             child_grid_backup = child.grid
-            # Truncate the child
-            if not child.truncate(removed_region, force=force, check_parent_free_grid=check_parent_free_grid):
+            # Truncate the child grid
+            if not child.truncate_grid(removed_region, force=force, check_parent_free_grid=check_parent_free_grid):
                 # If the truncate process failed then restore backups and return True
                 self.restore_grid_backup(backup, title='Restored grid backup while truncating')
                 return False
@@ -3877,7 +3873,7 @@ class Room:
             # If not then try to expand the truncated room accordingly to the truncated region to make it respect the minimum
             compensation_grid = self.grid.get_compensation_grid(region, self.min_size)
             if not self.expand_grid(compensation_grid, check_parent_free_grid=check_parent_free_grid):
-                if verbose: print(' Failed to truncate: The room would not respect minimum size and it can not be compensated -> Restoring backup')
+                if verbose: print(' Failed to truncate grid: The room would not respect minimum size and it can not be compensated -> Restoring backup')
                 self.restore_grid_backup(backup, title='Restored grid backup while truncating')
                 return False
         # Check the new parent free grid to be respecting the minimum size in case it is requested
@@ -3907,6 +3903,7 @@ class Room:
         check_parent_free_grid : bool = True,
         check_overlaps : bool = True,
         compensate_invaded : bool = True,
+        force : bool = False,
         is_loaned : bool = False,
         behaviour : str = 'exigent',
         easy : bool = False,
@@ -3922,11 +3919,15 @@ class Room:
             new_grid = self.grid.get_merge_grid(expansion_grid, check_overlaps=check_overlaps)
         # In case there is a minimum size restriction check that the colliding segment is as long as required
         if not new_grid.check_minimum(self.min_size):
-            if verbose:
-                print(f'Expanding grid of room {self.name} at {expansion_grid} failed:')
-                print('  Minimum size of the expanded grid would be not respected')
-                self.update_display(title='Grid expansion failure', extra=expansion_grid.get_perimeter_segments('red'))
-            return False
+            # If we must force fit the expansion then claim as much extra space as needed to fit the new expansion
+            if force:
+                new_grid = self.parent.free_grid.force_fit(new_grid)
+            else:
+                if verbose:
+                    print(f'Expanding grid of room {self.name} at {expansion_grid} failed:')
+                    print('  Minimum size of the expanded grid would be not respected')
+                    self.update_display(title='Grid expansion failure', extra=expansion_grid.get_perimeter_segments('red'))
+                return False
         # Make a backup of the current grid
         backup = { self: self.grid }
         # Set the new grid as the current grid
@@ -3935,13 +3936,18 @@ class Room:
         if self.parent:
             # Check the minimum size in the parent free grid to be respected
             if check_parent_free_grid and not self.parent.free_grid.check_minimum(self.parent_free_limit):
-                if verbose:
-                    print(f'Expanding grid of room {self.name} at {expansion_grid} failed:')
-                    print('  Parent minimum size would be not respected -> Restoring backup')
-                    self.update_display(title='Grid expansion failure', extra=expansion_grid.get_perimeter_segments('red'))
-                # add_frame(self.parent.free_grid, 'Debug')
-                self.restore_grid_backup(backup, title='Restored grid backup while expanding grid')
-                return False
+                # If we must force fit the expansion then claim as much extra space as needed to fit the new expansion
+                if force:
+                    self.grid = backup[self]
+                    self.grid = self.parent.free_grid.force_fit(new_grid, self.min_size, self.min_size)
+                else:
+                    if verbose:
+                        print(f'Expanding grid of room {self.name} at {expansion_grid} failed:')
+                        print('  Parent minimum size would be not respected -> Restoring backup')
+                        self.update_display(title='Grid expansion failure', extra=expansion_grid.get_perimeter_segments('red'))
+                    # add_frame(self.parent.free_grid, 'Debug')
+                    self.restore_grid_backup(backup, title='Restored grid backup while expanding grid')
+                    return False
             # Check if we are exceeding parent boundaries
             parent_outer_grid = expansion_grid - self.parent.grid
             if parent_outer_grid:
@@ -3987,13 +3993,13 @@ class Room:
                 for brother_room in brother_rooms:
                     if verbose: print(f'  Truncating {brother_room.name}')
                     # Make a backup grid of the current brother
-                    # We do not save it yet to the bacup object since the grid would be backed up automatically if failed to truncate
+                    # We do not save it yet to the bacup object since the grid would be backed up automatically if failed to truncate the grid
                     brother_grid_backup = brother_room.grid
-                    # Try to truncate the brother room
-                    if not brother_room.truncate(expansion_grid, easy=easy):
+                    # Try to truncate the brother room grid
+                    if not brother_room.truncate_grid(expansion_grid, easy=easy):
                         if verbose:
                             print(f'Expanding grid of room {self.name} at {expansion_grid} failed:')
-                            print('  Grid was expanded over a brother room which failed to truncate -> Restoring backup')
+                            print('  Grid was expanded over a brother room which failed to truncate its grid -> Restoring backup')
                             self.update_display(title='Grid expansion failure', extra=expansion_grid.get_perimeter_segments('red'))
                         self.restore_grid_backup(backup, title='Restored grid backup while expanding grid')
                         return False
@@ -4319,8 +4325,10 @@ class Stairs:
             self.set_place()
         # Set the rooms
         boundary = Boundary(self.polygon)
-        self._lower_room = Room(boundary=boundary, doors=[ self._lower_door ], parent=self.lower_floor, rigid=True, min_size=self.width, name='Lower')
-        self._upper_room = Room(boundary=boundary, doors=[ self._upper_door ], parent=self.upper_floor, rigid=True, min_size=self.width, name='Upper')
+        self._lower_room = Room(boundary=boundary, doors=[ self._lower_door ], rigid=True, min_size=self.width, name='Lower')
+        self.lower_floor.add_child(self._lower_room)
+        self._upper_room = Room(boundary=boundary, doors=[ self._upper_door ], rigid=True, min_size=self.width, name='Upper')
+        self.upper_floor.add_child(self._upper_room)
 
     # Get the lower door
     def get_lower_door (self) -> Door:
