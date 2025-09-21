@@ -13,15 +13,8 @@ from typing import Optional, List
 import warnings
 warnings.filterwarnings("ignore")
 
-# Set the global display options
-# Values here are used by other modules
-display_options = {
-    # Set if the display is actually enabled
-    'enabled': False,
-    # Set the number of frames to be displayed before stopping the process
-    # This is useful for debugging
-    'frames_limit': math.inf
-}
+# Import global variables
+from auxiliar import GLOBAL
 
 # Set a list with all system values at each recorded step
 frames = []
@@ -33,6 +26,9 @@ previous_slider_value = None
 
 # Updater called from the system
 def add_frame (data : list, title : Optional[str] = None):
+    # First check if we reached the limkit
+    # If so stop here
+    if GLOBAL['frame_count'] > GLOBAL['frames_limit']: raise SystemExit('Reached displayed frames limit')
     display_message = title if title else 'No title'
     print(f' [ frame {len(frames)} ] - {display_message}')
     if type(data) != list:
@@ -45,6 +41,7 @@ def add_frame (data : list, title : Optional[str] = None):
     rects = get_rects_from_anything(data)
     traced = [ element for element in data if hasattr(element, 'name') ]
     frames.append((segments, rects, traced))
+    GLOBAL['frame_count'] += 1
     queue.put(frames)
 
 # Show the heatmap
@@ -150,7 +147,8 @@ def represent (queue):
             patch = mpatches.Patch(facecolor=facecolor, edgecolor=track.segments_color, label=track.name)
             handles.append(patch)
         columns_number = math.ceil( len(handles) / 2 )
-        ax.legend(handles=handles, loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=columns_number)
+        if columns_number > 0:
+            ax.legend(handles=handles, loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=columns_number)
         #legend.handles = handles
         
     # Run the animation and show the plot
@@ -160,10 +158,10 @@ def represent (queue):
 # Set the heatmap representation in a paralel process so the matrix can keep beeing calculated
 def setup_display (frames_limit : Optional[int] = None):
     # Set the global display option as true
-    global display_options
-    display_options['enabled'] = True
+    global GLOBAL
+    GLOBAL['enabled'] = True
     if frames_limit != None:
-        display_options['frames_limit'] = frames_limit
+        GLOBAL['frames_limit'] = frames_limit
     # Start the display logic
     queue.put(frames)
     p = Process(target=represent, args=(queue, ))

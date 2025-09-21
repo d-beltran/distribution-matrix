@@ -346,13 +346,13 @@ test_building_2 = Building(
                 Room(
                     name='Sala de mantenimiento',
                     min_area=800,
-                    max_area=800,
+                    max_area=1000,
                     fill_color='blue'
                 ),
                 Room(
                     name='Sala de máquinas',
                     min_area=1000,
-                    max_area=1000,
+                    max_area=1200,
                     fill_color='green'
                 ),
             ]

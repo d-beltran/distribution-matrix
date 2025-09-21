@@ -865,15 +865,15 @@ class Rect:
         return False
 
     # Check if self rect is colliding with other rect
-    # i.e. one of their segments is totally or partially overlapping
-    # Note that one rectangle may be inside of the other
+    # i.e. there is an overlap in the area or perimeter
     def is_colliding_with (self, other : 'Rect') -> bool:
-        for self_segment in self.segments:
-            for other_segment in other.segments:
-                overlap = self_segment.get_overlap_segment(other_segment)
-                if overlap:
-                    return True
-        return False
+        # Check first if both rects would touch/overlap in the x dimension
+        if greater(self.x_min, other.x_max) or lower(self.x_max, other.x_min):
+            return False
+        # Check then if both rects would touch/overlap in the y dimension
+        if greater(self.y_min, other.y_max) or lower(self.y_max, other.y_min):
+            return False
+        return True
 
     # Check if self rect is connected with other rect
     # i.e. one of their segments is totally overlapping
@@ -2204,20 +2204,23 @@ class Grid:
         return self.get_substract_grid(other)
 
     # Check for each corner on each rect that, if it is inside any other rect, it is also a corner in this rect
-    # Check also that rects to do not overlap, since this may happen even with no corners inside each other
+    # Check also rects to do not overlap, since this may happen even with no corners inside each other
     def check (self):
         for rect, other_rects in otherwise(self.rects):
             rect_corners = rect.get_points()
-            for other_rect in other_rects:
+            for other_rect, resting_rects in otherwise(other_rects):
                 other_corners = other_rect.get_points()
                 for corner in rect_corners:
                     if corner in other_rect and corner not in other_corners:
-                        print(f'WARNING: Conflict rects {rect} and {other_rect}')
-                        raise RuntimeError('Grid rects are wrong')
+                        display_rects = [ rect.get_colored_rect('red'), other_rect.get_colored_rect('blue') ]
+                        display_rects += [ r.get_colored_rect('green') for r in resting_rects ]
+                        add_frame(display_rects, title='Debug: Conflict rects were found when checking grid')
+                        raise RuntimeError('Grid rects are wrong: unaligned corners')
                 if rect.get_overlap_rect(other_rect, borders = False):
-                    #add_frame(self.rects)
-                    print(f'WARNING: Overlapping rects {rect} and {other_rect}')
-                    raise RuntimeError('Grid rects are wrong')
+                    display_rects = [ rect.get_colored_rect('red'), other_rect.get_colored_rect('blue') ]
+                    display_rects += [ r.get_colored_rect('green') for r in resting_rects ]
+                    add_frame(display_rects, title='Debug: Conflict rects were found when checking grid')
+                    raise RuntimeError('Grid rects are wrong: overlaps')
 
     # Find redundant columns/rows of rectangles and merge them to make the grid more efficient
     # This should be necessary only when the grid is built in a non canonical way
@@ -2294,8 +2297,7 @@ class Grid:
     @classmethod
     def non_canonical (cls, rects : List[Rect]):
         # If there are no rects then set an empty grid
-        if len(rects) == 0:
-            return cls()
+        if len(rects) == 0: return cls()
         # First of all find rectangle groups
         # This is the non-canonical version of find_connected_rect_groups method
         rects_to_group = [ *rects ]
@@ -2323,7 +2325,7 @@ class Grid:
         # Now that we have canonical rects, set the grid
         grid = cls(canonical_rects)
         # Now rectangles should be canonical, but we may have redundant "cuts" where several rows/columns may be merged to optimize the grid
-        # DANI: Igual hay replantearse esto porque lo mismo es más ineficiente el chekeo + arreglo de la ineficiencia que la propia ineficiencia
+        # DANI: Igual hay que replantearse esto porque lo mismo es más ineficiente el chekeo + arreglo de la ineficiencia que la propia ineficiencia
         grid.compact()
         return grid
 
@@ -2422,14 +2424,20 @@ class Grid:
         return [ segment for boundary in self.boundaries for segment in boundary.segments ]
     
     # Get both the x and y ranges of the grid
-    def get_x_min (self):
+    def get_x_min (self) -> number:
         return min([ rect.x_min for rect in self.rects ])
-    def get_x_max (self):
+    def get_x_max (self) -> number:
         return max([ rect.x_max for rect in self.rects ])
-    def get_y_min (self):
+    def get_y_min (self) -> number:
         return min([ rect.y_min for rect in self.rects ])
-    def get_y_max (self):
+    def get_y_max (self) -> number:
         return max([ rect.y_max for rect in self.rects ])
+    
+    # Get sizes in both diemnsions
+    def get_x_size (self) -> number:
+        return self.get_x_max() - self.get_x_min()
+    def get_y_size (self) -> number:
+        return self.get_y_max() - self.get_y_min()
 
     # Check if a rect is overlapping at some rect in this grid
     def is_rect_overlapping (self, rect : Rect) -> bool:
@@ -2567,19 +2575,27 @@ class Grid:
         # Iterate minimum regions
         for segment, minimum_grid in self.generate_margin_regions(minimum):
             # If there is a part of this region which is not in the grid then we have a conflict
-            non_existing_grid = minimum_grid - self
-            if not non_existing_grid: continue
+            missing_grid = minimum_grid - self
+            if not missing_grid: continue
             # Now we must get the part of the rect which is smaller than the minimum
             if segment.is_horizontal():
-                x_min = non_existing_grid.get_x_min()
-                x_max = non_existing_grid.get_x_max()
+                # It may happen with inside corners that the missing grid has full height
+                # In these cases continue and let the other segment of the corner yield the conflict grid
+                y_size = missing_grid.get_y_size()
+                if not lower(y_size, minimum): continue
+                x_min = missing_grid.get_x_min()
+                x_max = missing_grid.get_x_max()
                 y_min = minimum_grid.get_y_min()
                 y_max = minimum_grid.get_y_max()
             elif segment.is_vertical():
+                # It may happen with inside corners that the missing grid has full height
+                # In these cases continue and let the other segment of the corner yield the conflict grid
+                x_size = missing_grid.get_x_size()
+                if not lower(x_size, minimum): continue
                 x_min = minimum_grid.get_x_min()
                 x_max = minimum_grid.get_x_max()
-                y_min = non_existing_grid.get_y_min()
-                y_max = non_existing_grid.get_y_max()
+                y_min = missing_grid.get_y_min()
+                y_max = missing_grid.get_y_max()
             else: raise ValueError('This function does not support diagonals')
             conflict_region = Rect(x_min = x_min, y_min = y_min, x_max = x_max, y_max = y_max)
             conflict_grid = Grid([conflict_region])
@@ -2587,12 +2603,16 @@ class Grid:
 
     # Given another smaller grid and a margin, claim the minimal extra space required for the grid to fit while respecting margins
     # Iteratively check if self margin is not respected in self grid and, if so, add the conflictive region to the other grid
-    # Iteratively check if the other margin is not respected and, if so, expand it as needed
-    def force_fit (self, fitted_grid : 'Grid', self_margin : number, grid_margin : number, debug : bool = False) -> 'Grid':
+    # Iteratively check if the other margin is not respected and, if so, claim it as needed
+    # If expand is false then invert the logic thus claiming spaces for the self grid and shrinking the fitted grid
+    def force_fit (self, fitted_grid : 'Grid', self_margin : number, fitted_grid_margin : number, expand : bool, debug : bool = False) -> 'Grid':
         # Make sure the starting self grid is respecting the margin
         # Otherwise this function makes no sense
         if not self.check_minimum(self_margin):
             raise ValueError('Self grid must respect the margins already in order to force fit another grid')
+        # Make sure the fitting grid is inside self grid
+        # Otherwise this function may be useless
+        # It was never thought with the purpouse of fitting half-inside grids, but it could work eventually
         # Set the new fitted grid to be returned at the end
         final_fitted_grid = fitted_grid
         # Set the new truncated grid after we fit the other
@@ -2602,34 +2622,55 @@ class Grid:
                 debug_segments = []
                 debug_segments += [ rect.get_colored_rect('blue') for rect in final_self_grid.rects ]
                 debug_segments += [ rect.get_colored_rect('green') for rect in final_fitted_grid.rects ]
-                add_frame(debug_segments, title='Force fit debug')
+                add_frame(debug_segments, title=f'Force fit {"expand" if expand else "shrink"} status debug')
             # Set which are the fixing regions to be claimed according to if the margin problem is in self or in the other grid
             fixing_regions = None
             # If self grid is not respecting the margin then claim the problematic region for the other grid
             if not final_self_grid.check_minimum(self_margin):
-                fixing_regions = final_self_grid.generate_minimum_conflict_regions(self_margin)
+                if expand:
+                    fixing_regions = final_self_grid.generate_minimum_conflict_regions(self_margin)
+                else:
+                    fixing_regions = final_self_grid.generate_minimum_fixing_regions(self_margin)
             # If the other gird is not respecting the margin then expand it until this is fixed
-            elif not final_fitted_grid.check_minimum(grid_margin):
-                fixing_regions = final_fitted_grid.generate_minimum_fixing_regions(grid_margin)
+            elif not final_fitted_grid.check_minimum(fitted_grid_margin):
+                if expand:
+                    fixing_regions = final_fitted_grid.generate_minimum_fixing_regions(fitted_grid_margin)
+                else:
+                    fixing_regions = final_fitted_grid.generate_minimum_conflict_regions(self_margin)
             # If there is no problem at all the we are done
             else: break
             # Get a region which would fix one of the margin non-respecting regions
             fixed = False
             for fixing_grid in fixing_regions:
+                if debug:
+                    fixing_debug_segments = debug_segments + [ rect.get_colored_rect('red') for rect in fixing_grid.rects ]
+                    add_frame(fixing_debug_segments, title=f'Force fit {"expand" if expand else "shrink"} step debug')
                 # This may happen in then event of two oposing inside corners which are aligned in one dimension
                 # Just ignore this region and let other region fix the actual problem
-                if fixing_grid in final_fitted_grid: continue
+                if expand and fixing_grid in final_fitted_grid: continue
+                # This may happen in then event of 
+                # Just ignore this region and let other region fix the actual problem
+                #if not expand and not fixing_grid.get_overlap_grid(final_fitted_grid): continue
                 # Make sure the fixing gird is inside the current grid
                 if fixing_grid not in self: continue
-                # Claim this space for the fitted region
-                final_fitted_grid += fixing_grid
-                final_self_grid -= fixing_grid
+                # Claim this space for the fitted grid if we are expanding it
+                if expand:
+                    final_fitted_grid += fixing_grid
+                    final_self_grid -= fixing_grid
+                # Claim this space for the self grid if we are not expanding the fitted region
+                else:
+                    final_fitted_grid -= fixing_grid
+                    final_self_grid += fixing_grid
                 fixed = True
                 break
             # If the fixing region was claimed then restart the checkings again
             if fixed: continue
             # If we already tried all fixing regions and failed then we surrender
-            raise ValueError('There are no fixing regions inside the fitting grid')
+            debug_segments = []
+            debug_segments += [ rect.get_colored_rect('blue') for rect in final_self_grid.rects ]
+            debug_segments += [ rect.get_colored_rect('green') for rect in final_fitted_grid.rects ]
+            add_frame(debug_segments, title=f'Force fit {"expand" if expand else "shrink"} failure debug')
+            raise RuntimeError('There are no fixing regions inside the fitting grid')
         return final_fitted_grid
 
     # Search all maximum rectangles which fulfill the specified minimum x and y sizes
@@ -2815,66 +2856,18 @@ class Grid:
         bottom_rect = self.get_bottom_rect(rect)
         return [ rect for rect in [ left_rect, right_rect, upper_rect, bottom_rect ] if rect != None ]
 
-    # Check the grid to respect minimum size in both x and y dimensions
+    # Check the grid to respect minimum size everywhere
+    # DISCLAIMER: the diagonal distance around an inside corner must be slighly longer than the minimum
+    # DISCLAIMER: a grid which is technically respecting the minimum could fail this check, but this is intended
+    # DISCLAIMER: some logics like the force-fit rely in this behaviour, DO NOT FIX IT
     def check_minimum (self, minimum : number, verbose : bool = False) -> bool:
         if verbose: print(f'Grid checking minimum ({minimum})')
         # If this is an empty grid then return True
         # Conceptually there is no space not respecting the minimum size if there is no space at all
         if not self: return True
-        # Save for each minimum rectangle the maximum size of maximum rectangles
-        rect_max_sizes = { rect: [0,0] for rect in self.rects }
-        # Check all maximum rectangles
-        for max_rect, contained_rects in self.max_rects:
-            x_size, y_size = max_rect.get_size()
-            # If there is at least one maximum rectangle which does not respect minimum size in both x and y dimensions then it is wrong
-            if lower(x_size, minimum) and lower(y_size, minimum):
-                if verbose:
-                    print(f'Grid checking minimum ({minimum}) failed:')
-                    print(f'  There is at least a maximum rectangle not respecting the minimum size in both dimensions')
-                    print(f'  Rect {max_rect} with X size {x_size} and Y size {y_size}')
-                return False
-            # Update the the rects maximum sizes
-            for rect in contained_rects:
-                max_sizes = rect_max_sizes[rect]
-                max_sizes[0] = max(max_sizes[0], x_size)
-                max_sizes[1] = max(max_sizes[1], y_size)
-            # For all rectangles which respect size in both dimensions,
-            # Find their free borders: border regions which are not overlapping with the grid boundaries
-            limits = [ segment for boundary in self.boundaries for segment in boundary.segments ]
-            free_borders = []
-            for segment in max_rect.segments:
-                free_borders += segment.substract_segments(limits)            
-            # Check free borders to respect the minimum size
-            for segment, other_segments in otherwise(free_borders):
-                # If the segment is wide enough then skip it
-                if not lower(segment.length, minimum):
-                    continue
-                # If the segment is not wide enough it may make a corner with other free regions thus beeing correct
-                # Find out if the free border is making a corner
-                corner_segment = next((other for other in other_segments if other.makes_corner_with(segment)), None)
-                # If there is not corner at all then the segment is not respecting the minimum size
-                if not corner_segment:
-                    if verbose:
-                        print(f'Grid checking minimum ({minimum}) failed:')
-                        print(f'  There is at least an inner segment not respecting the minimum size: {segment}')
-                    return False
-                # In case it is a corner, use the hipotenuse of the border to check the minimum size
-                # DANI: Aquí lo suyo sería encontrar el segmento diagonal, usal su length como size, y loguearlo cuando no cumple el min
-                diagonal_size = sqrt( segment.length**2 + corner_segment.length**2 )
-                if lower(diagonal_size, minimum):
-                    if verbose:
-                        print(f'Grid checking minimum ({minimum}) failed:')
-                        print(f'  There is at least an inner diagonal not respecting the minimum size: {size}')
-                    return False
-        # Now that we have the maximum size of all minimum rects we must check all of them fulfill the minimum
-        for sizes in rect_max_sizes.values():
-            for size in sizes:
-                if lower(size, minimum):
-                    # DANI: Seguro que es esto es un problema?
-                    if verbose:
-                        print(f'Grid checking minimum ({minimum}) failed:')
-                        print(f'  There is at least a max rect not respecting the minimum size is one side ({size})')
-                    return False
+        # Generate all minimum regions which should be respected and make sure none of them falls outside the grid
+        for fixing_region in self.generate_minimum_fixing_regions(minimum):
+            if fixing_region not in self: return False
         return True
 
     # This function is used to produce a new grid without all regions which do not respect a minimum size
@@ -3755,7 +3748,7 @@ def generate_random_polygon (
         # First of all check it is possible to respect the minimum size given the area
         affordable_min_size = sqrt(area)
         if affordable_min_size < min_size:
-            raise SystemExit('It is not possible to respect the minimum size (' + str(min_size) + ') given the area (' + str(area) + ')')
+            raise SystemExit(f'It is not possible to respect the minimum size ({min_size}) given the area ({area})')
         # In case width is not respecting the minimum size we must recalculate
         if width < min_size:
             width = min_size

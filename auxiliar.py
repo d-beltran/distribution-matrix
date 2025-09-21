@@ -1,7 +1,18 @@
 from typing import Union, Generator, Optional
-from math import isclose
+from math import isclose, inf
 
 # Auxiliar functions widely used along the whole code
+
+# A dict with global variables shared among all scripts
+GLOBAL = {
+    # Set if the display is actually enabled
+    'enabled_display': False,
+    # Set the number of frames to be displayed before stopping the process
+    # This is useful for debugging
+    'frames_limit': inf,
+    # Count the number of frames displayed
+    'frame_count': 0
+}
 
 # Exception for when user input is wrong
 class InputError(SystemExit):
