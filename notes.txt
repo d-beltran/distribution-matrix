@@ -1,5 +1,9 @@
 RAM
 
+para el hard retry falta loguear en condiciones cual ha sido el hard fail
+para el hard retry falta poner limite de tries
+plantearse hacer multithreading? o almenos dejar comentarios al respecto
+
 cuidao que las escaleras se pueden poner formando discarded grid, hay que ver como se asigna su posición
 
 [si no se dá la situación difícil] recuperar min size para el parent free space porque sino al final pueden quedar huecos que no respeten
