@@ -4192,7 +4192,9 @@ class Room:
         # Get all children rooms recursively
         # This includes self room
         rooms = root.get_rooms_recuersive()
-        # Display all current rooms together
+        # Make sure the extra segments are displayed on top
+        for element in extra:
+            element.z = 9
         elements_to_display = [ *rooms, *extra ]
         add_frame(elements_to_display, title)
 

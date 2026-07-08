@@ -40,7 +40,7 @@ def add_frame (data : list, title : Optional[str] = None):
     # This is for the fillings only, to add color
     rects = get_rects_from_anything(data)
     traced = [ element for element in data if hasattr(element, 'name') ]
-    frames.append((segments, rects, traced))
+    frames.append((segments, rects, traced, display_message))
     GLOBAL['frame_count'] += 1
     queue.put(frames)
 
@@ -71,6 +71,10 @@ def represent (queue):
     bprev.on_clicked(previous_frame)
     bnext = Button(axnext, '->')
     bnext.on_clicked(next_frame)
+
+    # Add the title
+    ax.set_title('(empty)', y=-0.15)
+    fig.subplots_adjust(bottom=0.18)
 
     # Animation updater
     def update_frame (i):
@@ -120,7 +124,7 @@ def represent (queue):
             return
 
         # Get everything to be displayed in the current frame
-        segments, rects, traced = frames[slider_value]
+        segments, rects, traced, display_message = frames[slider_value]
 
         # Draw all segments
         for segment in segments:
@@ -150,6 +154,9 @@ def represent (queue):
         if columns_number > 0:
             ax.legend(handles=handles, loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=columns_number)
         #legend.handles = handles
+
+        # Add the title
+        ax.set_title(display_message, y=-0.15)
         
     # Run the animation and show the plot
     anim = animation.FuncAnimation(fig, update_frame)
@@ -171,55 +178,60 @@ def setup_display (frames_limit : Optional[int] = None):
 
 # Mine all possible segments from a list of different vectorial_base elements
 def get_segments_from_anything (things : list) -> List['Segment']:
-    segments = []
+    total_segments = []
     for thing in things:
+        thing_segments = []
         # If it is a segment or something with a and b (i.e. something "segmentalizable")
         if hasattr(thing, 'a') and hasattr(thing, 'b'):
-            segments.append(thing)
+            thing_segments.append(thing)
         # If it is a rectangle, polygon, or something with segments
         if hasattr(thing, 'segments'):
-            segments += thing.segments
+            thing_segments += thing.segments
         # If it is a rectangle or something with a "crossing segment" getter
         if hasattr(thing, 'get_crossing_segment'):
-            segments.append(thing.get_crossing_segment())
+            thing_segments.append(thing.get_crossing_segment())
         # If it is a grid or something with a segments
         if hasattr(thing, 'rects'):
             for rect in thing.rects:
-                segments += rect.segments
-                segments.append(rect.get_crossing_segment())
+                thing_segments += rect.segments
+                thing_segments.append(rect.get_crossing_segment())
         # If it is a boundary or something with a polygon
         if hasattr(thing, 'polygon'):
             if thing.polygon:
-                segments += thing.polygon.segments
+                thing_segments += thing.polygon.segments
         # If it is a room or something with a boundary
         if hasattr(thing, 'boundary'):
             boundary = thing.boundary
             if boundary:
-                segments += boundary.exterior_polygon.segments
+                thing_segments += boundary.exterior_polygon.segments
                 for polygon in boundary.interior_polygons:
-                    segments += polygon.segments
+                    thing_segments += polygon.segments
         # If it has a corridor grid (i.e. it is a room)
         if hasattr(thing, 'corridor_grid'):
             if thing.corridor_grid != None:
                 corridor_segments = sum([ boundary.segments for boundary in thing.corridor_grid.boundaries ], [])
-                segments += corridor_segments
+                thing_segments += corridor_segments
         # If it is a room or something with doors
         if hasattr(thing, 'doors'):
-            doors = thing.doors
-            if not doors:
-                continue
+            doors = thing.doors or []
             for door in doors:
                 segment = door.segment
                 if not segment:
                     continue
                 segment.color = 'white'
                 segment.z = 17 # Make this segment display in the top layer
-                segments.append(segment)
+                thing_segments.append(segment)
                 # Create a new segment to represent the door open
                 open_door_segment = door.get_open_door()
-                segments.append(open_door_segment)
-
-    return segments
+                thing_segments.append(open_door_segment)
+        # Make sure the new segments inherit the z property, if they have it
+        if hasattr(thing, 'z'):
+            for segment in thing_segments:
+                # If a segment already has a z attribute then do not overwrite it
+                if hasattr(segment, 'z'): continue
+                segment.z = thing.z
+        total_segments += thing_segments
+    return total_segments
 
 # Mine all possible rectangles from a list of different vectorial_base elements
 def get_rects_from_anything (things : list) -> List['Rect']:
