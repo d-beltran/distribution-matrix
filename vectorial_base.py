@@ -3509,17 +3509,31 @@ def merge_grids (grids : List[Grid]) -> Grid:
 # All we know is these segments are connected between them
 # This means there is not an isolated segment or segment point
 # Yield any closed polygon when it is found
-def connect_boundary_segments (segments : List[Segment]) -> Generator[Polygon, None, None]:
+def connect_boundary_segments (segments : List[Segment], debug : bool = False) -> Generator[Polygon, None, None]:
+    # Check if there is at least a join of two corners and, if so, activate the debug mode
+    # segments_points = {}
+    # for segment in segments:
+    #     for point in segment.points:
+    #         segments_points[point] = segments_points.get(point, 0) + 1
+    #         if segments_points[point] == 4:
+    #             debug = True
+    #             break            
+    if debug: add_frame(segments, 'DEBUG connect boundary segments')
     remaining_segments = [ *segments ]
+    # Set the starting conditions
     first_segment = remaining_segments[0]
     remaining_segments.remove(first_segment)
     polygon_segments = [ first_segment ]
+    last_segment = first_segment
+    last_point = first_segment.b
     while len(remaining_segments) > 0:
         # Find a new segment which is connected to the last polygon segment
+        # Specifically check it is connected to the oposite point to the last connected point
+        # WARNING: It is important to check the connected point, not just the segment
+        # WARNING: Otherwise a counter-sense segment right after a union of two corners (see figure 09) will mess everything
         # There must be always at least 1 segment connected
-        last_segment = polygon_segments[-1]
-        previous_segments = polygon_segments[0:-1]
-        connected_segment = next(segment for segment in remaining_segments if segment.is_connected_with(last_segment))
+        connected_segment = next(segment for segment in remaining_segments if segment.has_point(last_point))
+        next_point = connected_segment.get_other_point(last_point)
         # Remove this segment from the segments list and add it to the polygon segments list
         remaining_segments.remove(connected_segment)
         polygon_segments.append(connected_segment)
@@ -3530,19 +3544,35 @@ def connect_boundary_segments (segments : List[Segment]) -> Generator[Polygon, N
         # In figure 09 both segment 0 and 1 will be connected to segment 4
         # However we want the polygon made of segments 1, 2, 3 and 4, thus excluding 0
         # For this reason we must find backwards the first segment to be connected to our last segment
+        previous_segments = polygon_segments[0:-1]
         backwards_segments = reversed(list(enumerate(previous_segments)))
-        closing_segment_index = next((s for s, segment in backwards_segments if segment.is_connected_with(connected_segment)), None)
-        if closing_segment_index != None:
-            # Get the last closed segments and yield them as a polygon
-            current_polygon_segments = polygon_segments[closing_segment_index:]
-            yield Polygon.non_canonical(current_polygon_segments)
-            # Remove the recently yielded segments from the previous segments list
-            polygon_segments = polygon_segments[0:closing_segment_index]
-            # If we are out of polygon segments but there are still reamining segments to connect then add one to the list
-            if len(polygon_segments) == 0 and len(remaining_segments) > 0:
-                first_segment = remaining_segments[0]
-                remaining_segments.remove(first_segment)
-                polygon_segments = [ first_segment ]
+        closing_segment_index = next((s for s, segment in backwards_segments if segment.has_point(next_point)), None)
+        # If this segment did not close any polygon then go for the next iteration
+        if closing_segment_index is None:
+            # Set the following segment and its last point
+            last_segment = connected_segment
+            last_point = last_segment.get_other_point(last_point)
+            continue
+        # Get the last closed segments and yield them as a polygon
+        current_polygon_segments = polygon_segments[closing_segment_index:]
+        next_polygon = Polygon.non_canonical(current_polygon_segments)
+        if debug: add_frame(next_polygon.segments, 'DEBUG: correctly connected polygon')
+        yield next_polygon
+        # If we are done then stop here
+        if len(remaining_segments) == 0: break
+        # Remove the recently yielded segments from the previous segments list
+        polygon_segments = polygon_segments[0:closing_segment_index]
+        if debug:
+            add_frame(polygon_segments, 'DEBUG: polygon segments')
+            add_frame(remaining_segments, 'DEBUG: remaining segments')
+        # If we are out of polygon segments but there are still reamining segments to connect then add one to the list
+        if len(polygon_segments) == 0:
+            first_segment = remaining_segments[0]
+            remaining_segments.remove(first_segment)
+            polygon_segments = [ first_segment ]
+        # Set the following segment and its last point
+        last_segment = polygon_segments[-1]
+        last_point = last_segment.b
 
 # Given a list of polygons, try to group them by boundaries
 # i.e. polygons which are contained inside other polygons are considered interior polygons of the boundary
