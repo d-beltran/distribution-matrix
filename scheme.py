@@ -1362,6 +1362,9 @@ class Room:
             # Fit in the target parent grid in case there is any non-respected minimum size
             fitted_initial_child_grid = target_parent_grid.force_fit(
                 initial_child_grid, self.min_size, room.min_size, expand=True)
+            # If we failed to fit the grid then try the next
+            if type(fitted_initial_child_grid) is Exception: continue
+            # If we already tried this initial grid and further failed then skip it already
             if fitted_initial_child_grid in tried_fitted_initial_grids: continue
             tried_fitted_initial_grids.add(fitted_initial_child_grid)
             # Now claim the actual initial grid
@@ -1713,6 +1716,10 @@ class Room:
             # WARNING: The current_corridor_length is not set since it must be only updated when the corridor is complete
             current_corridor = sample_free_region['corridor_segments']
             current_corridor_nodes = sample_free_region['corridor_nodes']
+            # If there is anything at this point then display it
+            if len(current_corridor) > 0:
+                elements_to_display = [ segment.get_colored_segment('red') for segment in current_corridor ]
+                self.update_display(extra=elements_to_display, title='Display the corridor made out of free regions')
 
         # Set a function to check if the corridor is finished, given a list of rooms and nodes
         def is_corridor_finished (corridor_rooms : List['Room'], corridor_nodes :List[Point]) -> bool:
@@ -2008,7 +2015,10 @@ class Room:
                 # Iterate over the different free grids and remove its segments from the corridor
                 for corridor_free_region in corridor_free_regions:
                     for segment in corridor_free_region['corridor_segments']:
-                        corridor -= segment
+                        # We must check if the segment is in the corridor
+                        # There is an expectional scenario where the region is included but nots its segment (see figure 11)
+                        if segment in corridor:
+                            corridor -= segment
                 # Now that we have the corridor alone we can search for corridor fragments to connect
                 for corridor_free_region in corridor_free_regions:
                     for segment in corridor_free_region['corridor_segments']:
@@ -2161,8 +2171,8 @@ class Room:
         # Note that, at this point, other rooms do not expand to compensate the lost area yet
         for child in self.children:
             if not child.truncate_grid(self.corridor_grid, force=True, skip_update_display=True):
-                raise ValueError(f'The space required by the corridor cannot be claimed from {child.name}')
-
+                if verbose: print(f'The space required by the corridor cannot be claimed from {child.name}')
+                return False
         # Show the relocated doors
         self.update_display(title='Displaying early corridor')
 
@@ -2230,7 +2240,8 @@ class Room:
                     # Substract the new corridor region from the children rooms
                     for child in self.children:
                         if not child.truncate_grid(expansion_grid, force=True, skip_update_display=True):
-                            raise ValueError(f'The space required by the corridor cannot be claimed from {child.name}')
+                            if verbose: print(f'The space required by the corridor cannot be claimed from {child.name}')
+                            return False
                     # If there was a door in the expansion segment then we must relocate it
                     # DANI: Si no recolocas las puertas afectadas aquí se hace después igualmente
                     # DANI: Pero si te falla en algún punto antes de que se recoloque verás una puerta fuera de sitio
@@ -3795,7 +3806,8 @@ class Room:
             truncated_grid = safe_grid
         # If the grid has been fully consumed then give up
         if not truncated_grid:
-            raise RuntimeError(f'We fully removed a whole room ({self.name}) by force-truncating')
+            if verbose: print(f' Failed to truncate grid: The room ({self.name}) would be fully removed by force-truncating')
+            return False
         truncated_boundaries = truncated_grid.find_boundaries()
         # In case the room has been splitted in 2 parts as a result of the invasion we go back
         if not force and len(truncated_boundaries) > 1:
@@ -3845,11 +3857,18 @@ class Room:
             if self.parent:
                 # Force fit the current grid in the parent grid by truncating it even more
                 available_grid = self.parent.free_grid + self.grid
+                # If the avilable grid is already not respecting the minimum size then we are done
+                # This may happen when there is no parent free space
+                if not available_grid.check_minimum(self.parent.min_size):
+                    if verbose: print(' Failed to truncate grid: The room would not respect minimum size and it can not be fitted since the available spac is not enough to respect margins -> Restoring backup')
+                    self.restore_grid_backup(backup, title='Restored grid backup while truncating')
+                    return False
+                print(f'Checking for room {self.name}, whose parent is {self.parent.name}')
                 fitted_grid = available_grid.force_fit(
-                    self.grid, self.parent.min_size, self.min_size, expand=False, debug=True)
+                    self.grid, self.parent.min_size, self.min_size, expand=False, debug=False)
                 # If the whole grid is consumed in the process then we surrender
-                if not fitted_grid:
-                    if verbose: print(' Failed to truncate grid: The room would not respect minimum size and it can not be fitted -> Restoring backup')
+                if not fitted_grid or type(fitted_grid) is Exception:
+                    if verbose: print(' Failed to truncate grid: The room would not respect minimum size and it failed to be fitted -> Restoring backup')
                     self.restore_grid_backup(backup, title='Restored grid backup while truncating')
                     return False
                 # Efectively set new truncated and fitted grid
@@ -3907,6 +3926,10 @@ class Room:
             # If we must force fit the expansion then claim as much extra space as needed to fit the new expansion
             if force:
                 new_grid = self.parent.free_grid.force_fit(new_grid, self.min_size, new_grid.min_size, expand=True)
+                # If we failed to fit the grid then surrender
+                if type(new_grid) is Exception:
+                    if verbose: print(f'Expanding grid of room {self.name} at {expansion_grid} failed when force fitting')
+                    return False
             else:
                 if verbose:
                     print(f'Expanding grid of room {self.name} at {expansion_grid} failed:')
@@ -3928,6 +3951,10 @@ class Room:
             if force:
                 self.grid = backup[self]
                 self.grid = self.parent.free_grid.force_fit(new_grid, self.min_size, self.min_size, expand=True)
+                # If we failed to fit the grid then surrender
+                if type(self.grid) is Exception:
+                    if verbose: print(f'Expanding grid of room {self.name} at {expansion_grid} failed when force fitting parent room')
+                    return False
             else:
                 if verbose:
                     print(f'Expanding grid of room {self.name} at {expansion_grid} failed:')

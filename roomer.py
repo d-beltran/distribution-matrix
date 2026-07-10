@@ -18,7 +18,7 @@ if __name__ == '__main__':
 
     # Represent current rooms tagged as display = True
     if display:
-        setup_display(frames_limit=1000)
+        setup_display(frames_limit=10000)
 
 
     #test = test_room_1

@@ -453,7 +453,7 @@ class Segment(Line):
         elif point == self.b:
             return self.a
         else:
-            raise ValueError('Input point is not one of the segment points')
+            raise ValueError(f'Input point "{point}" is not one of the segment points: "{self.a}" and "{self.b}"')
         
     # Given two segments, return the point where they are connected
     # If they are not connected return None
@@ -2609,6 +2609,8 @@ class Grid:
         # Make sure the starting self grid is respecting the margin
         # Otherwise this function makes no sense
         if not self.check_minimum(self_margin):
+            add_frame(self.rects, 'DEBUG: Minimum not respected in force_fit -> self grid')
+            add_frame(fitted_grid.rects, 'DEBUG: Minimum not respected in force_fit -> fitted grid')
             raise ValueError('Self grid must respect the margins already in order to force fit another grid')
         # Make sure the fitting grid is inside self grid
         # Otherwise this function may be useless
@@ -2666,11 +2668,13 @@ class Grid:
             # If the fixing region was claimed then restart the checkings again
             if fixed: continue
             # If we already tried all fixing regions and failed then we surrender
-            debug_segments = []
-            debug_segments += [ rect.get_colored_rect('blue') for rect in final_self_grid.rects ]
-            debug_segments += [ rect.get_colored_rect('green') for rect in final_fitted_grid.rects ]
-            add_frame(debug_segments, title=f'Force fit {"expand" if expand else "shrink"} failure debug')
-            raise RuntimeError('There are no fixing regions inside the fitting grid')
+            if debug:
+                debug_segments = []
+                debug_segments += [ rect.get_colored_rect('blue') for rect in final_self_grid.rects ]
+                debug_segments += [ rect.get_colored_rect('green') for rect in final_fitted_grid.rects ]
+                add_frame(debug_segments, title=f'Force fit {"expand" if expand else "shrink"} failure debug')
+                print(f'There are no fixing regions in self grid (blue) with a margin of {self_margin} to fit the fitting grid (green) with a margin of {fitted_grid_margin}')
+            return Exception('Failed to force fit grid')
         return final_fitted_grid
 
     # Search all maximum rectangles which fulfill the specified minimum x and y sizes
@@ -3298,6 +3302,13 @@ class Path:
             new_segments.remove(other)
             return Path(new_segments)
         raise ValueError(f'Path substraction of {other.__class__} is not supported')
+
+    def __contains__(self, other):
+        if isinstance(other, Point):
+            return other in self._nodes
+        if isinstance(other, Segment):
+            return other in self._segments
+        raise ValueError(f'Path containing of {other.__class__} is not supported')
 
     # Get the segments
     def get_segments (self) -> List[Segment]:
