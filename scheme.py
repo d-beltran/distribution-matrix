@@ -1727,6 +1727,10 @@ class Room:
             contains_all_rooms = all(room in corridor_rooms for room in required_rooms)
             if not contains_all_rooms:
                 return False
+            # Check all free regions are in the corridor
+            contains_all_free_regions = all(node in corridor_nodes for node in free_region_nodes)
+            if not contains_all_free_regions:
+                return False
             # Check all required doors are in the corridor
             contains_all_doors = all(door_point in corridor_nodes for door_point in already_set_door_points)
             if not contains_all_doors:
@@ -1780,6 +1784,7 @@ class Room:
                 # Get the following node paths which are not already included in the current path and its nodes
                 following_node_paths = [ *following_node_data['paths'] ]
                 following_node_path_nodes = [ *following_node_data['path_nodes'] ]
+                following_rooms = set(current_rooms)
                 # In case we find a free region node we immediately add all its segments and nodes to the corridor
                 corridor_free_region = free_region_nodes.get(following_node, None)
                 if corridor_free_region:
@@ -1789,6 +1794,7 @@ class Room:
                         node_data = nodes[node]
                         following_node_paths += node_data['paths']
                         following_node_path_nodes += node_data['path_nodes']
+                        following_rooms = following_rooms.union(set(node_data['rooms']))
                 # Add the following node paths/nodes to the remaning available paths/nodes
                 # Then we get the available paths/nodes for the following path
                 #print(len(following_node_paths))
@@ -1808,7 +1814,7 @@ class Room:
                         following_available_paths.append(path)
                         following_available_path_nodes.append(node)
                 # Get the following path covered rooms
-                following_rooms = current_rooms.union(set(following_node_data['rooms']))
+                following_rooms = following_rooms.union(set(following_node_data['rooms']))
                 # DANI: Usa esto para ver los pasos intermedios
                 #elements_to_display = [ segment.get_colored_segment('red') for segment in following_path ]
                 #self.update_display(extra=elements_to_display, title='Corridor solver step')
@@ -1991,7 +1997,7 @@ class Room:
                 current_corridor.remove(segment)
                 current_corridor += cutted_segments
         # Set the children doors
-        # These doors are susceptible of beeing moved while the corridor is build
+        # These doors are susceptible of beeing moved while the corridor is built
         children_doors = sum([ child.doors for child in required_children_rooms ], [])
 
         # In case we have rigid rooms, set the rigid grid which must never be modified
@@ -2007,8 +2013,12 @@ class Room:
         # Set a function to generate the corridor boundary
         # This process is wrapped in a function because we may have to change the corridor and redo the boundary further
         # e.g. a door can not be relocated in the boundary so it must be relocated now and the corridor will change
-        def make_corridor_grid () -> Grid:
+        def make_corridor_grid (debug : bool = True) -> Grid:
             corridor = Path(current_corridor)
+            # Display the current corridor
+            if debug:
+                elements_to_display = [ segment.get_colored_segment('red') for segment in corridor.segments ]
+                self.update_display(extra=elements_to_display, title='Display the corridor to build the boundary')
             # Now we must substract segments in the free space (fake corridors)
             # Always leave a minimal corridor fragment from the free space for the grid to be continuous
             if functional_corridor_grid:
@@ -2035,17 +2045,15 @@ class Room:
             if len(corridor) == 0:
                 # Check that there is just one node, as expected
                 if len(current_corridor_nodes) != 1:
-                    raise SystemExit('There is something very wrong with the corridor backbone')
+                    raise RuntimeError('There is something very wrong with the corridor backbone')
                 corridor_grid = Grid([ generate_point_rect(current_corridor_nodes[0], corridor_size) ])
             else:
-                # Display the current corridor
-                elements_to_display = [ segment.get_colored_segment('red') for segment in corridor.segments ]
-                self.update_display(extra=elements_to_display, title='Display the corridor to build the boundary')
                 # Generate a boundary around the current corridor path
                 corridor_grid = corridor.get_margined_grid(corridor_size)
             # Display the very first corridor boundary
-            elements_to_display = corridor_grid.get_perimeter_segments('blue')
-            self.update_display(extra=elements_to_display, title='Displaying first corridor boundary')
+            if debug: 
+                elements_to_display = corridor_grid.get_perimeter_segments('blue')
+                self.update_display(extra=elements_to_display, title='Displaying first corridor boundary')
 
             # Set the regions of the corridor which must be removed
             # e.g. regions out of the parent boundary, in case it is not adaptable
@@ -2077,15 +2085,16 @@ class Room:
 
             # Check the corridor has not been fully consumed
             if not corridor_grid:
-                raise ValueError('Corridor was all in excluding regions')
+                raise RuntimeError('Corridor was all in excluding regions')
 
             # Get the corridor boundary segments
             corridor_boundaries = corridor_grid.boundaries
             corridor_boundary_segments = sum([ boundary.segments for boundary in corridor_boundaries ], [])
 
             # Display the corridor boundaries after excluding regions removal
-            elements_to_display = [ segment.get_colored_segment('blue') for segment in corridor_boundary_segments ]
-            self.update_display(extra=elements_to_display, title='Displaying corridor boundaries after removing the excluding regions')
+            if debug:
+                elements_to_display = [ segment.get_colored_segment('blue') for segment in corridor_boundary_segments ]
+                self.update_display(extra=elements_to_display, title='Displaying corridor boundaries after removing the excluding regions')
 
             # And now we must expand the corridor regions where we substracted the excluding regions
             # Otherwise the corridor would have regions which do not respect the minimum size
@@ -2109,14 +2118,16 @@ class Room:
                     # For the outside
                     return 0
                 # Display the segments used as reference for the excluded region
-                elements_to_display = [ segment.get_colored_segment('green') for segment in excluded_reference_segments ]
-                self.update_display(extra = elements_to_display, title = 'DEBUG: Excluded reference segments')
+                if debug:
+                    elements_to_display = [ segment.get_colored_segment('green') for segment in excluded_reference_segments ]
+                    self.update_display(extra = elements_to_display, title = 'DEBUG: Excluded reference segments')
                 # Generate the extension boundary from the excluded reference segments
                 extension_corridor = Path(excluded_reference_segments)
                 extension_grid = extension_corridor.get_margined_grid(all_inside)
                 # Display the segments used as reference for the excluded region
-                elements_to_display = extension_grid.get_perimeter_segments('purple')
-                self.update_display(extra = elements_to_display, title = 'DEBUG: Extension segments')
+                if debug:
+                    elements_to_display = extension_grid.get_perimeter_segments('purple')
+                    self.update_display(extra = elements_to_display, title = 'DEBUG: Extension segments')
                 # elements_to_display = [ segment.get_colored_segment('purple') for segment in extension_boundaries[0].segments ]
                 # self.update_display(extra=elements_to_display, title='Debug 2')
                 # Now add the extended grid to the corridor grid
@@ -2124,24 +2135,45 @@ class Room:
                 corridor_grid += extension_grid
 
             # Display the corridor boundaries
-            corridor_boundaries = corridor_grid.boundaries
-            corridor_boundary_segments = sum([ boundary.segments for boundary in corridor_boundaries ], [])
-            elements_to_display = [ segment.get_colored_segment('blue') for segment in corridor_boundary_segments ]
-            self.update_display(extra=elements_to_display, title='Displaying corridor boundaries after expanding to compensate the removal of excluding regions')
+            if debug:
+                elements_to_display = corridor_grid.get_perimeter_segments('blue')
+                self.update_display(extra=elements_to_display, title='Displaying corridor boundaries after expanding to compensate the removal of excluding regions')
 
             # Now add the free grid to the corridor grid
             # DANI: Esto tal vez se puede replantear. No es necesario y perdemos la free grid (espacio claimable)
             if self.free_grid:
                 corridor_grid += self.free_grid
                 # Display the corridor boundaries
-                corridor_boundaries = corridor_grid.boundaries
-                corridor_boundary_segments = sum([ boundary.segments for boundary in corridor_boundaries ], [])
-                elements_to_display = [ segment.get_colored_segment('blue') for segment in corridor_boundary_segments ]
-                self.update_display(extra=elements_to_display, title='Displaying corridor boundaries after adding back the parent free space')
+                if debug:
+                    elements_to_display = corridor_grid.get_perimeter_segments('blue')
+                    self.update_display(extra=elements_to_display, title='Displaying corridor boundaries after adding back the parent free space')
 
             # Check we have only one boundary at this point
-            if len(corridor_grid.boundaries) > 1:
-                raise ValueError('We have a splitted corridor')
+            # If we have more than one, excepctionally, we can fix it if they are connected by a point
+            # This may happen when the free space is divded (see figure 11)
+            while len(corridor_grid.boundaries) > 1:
+                matching_corner : bool = False
+                sample_boundary = corridor_grid.boundaries[0]
+                sample_boundary_corners = set(sample_boundary.outside_corners)
+                other_boundaries = corridor_grid.boundaries[1:]
+                for other_boundary in other_boundaries:
+                    other_boundary_corners = set(other_boundary.outside_corners)
+                    common_corners = sample_boundary_corners.intersection(other_boundary_corners)
+                    if len(common_corners) == 0: continue
+                    matching_corner = True
+                    # Make sure both boundaries are joined by adding some extra space to the grid
+                    # Here we have 4 different ways to place the extra space:
+                    # Either entirely in one of the two colliding rooms or in the middle, beeing longer in either y or x
+                    # Unfortunately I have not the patience to test all 4 cases and check if it worked, so I'll just try one
+                    sample_corner = next(iter(common_corners))
+                    corridor_grid += Grid([ generate_point_rect(sample_corner, corridor_size, corridor_size*2) ])
+                    if debug:
+                        elements_to_display = corridor_grid.get_perimeter_segments('blue')
+                        self.update_display(extra=elements_to_display, title='Displaying corridor boundaries after connecting two splitted regions')
+                # If we found a matching corner then give it another try after modifying the grid
+                if matching_corner: continue
+                # If we failed to stablish a connecting point between at least one boundary then surrender here
+                raise RuntimeError('We have a splitted corridor')
 
             # Remove regions from the corridor grid which are not respecting the minimum size
             # This may happen in some scenarios but there should be no problem in removing them. See figure 8
@@ -2149,23 +2181,22 @@ class Room:
 
             # Check the corridor has not been fully consumed
             if not corridor_grid:
-                raise ValueError('Corridor was not respecting minimum size')
+                raise RuntimeError('Corridor was not respecting minimum size')
+
+            # Display the corridor boundaries
+            if debug:
+                elements_to_display = corridor_grid.get_perimeter_segments('blue')
+                self.update_display(extra=elements_to_display, title='Displaying corridor boundaries after removing regions not respecting the corridor minimum size')
 
             # Now set the corridor grid officially
             self.corridor_grid += corridor_grid
-
-            # Display the corridor boundaries
-            corridor_boundaries = self.corridor_grid.boundaries
-            corridor_boundary_segments = sum([ boundary.segments for boundary in corridor_boundaries ], [])
-            elements_to_display = [ segment.get_colored_segment('blue') for segment in corridor_boundary_segments ]
-            self.update_display(extra=elements_to_display, title='Displaying corridor boundaries after removing regions not respecting the corridor minimum size')
 
         # Run the function above to generate the corridor
         make_corridor_grid()
 
         # At this point there must be a corridor grid
         if not self.corridor_grid:
-            raise SystemExit('Failed to set a corridor grid')
+            raise RuntimeError('Failed to set a corridor grid')
 
         # Set a function to substract the corridor region from the rest of child rooms
         # Note that, at this point, other rooms do not expand to compensate the lost area yet

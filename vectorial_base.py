@@ -3694,13 +3694,15 @@ def get_path_length (path : List['Segment']) -> number:
     return sum([ segment.length for segment in path ])
 
 # Generate a boundary around a point
-def generate_point_rect (point : Point, size : number) -> Rect:
-    half_size = size / 2
+def generate_point_rect (point : Point, size_x : number, size_y : Optional[number] = None) -> Rect:
+    if size_y is None: size_y = size_x
+    half_size_x = size_x / 2
+    half_size_y = size_y / 2
     # Set the dimension values
-    x_min = point.x - half_size
-    x_max = point.x + half_size
-    y_min = point.y - half_size
-    y_max = point.y + half_size
+    x_min = point.x - half_size_x
+    x_max = point.x + half_size_x
+    y_min = point.y - half_size_y
+    y_max = point.y + half_size_y
     # Set the rect and return it
     return Rect(x_min, y_min, x_max, y_max)
 
