@@ -2152,10 +2152,10 @@ class Room:
                     elements_to_display = corridor_grid.get_perimeter_segments('blue')
                     self.update_display(extra=elements_to_display, title='Displaying corridor boundaries after adding back the parent free space')
 
-            # Check we have only one boundary at this point
+            # Check the corridor is not splitted, but unified in a single grid
             # If we have more than one, excepctionally, we can fix it if they are connected by a point
             # This may happen when the free space is divded (see figure 11)
-            while len(corridor_grid.boundaries) > 1:
+            while corridor_grid and not corridor_grid.is_unified():
                 matching_corner : bool = False
                 sample_boundary = corridor_grid.boundaries[0]
                 sample_boundary_corners = set(sample_boundary.outside_corners)
@@ -2985,7 +2985,7 @@ class Room:
         # This scenario is more likely than it may appear
         if self.parent.available_area < self.max_area and self.parent.available_area > self.min_area \
             and all( room.is_fit_to_required_area('conformist') for room in self.get_brother_rooms() ) \
-            and (not self.parent.available_grid.is_splitted()) \
+            and self.parent.available_grid and self.parent.available_grid.is_unified() \
             and self.parent.available_grid.check_minimum(self.min_size):
             if verbose: print('Auto-filling available space')
             self.grid = self.parent.available_grid
@@ -4605,8 +4605,8 @@ class Stairs:
                 upper_grid = Grid([upper_spot]) - upper_free_grid
                 if lower_grid != upper_grid:
                     raise Exception('Lower and upper grids must be identical')
-                if len(lower_grid.boundaries) != 1:
-                    raise Exception('Grid must have only one boundary')
+                if lower_grid and not lower_grid.is_unified():
+                    raise Exception('Grid must not be splitted, but unified')
                 # Set the polygon
                 self.polygon = lower_grid.boundaries[0].exterior_polygon
                 # Set the door positions

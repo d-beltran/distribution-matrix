@@ -2663,7 +2663,7 @@ class Grid:
                 else:
                     new_fitted_grid = final_fitted_grid - fixing_grid
                     # Make sure the new fitted grid has not been splitted
-                    if len(new_fitted_grid.boundaries) > 1: continue
+                    if new_fitted_grid and not new_fitted_grid.is_unified(): continue
                     final_fitted_grid = new_fitted_grid
                     final_self_grid += fixing_grid
                 fixed = True
@@ -3203,6 +3203,7 @@ class Grid:
 
     # Check if the grid is unified, meaning that there is not more than one group of connected rectangles
     def is_unified (self) -> bool:
+        if len(self.rects) == 0: raise RuntimeError('Trying to check if empty grid is unified')
         first_group = next(self.find_connected_rect_groups())
         return len(first_group) == len(self.rects)
 
@@ -3263,9 +3264,6 @@ class Grid:
     def get_perimeter_segments (self, color : str = 'black') -> List[Segment]:
         boundary_segments = sum([ boundary.segments for boundary in self.boundaries ], [])
         return [ segment.get_colored_segment(color) for segment in boundary_segments ]
-
-    def is_splitted (self) -> bool:
-        return len(self.boundaries) > 1
 
 # A path is a group of connected segments
 class Path:
