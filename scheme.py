@@ -2976,6 +2976,20 @@ class Room:
             raise RuntimeError(f'Trying to fit {self.name} with {required_area} required area (exigent behaviour) but there is no free space available')
         # Make a boundary backup of this room and all its brothers
         backup = self.parent.make_grid_backup(children_only=True)
+        # There is one scenario where we can skip this process easily, but the following conditions must be fulfiled:
+        # 1 - There is only one room left to fit
+        # 2 - The available area is within the range of the required area
+        # 3 - The available area is not splitted in multiple regions
+        # 4 - The available area respects the minimum margin
+        # If all these conditions are met then we can just set the available area as the room area in one step
+        # This scenario is more likely than it may appear
+        if self.parent.available_area < self.max_area and self.parent.available_area > self.min_area \
+            and all( room.is_fit_to_required_area('conformist') for room in self.get_brother_rooms() ) \
+            and (not self.parent.available_grid.is_splitted()) \
+            and self.parent.available_grid.check_minimum(self.min_size):
+            if verbose: print('Auto-filling available space')
+            self.grid = self.parent.available_grid
+            return True
         # Keep expanding or contracting until the current room reaches the desired area
         # Check the required area is big enought to be meaningfull according to the resolution
         # i.e. check if expanding a segment with the minimum length would make it move more than the minimum resolution
@@ -2988,7 +3002,7 @@ class Room:
         # DANI: Pero una resolución pequeña no hará que no queden espacios libres, simplemente hará que esos espacios sean muy pequeños
         while not self.is_fit_to_required_area(behaviour=behaviour):
             if verbose: print(f' Required area: {required_area}')
-            # If the required are is positive it means we must expand our room
+            # If the required area is positive it means we must expand our room
             if required_area > 0:
                 # Set a function to supervise if each expansion step is succesful or not
                 def expand_step () -> bool:

@@ -3264,6 +3264,9 @@ class Grid:
         boundary_segments = sum([ boundary.segments for boundary in self.boundaries ], [])
         return [ segment.get_colored_segment(color) for segment in boundary_segments ]
 
+    def is_splitted (self) -> bool:
+        return len(self.boundaries) > 1
+
 # A path is a group of connected segments
 class Path:
     def __init__ (self, segments : Union[ Set[Segment], List[Segment] ] = []):

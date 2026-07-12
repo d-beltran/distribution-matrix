@@ -1,7 +1,5 @@
 RAM
 
-que si el area disponible es igual a la necesaria coja la habitación entra y listos
-
 para el hard retry falta hacer que paralelize
 	* tal vez un try catch para emergencias
 
