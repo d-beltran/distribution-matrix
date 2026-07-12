@@ -2661,7 +2661,10 @@ class Grid:
                     final_self_grid -= fixing_grid
                 # Claim this space for the self grid if we are not expanding the fitted region
                 else:
-                    final_fitted_grid -= fixing_grid
+                    new_fitted_grid = final_fitted_grid - fixing_grid
+                    # Make sure the new fitted grid has not been splitted
+                    if len(new_fitted_grid.boundaries) > 1: continue
+                    final_fitted_grid = new_fitted_grid
                     final_self_grid += fixing_grid
                 fixed = True
                 break
