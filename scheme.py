@@ -475,6 +475,22 @@ class Door:
         if self.is_point_suitable(boundary=boundary):
             return True
         return self.relocate(boundary=boundary)
+
+    # Make a copy of this door
+    # Make sure we can mutate the copy without having any effect on the original
+    def copy(self) -> 'Door':
+        return Door(
+            point = self.point,
+            width = self.width,
+            margin = self.margin,
+            length = self.length,
+            direction = self.direction,
+            pivot = self.pivot,
+            rigid = self.rigid,
+            reverse = self.reverse,
+            room = self.room,
+        )
+        
         
 # A room is a smart boundary that may contain other boundaries with conservative areas and size restrictions
 class Room:
@@ -566,6 +582,13 @@ class Room:
         unique_children = unique(children)
         if len(children) != len(unique_children):
             raise InputError(f'Duplicated child in room {self.name}: ' + ', '.join([ child.name for child in children]))
+        # Store children by their names so they may be retrieved this way
+        self.children_by_names = {}
+        for child in children:
+            # Make sure children have unique names
+            if self.children_by_names.get(child.name, False):
+                raise InputError(f'Duplicated child name {child.name}')
+            self.children_by_names[child.name] = child
         # Set the children rooms
         self._children = children
         # Set every child parent as self to maintain coherence
@@ -600,9 +623,6 @@ class Room:
         self._min_size = min_size
         # Set the internal max size value
         self._max_size = None
-        # Parent free limit is set by the parent while setting the child boundary
-        # Parent free limit is the maximum min size of all parent children but this child
-        self.parent_free_limit = None
         # Save input door args
         self._door_args = door_args
         # Set the doors
@@ -1198,7 +1218,7 @@ class Room:
         # Note that we are reading the public height, not the private
         # Thus it is a recursive setter until we find a parent with a height value
         if self.parent:
-            return self.height
+            return self.parent.height
         # If we are the root and there is a parent building we can inherit the height from it
         if self.parent_building:
             return self.parent_building.room_args['height']
@@ -1211,6 +1231,12 @@ class Room:
 
     # The room height
     height = property(get_height, set_height, None, "The room height")
+
+    # Parent free limit is the maximum min size of all other rooms: the parent and the brothers
+    def get_parent_free_limit(self) -> number:
+        # Configure the child room to respect the parent free min size limit according to its brothers
+        other_rooms = [ self.parent ] + [ brother for brother in self.get_brother_rooms()]
+        return max([ other.min_size for other in other_rooms ])
 
     # Set children grids according to the room configuration
     # This function triggers the logic to solve room distributions
@@ -1239,10 +1265,6 @@ class Room:
         rooms_to_solve = []
         for room in rooms:
             if verbose: print(f'Now solving {room.name}')
-            # Configure the child room to respect the parent free min size limit according to its brothers
-            other_rooms = [ self ] + [ other for other in rooms if other != room ]
-            parent_free_limit = max([ other.min_size for other in other_rooms ])
-            room.parent_free_limit = parent_free_limit
             # If the room already has boundary at this point then ignore it
             if not room.boundary: rooms_to_solve.append(room)
             # # If the children has no boundary it must be built
@@ -1254,53 +1276,56 @@ class Room:
         # Set a recursive logic to solve a room after every other brother room
         # This way we can cover every possible configuration of starting spots for every room
         # Thus if the last room does not fit anywhere we can go back and relocate the previous room and so on
-        def generate_rooms_configuration (following_rooms : List['Room']) -> Generator[None, None, None]:
+        def generate_rooms_configuration (
+            starting_configuration : 'Room',
+            remaining_rooms_to_solve : List['Room']
+        ) -> Generator['Room', None, None]:
             # Get the first room as the current room to be placed
-            current_room = following_rooms[0]
+            current_room = remaining_rooms_to_solve[0]
             # Get the remaining rooms
-            reminaing_rooms = following_rooms[1:]
+            reminaing_rooms = remaining_rooms_to_solve[1:]
             is_final_room = len(reminaing_rooms) == 0
             # Iterate the possible places for the following room
-            for _t in self.set_child_grid(current_room):
+            for result in starting_configuration.generate_possible_child_fits(current_room):
                 # If there are no remaining rooms then yield the current configuration here
                 if is_final_room:
-                    yield
+                    yield result
                     continue
                 # For each place call this function recursively
-                for _t2 in generate_rooms_configuration(reminaing_rooms):
-                    yield
+                for sub_results in generate_rooms_configuration(result, reminaing_rooms):
+                    yield sub_results
                 
         # Iterate every possible configuration found
         # DANI: Note that the values from the generator are always None
         # DANI: What matters is the configuration of the rooms when the value is returned
         tries = 1
-        for _c in generate_rooms_configuration(rooms_to_solve):
+        for configuration in generate_rooms_configuration(self, rooms_to_solve):
 
             tries += 1
 
             # Reshaped children to reduce unnecessary corners as well
-            self.reduce_children_corners()
+            configuration.reduce_children_corners()
 
             # Now that all children bondaries are set we must set the corridor
 
             # Set the corridor
             if len(rooms) > 0:
-                if not self.set_corridor():
+                if not configuration.set_corridor():
                     continue
 
             # At this point the boundary is no longer adaptable to child boundaries, in case it was
             # This is because then the reducing corneres process requires real free space to work
-            self._child_adaptable_boundary = False
+            configuration._child_adaptable_boundary = False
 
             # If there is a limit of corners in the room (i.e. this is the root room) then reshape children now
-            if self._child_adaptable_boundary and self.max_corners:
-                self.reduce_corners()
+            if configuration._child_adaptable_boundary and configuration.max_corners:
+                configuration.reduce_corners()
             # Reshape children to reduce unnecessary corners as well
-            self.reduce_children_corners()
+            configuration.reduce_children_corners()
 
             # Relocate the doors to the most suitable placement now that boundaries will change no more
             any_relocated_door = False
-            for child in self.children:
+            for child in configuration.children:
                 for door in child.doors:
                     if door.rigid:
                         continue
@@ -1309,7 +1334,7 @@ class Room:
 
             # Show the relocated doors
             if any_relocated_door:
-                self.update_display(title='Relocated doors')
+                configuration.update_display(title='Relocated doors')
 
             # If the recursive flag was passed then we must solve every child's children
             if recursive:
@@ -1323,6 +1348,7 @@ class Room:
                 if solving_problem: continue
 
             # If we made it this far then we have succeeded
+            self.paste(configuration)
             return True
 
         # If we exausted all possible configurations then we surrender
@@ -1338,26 +1364,37 @@ class Room:
         # Generate fitting rects. If there is at least one then the room fits
         grid = self.grid if force else self.free_grid
         fitting_rects = grid.get_fitting_space(size, size)
-        if next(fitting_rects, None):
+        if fitting_rects:
             return True
         return False
 
-    # Set up a child room grid between parent and brother grids
-    def set_child_grid (self, room : 'Room', forced : bool = False, verbose : bool = False) -> Generator[None, None, None]:
+    # Generate configurations where the child room is fitted in the parent
+    # Every configuration will respect all area and size restrictions for the parent, self and brother rooms
+    def generate_possible_child_fits (self,
+        room : 'Room',
+        forced : bool = False,
+        verbose : bool = False
+    ) -> Generator['Room', None, None]:
         if verbose: print(f'Setting {self.name} child room {room.name} grid (forced = {forced})')
         # Set the target grid depending on if it has been forced or not
         target_parent_grid = self.grid if forced else self.free_grid
         # Get the fitting space
         fitting_grid = target_parent_grid.get_fitting_space(room.min_size, room.min_size)
+        # If there is no fitting space then try with the force already
         if not fitting_grid:
             if forced: raise RuntimeError(f'The room {room.name} has no fitting space to start with')
-            return self.set_child_grid(room, forced=True)
+            for result in self.generate_possible_child_fits(room, forced=True):
+                yield result
+            return
         # Keep track already tried initial grids so we do not loose time repeating the same
         tried_fitted_initial_grids = set()
-        # Also make a backup before we start, so we can recover ir in case any configuration fails
-        backup = self.make_backup()
         # Get a random spot from the fitting space and set the initial grid there
         for spot in fitting_grid.generate_fitting_spots(room.min_size, room.min_size):
+            # Make a copy of self room before we start, so we can mess the configuration and never loose the original
+            self_copy = self.copy()
+            # Use the child copy
+            child_copy = self_copy.children_by_names[room.name]
+            # Set the initial child grid
             initial_child_grid = Grid([spot])
             # Fit in the target parent grid in case there is any non-respected minimum size
             fitted_initial_child_grid = target_parent_grid.force_fit(
@@ -1368,18 +1405,16 @@ class Room:
             if fitted_initial_child_grid in tried_fitted_initial_grids: continue
             tried_fitted_initial_grids.add(fitted_initial_child_grid)
             # Now claim the actual initial grid
-            if not room.expand_grid(fitted_initial_child_grid, check_parent_free_grid=False):
+            if not child_copy.expand_grid(fitted_initial_child_grid, check_parent_free_grid=False):
                 continue
             if verbose: print(f'Setting {self.name} child room {room.name} grid succeeded to set inital grid')
             # Proceed with the expansion of this child room until it reaches its forced area
-            if not room.fit_to_required_area(behaviour='conformist', verbose=True):
-                room.grid = None # Reset the room grid
+            if not child_copy.fit_to_required_area(behaviour='conformist', verbose=True):
+                child_copy.grid = None # Reset the room grid
                 continue
             if verbose: print(f'Setting {self.name} child room {room.name} grid succeeded to fully fit')
             # We have a successful candidate, so yield
-            yield
-            # If the previous yield failed then recover the backup before trying a new starting spot
-            self.restore_backup(backup)
+            yield self_copy
         # If we already tried all possible spots then we surrender
         if verbose: print(f'Setting {self.name} child room {room.name} grid failed: No suitable spot was found')
         
@@ -1438,8 +1473,10 @@ class Room:
         # The limit may come from the square side limit, the space limit or the own room limit
         minimum_space = min(x_space, y_space)
         first_side_length = min(square_side_length, minimum_space, self.max_size)
+        # Get the parent free limit to be respected
+        parent_free_limit = self.get_parent_free_limit()
         # In case the first side length is between the limit space and the margined limit space we must fit it to the limit
-        margined_minimum_space = minimum_space - self.parent_free_limit
+        margined_minimum_space = minimum_space - parent_free_limit
         if minimum_space > first_side_length and first_side_length > margined_minimum_space:
             first_side_length = margined_minimum_space
         # Once we have calculated the first length we can calculate the second one
@@ -1448,7 +1485,7 @@ class Room:
         maximum_side_length = self.target_area / first_side_length
         second_side_length = min(maximum_space, maximum_side_length)
         # In case the second side length is between the limit space and the margined limit space we must fit it to the limit as well
-        margined_maximum_space = maximum_space - self.parent_free_limit
+        margined_maximum_space = maximum_space - parent_free_limit
         if maximum_space > second_side_length and second_side_length > margined_maximum_space:
             second_side_length = margined_maximum_space
         # Create the new rect fitting the biggest size in the biggest space and the opposite
@@ -3425,7 +3462,7 @@ class Room:
         maximum_forward_limit = max([ rect.get_size()[forward] for rect in contact_max_rects ])
 
         # Set the margin according to the invaded rooms
-        room_limits = [ self.parent_free_limit if room == parent_room else room.min_size for room in rooms ]
+        room_limits = [ self.get_parent_free_limit() if room == parent_room else room.min_size for room in rooms ]
         margin_limit = max(room_limits)
 
         # Use the margin limit to set the margined forward limits
@@ -3937,8 +3974,10 @@ class Room:
         # Note that parent grid is not checked in situtations where the truncated region is to be claimed by other room rigth away
         # DANI: Esto tiene un problema y es resolver un pull cuando ya está toda el area consumida -> se hace eterno
         # DANI: No se me ocurre solución sencilla así que de momento lo quito y ya
-        if check_parent_free_grid and not self.parent.free_grid.check_minimum(self.parent_free_limit):
-            if verbose: print(f' Minimum size ({self.parent_free_limit}) is not respected in parent free space -> Restoring backup')
+        # Get the parent free limit to be respected
+        parent_free_limit = self.get_parent_free_limit()
+        if check_parent_free_grid and not self.parent.free_grid.check_minimum(parent_free_limit):
+            if verbose: print(f' Minimum size ({parent_free_limit}) is not respected in parent free space -> Restoring backup')
             # add_frame(self.parent.free_grid, title='Debug -> ' + self.parent.name)
             self.restore_grid_backup(backup, title='Restored grid backup while truncating grid')
             return False
@@ -3996,9 +4035,11 @@ class Room:
         if not self.parent:
             if verbose: print(f'Expanding grid of room {self.name} with no parent at {expansion_grid} succeeded')
             return True
+        # Get the parent free limit to be respected
+        parent_free_limit = self.get_parent_free_limit()
         # In case this room has a parent room a few extra step must be done
         # Check the minimum size in the parent free grid to be respected
-        if check_parent_free_grid and not self.parent.free_grid.check_minimum(self.parent_free_limit):
+        if check_parent_free_grid and not self.parent.free_grid.check_minimum(parent_free_limit):
             # If we must force fit the expansion then claim as much extra space as needed to fit the new expansion
             if force:
                 self.grid = backup[self]
@@ -4281,6 +4322,34 @@ class Room:
     # The display flag may be passed in order to generate a dynamic graph to display the solving process
     def solve (self) -> bool:
         return self.solve_children(recursive=True)
+
+    # Make a copy of the current room
+    def copy (self) -> 'Room':
+        print(f'COPIED {self.name}')
+        #if self.name == 'Segunda planta': breakpoint()
+        return Room(
+            boundary = self.boundary,
+            min_area = self.input_min_area,
+            max_area = self.input_max_area,
+            min_size = self.min_size,
+            rigid = self.rigid,
+            # Do not set maximum corners if we already have a boundary
+            max_corners = None if self.boundary else self.max_corners,
+            corridor_size = self.corridor_size,
+            doors = [ door.copy() for door in self.doors ],
+            door_args = self.door_args,
+            height = self.height,
+            name = self.name,
+            segments_color = self.segments_color,
+            fill_color = self.fill_color,
+            children = [ child.copy() for child in self.children ],
+            parent_building = self.parent_building,
+        )
+
+    # Convert this instance in another instance by copying all its atributes
+    def paste(self, other : 'Room'):
+        print(f'PASTED {self.name}')
+        self.__dict__.update(other.__dict__)
 
 # The element which connects diferent floors of a building
 class Stairs:
@@ -4728,10 +4797,12 @@ class Building:
     # - Little roofs (i.e. perimeter truncation)
     # *** Note that there may be no problem in reducing the perimeter since there may be no upper floors (also very commom)
     def _fix_inherited_ghost_corridor_regions (self, floor : Room):
+        # Get the floor's parent free limit to be respected
+        free_limit = floor.get_parent_free_limit()
         # Find these inherited ghost corridor regions
         # Get all free regions not respecting the parent free limit (i.e. the highest minimum size among its children)
         corridor_free_regions = floor.free_grid
-        correct_regions = corridor_free_regions.keep_minimum(floor.parent_free_limit)
+        correct_regions = corridor_free_regions.keep_minimum(free_limit)
         wrong_regions = corridor_free_regions - correct_regions
         if not wrong_regions:
             return
