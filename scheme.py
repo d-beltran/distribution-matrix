@@ -583,12 +583,12 @@ class Room:
         if len(children) != len(unique_children):
             raise InputError(f'Duplicated child in room {self.name}: ' + ', '.join([ child.name for child in children]))
         # Store children by their names so they may be retrieved this way
-        self.children_by_names = {}
+        self._children_by_names = {}
         for child in children:
             # Make sure children have unique names
-            if self.children_by_names.get(child.name, False):
+            if self._children_by_names.get(child.name, False):
                 raise InputError(f'Duplicated child name {child.name}')
-            self.children_by_names[child.name] = child
+            self._children_by_names[child.name] = child
         # Set the children rooms
         self._children = children
         # Set every child parent as self to maintain coherence
@@ -682,8 +682,21 @@ class Room:
     def get_children (self) -> List['Room']:
         return self._children
 
+    # Force set the children rooms later after initialization
+    def set_children (self, new_children : List['Room']):
+        # Reset the children by names variable
+        self._children_by_names = {}
+        # Set the new children and this room the parent of all of them
+        self._children = new_children
+        for new_child in new_children:
+            new_child._parent = self
+            self._children_by_names[new_child.name] = new_child
+
     # The children rooms
-    children = property(get_children, None, None, "The children rooms")
+    children = property(get_children, set_children, None, "The children rooms")
+
+    def get_child_by_name (self, child_name : str) -> 'Room':
+        return self._children_by_names[child_name]
 
     # Add a single child room
     def add_child (self, child_room : 'Room'):
@@ -1309,7 +1322,7 @@ class Room:
             # Now that all children bondaries are set we must set the corridor
 
             # Set the corridor
-            if len(rooms) > 0:
+            if len(configuration.children) > 0:
                 if not configuration.set_corridor():
                     continue
 
@@ -1340,8 +1353,9 @@ class Room:
             if recursive:
                 solving_problem = False
                 # Iterate children
-                for room in rooms:
-                    if not room.solve_children(recursive=True):
+                for child in configuration.children:
+                    if configuration != child.parent: raise RuntimeError('Hold up')
+                    if not child.solve_children(recursive=True):
                         solving_problem = True
                         break
                 # If any child failed to be solved then try with the next configuration
@@ -1393,7 +1407,7 @@ class Room:
             # Make a copy of self room before we start, so we can mess the configuration and never loose the original
             self_copy = self.copy()
             # Use the child copy
-            child_copy = self_copy.children_by_names[room.name]
+            child_copy = self_copy.get_child_by_name(room.name)
             # Set the initial child grid
             initial_child_grid = Grid([spot])
             # Fit in the target parent grid in case there is any non-respected minimum size
@@ -2795,8 +2809,10 @@ class Room:
         for child in self.children:
             if verbose: print(f'Reducing corners in {child.name}')
             # Skip rigid children
-            if child.rigid:
-                continue
+            if child.rigid: continue
+            if not child.boundary:
+                self.update_display(title='Debug missing child boundary')
+                raise RuntimeError(f'Child {child.name} is missing a boundary')
             exterior_polygon = child.boundary.exterior_polygon
             # DANI: Podría ser > child.max_corners en lugar de > 4, pero eso implicaría que el 4 fuese el por defecto
             # DANI: O sino implicaría tener que especificar que quieres 4 corners en todos los children
@@ -4325,30 +4341,23 @@ class Room:
 
     # Make a copy of the current room
     def copy (self) -> 'Room':
-        print(f'COPIED {self.name}')
-        #if self.name == 'Segunda planta': breakpoint()
-        return Room(
-            boundary = self.boundary,
-            min_area = self.input_min_area,
-            max_area = self.input_max_area,
-            min_size = self.min_size,
-            rigid = self.rigid,
-            # Do not set maximum corners if we already have a boundary
-            max_corners = None if self.boundary else self.max_corners,
-            corridor_size = self.corridor_size,
-            doors = [ door.copy() for door in self.doors ],
-            door_args = self.door_args,
-            height = self.height,
-            name = self.name,
-            segments_color = self.segments_color,
-            fill_color = self.fill_color,
-            children = [ child.copy() for child in self.children ],
-            parent_building = self.parent_building,
-        )
+        # Make an empty copy
+        copy = Room.__new__(Room)
+        # Pase the current contents
+        copy.__dict__.update(self.__dict__)
+        # Edit some fields which may need a deeper copy
+        # Copy every door
+        copy.doors = [ door.copy() for door in self.doors ]
+        # Copy every child
+        # Note that here we also copy children rooms thus making this function recursive
+        copy.children = [ child.copy() for child in self.children ]
+        # Make sure the copy has no parent
+        # Otherwise you may end up having weird behaviour, since the parent does not recognize the copy as child
+        copy._parent = None
+        return copy
 
     # Convert this instance in another instance by copying all its atributes
     def paste(self, other : 'Room'):
-        print(f'PASTED {self.name}')
         self.__dict__.update(other.__dict__)
 
 # The element which connects diferent floors of a building
