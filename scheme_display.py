@@ -166,7 +166,7 @@ def represent (queue):
 def setup_display (frames_limit : Optional[int] = None):
     # Set the global display option as true
     global GLOBAL
-    GLOBAL['enabled'] = True
+    GLOBAL['enabled_display'] = True
     if frames_limit != None:
         GLOBAL['frames_limit'] = frames_limit
     # Start the display logic
