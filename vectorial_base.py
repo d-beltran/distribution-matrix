@@ -65,6 +65,7 @@ class Point:
         raise ValueError('Point substraction of ' + str(other.__class__) + ' is not supported')
 
     # Get the distance from this point to other specified point
+    # DANI: probar similitud de coseno
     def get_distance_to (self, other : 'Point') -> number:
         x_distance = self.x - other.x
         y_distance = self.y - other.y

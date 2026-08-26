@@ -6,6 +6,8 @@ from vectorial_base import *
 
 import random
 from math import sqrt, inf, tan, atan, degrees, radians
+from multiprocessing import Manager, Pool, cpu_count, Queue
+from queue import Empty
 
 # Set the seed and print it
 seed = None
@@ -665,6 +667,20 @@ class Room:
         if self.max_corners:
             raise InputError('Parameter max_corners is supported only in the root room')
 
+    # Check if a room fits in this room according to its minimum size
+    # Check free space by default and all space if the argument 'force' is passed
+    def does_room_fit (self, room : 'Room', force : bool = False) -> bool:
+        size = room.min_size
+        # If there is no minimum size it will always fit
+        if not size:
+            return True
+        # Generate fitting rects. If there is at least one then the room fits
+        grid = self.grid if force else self.free_grid
+        fitting_rects = grid.get_fitting_space(size, size)
+        if fitting_rects:
+            return True
+        return False
+
     def __str__(self):
         return f'<Room "{self.name}">'
 
@@ -696,7 +712,9 @@ class Room:
     children = property(get_children, set_children, None, "The children rooms")
 
     def get_child_by_name (self, child_name : str) -> 'Room':
-        return self._children_by_names[child_name]
+        child = self._children_by_names.get(child_name, None)
+        if child is None: raise RuntimeError(f'Room "{self.name}" has no child named "{child_name}"')
+        return child
 
     # Add a single child room
     def add_child (self, child_room : 'Room'):
@@ -1134,7 +1152,6 @@ class Room:
         if self.parent_building:
             self._min_size = self.parent_building.room_args.get('min_size', None)
             return self._min_size
-        raise
         raise InputError(f'Cannot find minimum size for room {self.name}. Please, set the minimum size in the root room or the buildings room args')
     min_size = property(get_min_size, None, None, "The room minimum space")
 
@@ -1257,10 +1274,11 @@ class Room:
     # All children rooms must have their boundary fully set before solving the next generation of children
     def solve_children (self, recursive : bool = False, verbose : bool = True) -> bool:
         if verbose: print(f'Solving {self.name} children: ' + ', '.join([ child.name for child in self.children ]))
-        # Make a new list out of self children in order to not mutate the original
-        rooms = [ *self.children ]
+        # Make a list of the rooms to be solved
+        # These are children which have no boundary already
+        rooms_to_solve = [ child for child in self.children if not child.boundary ]
         # If there are not children then we have nothing to do here
-        if len(rooms) == 0: return True
+        if len(rooms_to_solve) == 0: return True
         # Before allocating place for any children room, set corridor spaces in front of parent doors
         # This way this space is never claimed since it has to be occupied by the corridor anyway
         # Note that the root room may have non defined doors
@@ -1269,62 +1287,242 @@ class Room:
             self.corridor_grid += Grid([door.get_required_space(inside=True)])
         # Sort children rooms by minimum size, with the biggest sizes first
         if self._child_adaptable_boundary:
-            random.shuffle(rooms)
+            random.shuffle(rooms_to_solve)
         else:
             def sort_by_target_area (room):
                 return room.target_area
-            rooms.sort( key=sort_by_target_area, reverse=True )
-        # Set an initial basic configuration to all rooms and select those to be solved
-        rooms_to_solve = []
-        for room in rooms:
-            if verbose: print(f'Now solving {room.name}')
-            # If the room already has boundary at this point then ignore it
-            if not room.boundary: rooms_to_solve.append(room)
-            # # If the children has no boundary it must be built
-            # if not child_grid_setter(room):
-            #     if verbose: print(f'Child {room.name} has failed to be set')
-            #     return False
+            rooms_to_solve.sort( key=sort_by_target_area, reverse=True )
 
+        # In order to solve the problem faster we will paralelize several processes looking for a solution.
+        # To do so, we will use the following strategy:
+        #
+        # Given a fixed order of rooms to be solved, think of a pyramid of possible room configurations.
+        # We can place the first room in different positions and this would be the first layer of the pyramid.
+        # Then, for every initial placement, we can place the following room in different positions and so forth.
+        # This is an iterative process with as many layers as rooms to solve and the possibilites may be a lot.
+        # The last layer of the pyramid is made of configurations including all the rooms, which may be tested.
+        # Testing a configuration means trying to fit the corridor. Note that a valid configuration may fail here.
+        # If we test a final configuration and it works then our job is done here.
+        # However there may be a scenario where there are few or no solutions.
+        # And the only way to know this is to explore the whole pyramid, so we must be prepared to do it.
+        # 
+        # In order to explore this pyramid of possible configurations we will use a bottom-top strategy.
+        # Every process will go straight to the last layer of the pyramid by placing one room after another.
+        # Then it will try if the configuration works and, if not, it will just change the last room and try again.
+        # This means every process will potentially find a solution in the first try
+        # In the other hand, the paralelization will throw new processes in a top-bottom strategy.
+        # Thus every independent process will explore a very different region of the pyramid.
+        # This is important since sometimes the starting configurations may be "doomed" by just luck.
+        # A single process will take a lot of time to check all possibilities before surrendering.
+        #
+        # We must coordinate these two opposite strategies which may eventually find each other:
+        # The independent processes may not find any solutions and climb up in the pyramid
+        # If they climb up enought they will reach the level where the "paralelizer" is working
+        # We must detect this scenario so the processes stop at this point to not waste the work
+        # To do so, we will keep track of every region of the pyramid which has been already explored
+        #
+        # The pyramid object stores the progress by every layer
+        # Layer keys are the number of rooms still left to solve at the corresponding layer
+        # Then for every layer we keep the generator and a list with every generated spot
+        #pyramid = {}
+
+        # This function searches the pyramid from the bottom to the top and reports its progress
         # Set up each room by giving them a position and correct size to match the forced area
         # Set a recursive logic to solve a room after every other brother room
         # This way we can cover every possible configuration of starting spots for every room
         # Thus if the last room does not fit anywhere we can go back and relocate the previous room and so on
-        def generate_rooms_configuration (
+        # After the rooms fit, try to add the corridor and check if it fits as well
+        def find_rooms_configuration (
             starting_configuration : 'Room',
-            remaining_rooms_to_solve : List['Room']
-        ) -> Generator['Room', None, None]:
+            remaining_rooms_to_solve : List['Room'],
+        ) -> bool:
             # Get the first room as the current room to be placed
             current_room = remaining_rooms_to_solve[0]
             # Get the remaining rooms
             reminaing_rooms = remaining_rooms_to_solve[1:]
             is_final_room = len(reminaing_rooms) == 0
             # Iterate the possible places for the following room
-            for result in starting_configuration.generate_possible_child_fits(current_room):
-                # If there are no remaining rooms then yield the current configuration here
-                if is_final_room:
-                    yield result
+            for rooms_distribution, child_spot_args in starting_configuration._generate_child_fitting_spots(current_room):
+                # Fit the child out of its initial grid
+                if not rooms_distribution._try_initial_grid(*child_spot_args):
                     continue
-                # For each place call this function recursively
-                for sub_results in generate_rooms_configuration(result, reminaing_rooms):
-                    yield sub_results
-                
-        # Iterate every possible configuration found
-        # DANI: Note that the values from the generator are always None
-        # DANI: What matters is the configuration of the rooms when the value is returned
-        tries = 1
-        for configuration in generate_rooms_configuration(self, rooms_to_solve):
+                # If there are no remaining rooms then we have a complete configuration here
+                if is_final_room:
+                    # Try to use this configuration by adjusting the corners and adding the corridor
+                    # If the corridor does not fit then try the next configuration
+                    if try_rooms_configuration(rooms_distribution): return True
+                    continue
+                # Tf there are still rooms to solve then call this function recursively
+                if find_rooms_configuration(rooms_distribution, reminaing_rooms): return True
+            # If we run out of options then return False
+            return False
 
-            tries += 1
+        # This function searches the pyramid from the bottom to the top and reports its progress
+        # Try to place all rooms starting from a distribution which may be at any layer and a new spot for the next child
+        # After all rooms fit, try to add the corridor and check if it fits as well
+        def digger (
+            rooms_distribution : 'Room',
+            child_spot_args : tuple,
+            reminaing_rooms : List['Room'],
+            pyramid_layer : dict,
+            pool_results,
+        ) -> bool:
+            raise RuntimeError('Hold up')
+            # Check if this is the last room 
+            is_final_room = len(reminaing_rooms) == 0
+            # Fit the child out of its initial grid
+            if not rooms_distribution._try_initial_grid(*child_spot_args):
+                pool_results.put(False)
+                return False
+            # If there are no remaining rooms then we have a complete configuration here
+            if is_final_room:
+                # Try to use this configuration by adjusting the corners and adding the corridor
+                # If the corridor does not fit then try the next configuration
+                if try_rooms_configuration(rooms_distribution):
+                    pool_results.put(True)
+                    return True
+                pool_results.put(False)
+                return False
+            # If there are still rooms to solve then we run this same logic recursively
+            # Get the first remaining room as the next room to be placed
+            next_room = reminaing_rooms[0]
+            # Get the remaining rooms
+            following_rooms = reminaing_rooms[1:]
+            # Set the next layer of new possible spots
+            # Generate new available spots for the next room to be fit
+            next_pyramid_layer = {
+                'sta': rooms_distribution,
+                'fol': following_rooms,
+                'gen': rooms_distribution._generate_child_fitting_spots(next_room),
+                'res': [],
+            }
+            # Add this layer to the pyramid
+            pyramid_layer['res'].append(next_pyramid_layer)
+            # Call this function recursively for every following room
+            for next_rooms_distribution, next_child_spot_args in next_pyramid_layer['gen']:
+                if digger(next_rooms_distribution, next_child_spot_args, following_rooms, next_pyramid_layer, pool_results):
+                    pool_results.put(True)
+                    return True
+            # If we run out of options then return False
+            pool_results.put(False)
+            return False
 
+        # This function starts searches in the pyramid from the top to the bottom
+        # When it finds a generator which is still alive, it throws new digger processes from it which run in paralel
+        # However this function is not paralelized but it runs in the main process only
+        def paralelizer (
+            starting_configuration : 'Room',
+            rooms_to_solve : List['Room'],
+        ) -> bool:
+            # Get the first room as the starting point
+            current_room = rooms_to_solve[0]
+            # Get the remaining rooms
+            following_rooms = rooms_to_solve[1:]
+            # Set the root object storing all further layers with room distributions
+            # Here we will also store their generators for the following spots to fit next children
+            pyramid = {
+                'sta': starting_configuration,
+                'fol': following_rooms,
+                'gen': starting_configuration._generate_child_fitting_spots(current_room),
+                'res': [],
+            }
+            # Now set a generator that will search available levels in the pyramid in a top-down order
+            # Note that the diggers will create more new levels on their way down the pyramid
+            # Most of these levels will have generators which have yielded just once
+            # Thus they will have plenty of additional spots to yield
+            def find_next_level(pyramid_level : dict) -> Generator:
+                # Yield the current level if the generator is still alive
+                generator = pyramid_level['gen']
+                next_result = next(generator), None
+                if next_result is not None:
+                    yield pyramid_level, next_result
+                # Now yield other results from the following pyramid levels
+                for following_level in pyramid_level['res']:
+                    for level in find_next_level(following_level):
+                        yield level
+            # Call the generator finder with the starting pyramid configuration
+            pyramid_level_finder = find_next_level(pyramid)
+
+            # Setup the queue to handle results from multiple processes at once
+            manager = Manager()
+            pool_results = manager.Queue()
+        
+            def get_result_if_exists() -> Optional[bool]:
+                try: return pool_results.get_nowait()
+                except Empty: return None
+        
+            def wait_for_result() -> bool:
+                return pool_results.get()
+
+            def show_error(error):
+                print(f'There was an error: {error}')
+
+            # Instantiate the pool to run multiple processes in paralel
+            with Pool(processes=N_PARALEL) as pool:
+                # Launch as many processes as possible and wait for a positive result
+                # If a process fails then launch a new process to fill the available CPU
+                while True:
+                    print(f'RUNNING PROCESSES {len(pool._cache)}')
+                    # Before anything, check if we already had a result from any already running process
+                    next_result = get_result_if_exists()
+                    # If a process succeded then stop other processes already running
+                    if next_result is True:
+                        pool.terminate()
+                        pool.join()
+                        raise SystemExit('Epale')
+                        return True
+                    print(f'NEXT RESULT {next_result}')
+                    # Check if there are CPUs available and, if so, launch a new process
+                    running_processes_count = len(pool._cache)
+                    print(f'RUNNING PROCESSES {running_processes_count}')
+                    has_available_cpus = running_processes_count < N_PARALEL
+                    if has_available_cpus:
+                        # Get the next available configuration
+                        next_pyramid_result = next(pyramid_level_finder, None)
+                        # If there are no more configurations and there are no processes left then stop here
+                        if next_pyramid_result is None and running_processes_count == 0:
+                            raise SystemExit('Failed :(')
+                            return False
+                        # Unpack some values
+                        next_pyramid_level, next_generator_results = next_pyramid_result
+                        room_copy, child_spot_args = next_generator_results
+                        following_rooms = next_pyramid_level['fol']
+                        # Launch a new process
+                        print('LAUNCHING PROCESS')
+                        digger_args = Queue()
+                        digger_args.put((room_copy, child_spot_args, following_rooms, next_pyramid_level, pool_results))
+                        pool.apply_async(digger, digger_args, error_callback=show_error)
+                        print(f'RUNNING PROCESSES AFTER {len(pool._cache)}')
+                        #breakpoint()
+                        continue
+                    # Await for the next result
+                    next_result = wait_for_result()
+                    print(f'NEXT RESULT {next_result}')
+                    # If a processes succeded then stop other processes already running
+                    if next_result is True:
+                        pool.terminate()
+                        pool.join()
+                        raise SystemExit('Hold up')
+                        return True
+
+            # Get next generators and consume all their spots
+            # for pyramid_level in pyramid_level_finder:
+            #     spot_generator = pyramid_level['gen']
+            #     for rooms_distribution, child_spot_args in spot_generator:
+            #         # Launch a new digger process here
+            #         if digger(rooms_distribution, child_spot_args, following_rooms, pyramid_level):
+            #             return True
+
+        # Given a final configuration of rooms, try to stablish the corridor, add the doors, etc.
+        # Note that this process may fail even with a valid configuration since the corridor may not fit
+        def try_rooms_configuration (configuration : 'Room') -> bool:
             # Reshaped children to reduce unnecessary corners as well
             configuration.reduce_children_corners()
-
             # Now that all children bondaries are set we must set the corridor
-
             # Set the corridor
             if len(configuration.children) > 0:
                 if not configuration.set_corridor():
-                    continue
+                    return False
 
             # At this point the boundary is no longer adaptable to child boundaries, in case it was
             # This is because then the reducing corneres process requires real free space to work
@@ -1359,78 +1557,73 @@ class Room:
                         solving_problem = True
                         break
                 # If any child failed to be solved then try with the next configuration
-                if solving_problem: continue
+                if solving_problem:
+                    return False
 
             # If we made it this far then we have succeeded
             self.paste(configuration)
             return True
 
-        # If we exausted all possible configurations then we surrender
-        return False
+        #return find_rooms_configuration(self, rooms_to_solve)
+        return paralelizer(self, rooms_to_solve)
 
-    # Check if a room fits in this room according to its minimum size
-    # Check free space by default and all space if the argument 'force' is passed
-    def does_room_fit (self, room : 'Room', force : bool = False) -> bool:
-        size = room.min_size
-        # If there is no minimum size it will always fit
-        if not size:
-            return True
-        # Generate fitting rects. If there is at least one then the room fits
-        grid = self.grid if force else self.free_grid
-        fitting_rects = grid.get_fitting_space(size, size)
-        if fitting_rects:
-            return True
-        return False
-
-    # Generate configurations where the child room is fitted in the parent
-    # Every configuration will respect all area and size restrictions for the parent, self and brother rooms
-    def generate_possible_child_fits (self,
-        room : 'Room',
+    # Set a function to generate child fittng spots including some additional metrics
+    def _generate_child_fitting_spots (self,
+        child : 'Room',
         forced : bool = False,
         verbose : bool = False
-    ) -> Generator['Room', None, None]:
-        if verbose: print(f'Setting {self.name} child room {room.name} grid (forced = {forced})')
+    ) -> Generator[Tuple['Room', Tuple], None, None]:
+        if verbose: print(f'Setting {self.name} child room {child.name} grid (forced = {forced})')
         # Set the target grid depending on if it has been forced or not
         target_parent_grid = self.grid if forced else self.free_grid
         # Get the fitting space
-        fitting_grid = target_parent_grid.get_fitting_space(room.min_size, room.min_size)
+        fitting_grid = target_parent_grid.get_fitting_space(child.min_size, child.min_size)
         # If there is no fitting space then try with the force already
         if not fitting_grid:
-            if forced: raise RuntimeError(f'The room {room.name} has no fitting space to start with')
-            for result in self.generate_possible_child_fits(room, forced=True):
+            if forced: raise RuntimeError(f'The room {child.name} has no fitting space to start with')
+            for result in self._generate_child_fitting_spots(child, forced=True, verbose=verbose):
                 yield result
             return
         # Keep track already tried initial grids so we do not loose time repeating the same
         tried_fitted_initial_grids = set()
         # Get a random spot from the fitting space and set the initial grid there
-        for spot in fitting_grid.generate_fitting_spots(room.min_size, room.min_size):
+        for spot in fitting_grid.generate_fitting_spots(child.min_size, child.min_size):
             # Make a copy of self room before we start, so we can mess the configuration and never loose the original
             self_copy = self.copy()
             # Use the child copy
-            child_copy = self_copy.get_child_by_name(room.name)
+            child_copy = self_copy.get_child_by_name(child.name)
             # Set the initial child grid
             initial_child_grid = Grid([spot])
-            # Fit in the target parent grid in case there is any non-respected minimum size
-            fitted_initial_child_grid = target_parent_grid.force_fit(
-                initial_child_grid, self.min_size, room.min_size, expand=True)
-            # If we failed to fit the grid then try the next
-            if type(fitted_initial_child_grid) is Exception: continue
-            # If we already tried this initial grid and further failed then skip it already
-            if fitted_initial_child_grid in tried_fitted_initial_grids: continue
-            tried_fitted_initial_grids.add(fitted_initial_child_grid)
-            # Now claim the actual initial grid
-            if not child_copy.expand_grid(fitted_initial_child_grid, check_parent_free_grid=False):
-                continue
-            if verbose: print(f'Setting {self.name} child room {room.name} grid succeeded to set inital grid')
-            # Proceed with the expansion of this child room until it reaches its forced area
-            if not child_copy.fit_to_required_area(behaviour='conformist', verbose=True):
-                child_copy.grid = None # Reset the room grid
-                continue
-            if verbose: print(f'Setting {self.name} child room {room.name} grid succeeded to fully fit')
-            # We have a successful candidate, so yield
-            yield self_copy
+            # Try if the initial grid leads to a correct child fitting
+            yield self_copy, (child_copy, target_parent_grid, initial_child_grid, tried_fitted_initial_grids, verbose)
         # If we already tried all possible spots then we surrender
-        if verbose: print(f'Setting {self.name} child room {room.name} grid failed: No suitable spot was found')
+        if verbose: print(f'Setting {self.name} child room {child.name} grid failed: No suitable spot was found')
+        
+
+    # Set a function to try to stablish a child grid from a raw starting spot
+    def _try_initial_grid (self : 'Room', child : 'Room',
+        target_parent_grid : 'Grid', initial_child_grid : 'Grid',
+        tried_fitted_initial_grids : set, verbose : bool = False,
+    ) -> bool:
+        # Fit in the target parent grid in case there is any non-respected minimum size
+        fitted_initial_child_grid = target_parent_grid.force_fit(
+            initial_child_grid, self.min_size, child.min_size, expand=True)
+        # If we failed to fit the grid then try the next
+        if type(fitted_initial_child_grid) is Exception: return False
+        # If we already tried this initial grid and further failed then skip it already
+        if fitted_initial_child_grid in tried_fitted_initial_grids: return False
+        tried_fitted_initial_grids.add(fitted_initial_child_grid)
+        # Now claim the actual initial grid
+        if not child.expand_grid(fitted_initial_child_grid, check_parent_free_grid=False):
+            return False
+        if verbose: print(f'Setting {self.name} child room {child.name} grid succeeded to set inital grid')
+        # Proceed with the expansion of this child room until it reaches its forced area
+        if not child.fit_to_required_area(behaviour='conformist', verbose=True):
+            child.grid = None # Reset the room grid
+            return False
+        if verbose: print(f'Setting {self.name} child room {child.name} grid succeeded to fully fit')
+        # We have a successful candidate, so yield
+        return True
         
     # Build a provisional grid from the children room grids
     # This function is meant to be used only when the parent (self) room has an adaptable boundary

@@ -1,5 +1,7 @@
 RAM
 
+wave function collapse
+
 para el hard retry falta hacer que paralelize
 	* tal vez un try catch para emergencias
 
