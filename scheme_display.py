@@ -26,6 +26,12 @@ previous_slider_value = None
 
 # Updater called from the system
 def add_frame (data : list, title : Optional[str] = None):
+    # If the display is not enabled then there is nothing to do here
+    # Note that this check is also done in the room update_display function
+    # However there are many debug calls to this function which do not go through it
+    # WARNING: Otherwise we would fill the queue with frames which nobody is ever going to read
+    # WARNING: This would also keep the process alive forever, since the queue is never emptied
+    if not GLOBAL['enabled_display']: return
     # First check if we reached the limkit
     # If so stop here
     if GLOBAL['frame_count'] > GLOBAL['frames_limit']: raise SystemExit('Reached displayed frames limit')

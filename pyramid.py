@@ -6,6 +6,8 @@ from traceback import format_exception
 
 from typing import List, Union, Optional
 
+from auxiliar import GLOBAL
+
 # Get the number of available CPUs
 AVAILABLE_CPUS : int = cpu_count()
 # Set the number of parallel process to launch within reason
@@ -55,6 +57,10 @@ def paralelizer (
     rooms_to_solve : List['Room'],
     verbose : bool = False,
 ) -> bool:
+    # If paralelization is disabled then run the search in this very process
+    # This is meant for debugging, since anything happening in another process can not be displayed
+    if not GLOBAL['enabled_paralelization']:
+        return serial_digger(starting_configuration, rooms_to_solve, verbose)
     # Get the first room as the starting point
     current_room = rooms_to_solve[0]
     # Setup the manager which holds the pyramid of possible room configurations
@@ -124,7 +130,7 @@ def paralelizer (
             # Save the successful configuration in the room which is being solved
             # Note that the configuration was solved in a different process, so it must be pasted
             starting_configuration.paste(result)
-            starting_configuration.update_display(title='Found successful children distribution')
+            starting_configuration.update_display(title=f'Found successful children distribution in {starting_configuration.name}')
             # Now that we have a solution there is no point in keeping the other processes alive
             pool.terminate()
             pool.join()
@@ -139,7 +145,6 @@ def paralelizer (
             # Check if there are CPUs available and, if so, launch a new process
             # Note that the pool cache holds the tasks which have not been completed yet
             running_processes_count = len(pool._cache)
-            print(f'RUNNING PROCESSES {running_processes_count}')
             has_available_cpus = running_processes_count < N_PARALEL
             if has_available_cpus:
                 # Claim a spot as high in the pyramid as possible
@@ -169,13 +174,45 @@ def paralelizer (
                 # Note that the arguments must be picklable, since they are sent to another process
                 # This is the reason why the pyramid is not sent but a proxy to it
                 # Note that the depth tells how high in the pyramid this new search starts
-                print(f'LAUNCHING PROCESS (pyramid depth {depth})')
                 digger_args = (room_copy, child_spot_args, following_rooms, depth)
                 pool.apply_async(digger_task.run, digger_args, error_callback=show_error)
                 continue
             # Await for the next result
             if handle_result(wait_for_result()):
                 return True
+
+# This function runs the very same search, but in this process alone and without paralelizing
+# It is meant for debugging, since diggers running in other processes have their own memory
+# Thus they can not display anything and they can not be stopped with a breakpoint either
+def serial_digger (
+    starting_configuration : 'Room',
+    rooms_to_solve : List['Room'],
+    verbose : bool = False,
+) -> bool:
+    # Get the first room as the starting point
+    current_room = rooms_to_solve[0]
+    # Get the remaining rooms
+    following_rooms = rooms_to_solve[1:]
+    # Set the search
+    # Note that there is no results queue, since the result is returned and not reported
+    # Note that the pyramid is a regular object here and not a proxy to a manager process
+    # No other process claims spots from it, so it is just the digger keeping track of its own levels
+    digger_task = DiggerTask(verbose=verbose, results_queue=None, pyramid=Pyramid())
+    # Iterate the possible places for the first room
+    # Note that a digger explores its whole region on its own, but never above the spot it was given
+    # This is why we must still hand it the spots of the first room one by one
+    for room_copy, child_spot_args in starting_configuration._generate_child_fitting_spots(current_room, verbose):
+        # Dig here and now, instead of launching a process
+        # Note that errors are not caught, so a crash shows its actual traceback and stops everything
+        solved_configuration = digger_task.dig(room_copy, child_spot_args, following_rooms, 0)
+        if solved_configuration:
+            # Save the successful configuration in the room which is being solved
+            # Note that the configuration is a copy of this room, so it must be pasted
+            starting_configuration.paste(solved_configuration)
+            starting_configuration.update_display(title=f'Found successful children distribution in {starting_configuration.name}')
+            return True
+    # If we run out of options then the whole pyramid was explored and we failed
+    return False
 
 # This is what is reported to the main process when one of the paralel processes crashes
 # Note that a crash is not a failure to find a solution, but a bug which must stop the whole process

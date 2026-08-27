@@ -7,6 +7,8 @@ from math import isclose, inf
 GLOBAL = {
     # Set if the display is actually enabled
     'enabled_display': False,
+    # Set if paralelization is enabled
+    'enabled_paralelization': False,
     # Set the number of frames to be displayed before stopping the process
     # This is useful for debugging
     'frames_limit': inf,
