@@ -190,7 +190,7 @@ def get_segments_from_anything (things : list) -> List['Segment']:
         # If it is a rectangle or something with a "crossing segment" getter
         if hasattr(thing, 'get_crossing_segment'):
             thing_segments.append(thing.get_crossing_segment())
-        # If it is a grid or something with a segments
+        # If it is a grid or something with rects
         if hasattr(thing, 'rects'):
             for rect in thing.rects:
                 thing_segments += rect.segments
@@ -230,6 +230,10 @@ def get_segments_from_anything (things : list) -> List['Segment']:
                 # If a segment already has a z attribute then do not overwrite it
                 if hasattr(segment, 'z'): continue
                 segment.z = thing.z
+        # Make sure the new segments inherit the color, if they have it
+        if hasattr(thing, 'color'):
+            for segment in thing_segments:
+                segment.color = thing.color
         total_segments += thing_segments
     return total_segments
 

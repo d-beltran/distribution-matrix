@@ -2150,8 +2150,9 @@ class Boundary:
 # This class is used to handle space inside boundaries
 # Note that a grid may be empty (i.e. the list of rects may be empty)
 class Grid:
-    def __init__(self, rects : List[Rect] = []):
+    def __init__(self, rects : List[Rect] = [], color : Optional[str] = None):
         self._rects = rects
+        self.color = color
         # Check rectangles to match the grid format requirements
         self.check()
         self._max_rects = None
