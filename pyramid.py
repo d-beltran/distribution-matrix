@@ -160,6 +160,7 @@ def paralelizer (
                 # Build the arguments to try this spot out of the claimed distribution
                 # Note that the tried grids are not shared with the process which owns this level
                 # Thus some work may be repeated, but only within this very spot
+                # Sharing them was tried and measured, but asking the manager on every try was way slower
                 next_room = remaining_rooms[0]
                 following_rooms = remaining_rooms[1:]
                 room_copy, child_spot_args = distribution._get_child_spot_args(
@@ -359,6 +360,8 @@ class DiggerTask:
         level_id = self.pyramid.add_level(
             rooms_distribution, remaining_rooms, next_depth, target_parent_grid, fitting_grid)
         # Keep track already tried initial grids so we do not loose time repeating the same
+        # Note that this record is local to this process and it is not shared through the pyramid
+        # Sharing it was tried and measured, but asking the manager on every try was way slower
         tried_fitted_initial_grids = set()
         # Claim spots from our own level until there are no more spots to be claimed
         # Note that a claimed spot is never claimed again, not even by a different process
