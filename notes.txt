@@ -2,8 +2,6 @@ RAM
 
 wave function collapse
 
-cuidao que las escaleras se pueden poner formando discarded grid, hay que ver como se asigna su posición
-
 [si no se dá la situación difícil] recuperar min size para el parent free space porque sino al final pueden quedar huecos que no respeten
 	*** esto lo quité por un problema técnico, por lo visto
 	*** pero es importante, puede quedar fatal justo antes del set_corridor

@@ -4642,7 +4642,7 @@ class Stairs:
     # Here is decided both shape and position of the stair rooms and their doors also considering extra space for the corridor
     # Note that the extra space may not be the same in upper and lower floors
     # Note that this additional space is unserstood as simply an extension of the stair length which keeps the stair width
-    def set_place (self):
+    def set_place (self, debug : bool = True) -> bool:
         # Set the lower and upper floor grids
         # If there is no upper floor then asume the available space will be the lower floor
         lower_floor_grid = self.lower_floor.grid
@@ -4651,7 +4651,8 @@ class Stairs:
             upper_floor_grid = lower_floor_grid
         # Set the additional space length required
         # Note that the additional space width will be the stairs width to avoid difficulties, but length may change
-        required_free_space_length = self.lower_floor.door_args['length']
+        required_lower_space = max(self.lower_floor.door_args['length'], self.lower_floor.min_size)
+        required_upper_space = max(self.upper_floor.door_args['length'], self.upper_floor.min_size)
         # Rectangle with both doors in the same place (e.g. elevators)
         if self.configuration == 0:
             raise SystemExit('Configuration 0 is not yet programmed :(')
@@ -4660,18 +4661,30 @@ class Stairs:
             # Stair may be oriented in any direction and it may tell the difference between fitting or not
             for direction in [ UP, RIGHT, DOWN, LEFT ]:
                 is_vertical = direction.is_vertical()
-                x_size = self.width if is_vertical else self.length + required_free_space_length
-                y_size = self.length + required_free_space_length if is_vertical else self.width
-                x_offset = 0 if is_vertical else required_free_space_length * direction.x # Direction x is to be -1 or 1
-                y_offset = required_free_space_length * direction.y if is_vertical else 0 # Direction y is to be -1 or 1
+                lower_x_size = self.width if is_vertical else self.length + required_lower_space
+                lower_y_size = self.length + required_lower_space if is_vertical else self.width
+                upper_x_size = self.width if is_vertical else self.length + required_upper_space
+                upper_y_size = self.length + required_upper_space if is_vertical else self.width
+                x_offset = 0 if is_vertical else required_lower_space * direction.x # Direction x is to be -1 or 1
+                y_offset = required_lower_space * direction.y if is_vertical else 0 # Direction y is to be -1 or 1
                 # Get both available spaces, lower and upper, taking in count each other
                 lower_available_space, upper_available_space = get_tandem_fitting_grid(
-                    grid_1 = lower_floor_grid, x_fit_size_1 = x_size, y_fit_size_1 = y_size,
-                    grid_2 = upper_floor_grid, x_fit_size_2 = x_size, y_fit_size_2 = y_size,
+                    grid_1 = lower_floor_grid, x_fit_size_1 = lower_x_size, y_fit_size_1 = lower_y_size,
+                    grid_2 = upper_floor_grid, x_fit_size_2 = upper_x_size, y_fit_size_2 = upper_y_size,
                     x_position_offset = x_offset, y_position_offset = y_offset )
                 # Now we must define a random spot in the available lower space and set its equivalent in the upper room
-                lower_spot = next(lower_available_space.generate_fitting_spots(x_size, y_size))
+                # DANI: Aquí la lógica es limitada y no resolverá espacios complejos
+                # DANI: Lo suyo sería usar lower_available_space.generate_fitting_regions_with_margin()
+                # DANI: Sin embargo esta función aún no soporta el "espacio libre ya asignado" de la escalera
+                lower_spot = next(lower_available_space.generate_fitting_spots(lower_x_size, lower_y_size), None)
+                if lower_spot is None: continue
                 upper_spot = lower_spot.get_offset_rect(x_position_offset = x_offset, y_position_offset = y_offset)
+                # Show the current position of the spots if we are to debug
+                if debug:
+                    lower_available_space.color, upper_available_space.color = 'red', 'blue'
+                    lower_spot.color, upper_spot.color = 'orange', 'purple'
+                    elements_to_display = [ lower_available_space, upper_available_space, lower_spot, upper_spot ]
+                    add_frame(elements_to_display, title='Available space to set the stairs')
                 # Now we tell apart the free space from the actual room space
                 x_size_offset = 0 if is_vertical else -self.length
                 y_size_offset = -self.length if is_vertical else 0
@@ -4705,6 +4718,10 @@ class Stairs:
                 self._lower_door = Door(point = lower_door_point, rigid=True)
                 upper_door_point = Point(upper_door_point_x_position, upper_door_point_y_position)
                 self._upper_door = Door(point = upper_door_point, rigid=True)
+                # If we made it this far then it means we successfully placed the stairs
+                return True
+            # If we could not find a single spot in any direction then we surrender
+            return False
         # If the configuration is not recognized then raise an input error
         else:
             raise InputError(f'Stairs configuration {self.configuration} is not defined')
