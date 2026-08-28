@@ -2093,64 +2093,61 @@ class Room:
                         break
 
             # Set the first corridor grid
-            corridor_grid = Grid()
+            # Note that the room may have already some preexsiting corridor grid (e.g. from rigid doors)
+            corridor_grid = Grid() if self._corridor_grid is None else self._corridor_grid
             # It may happen that there are no corridor segments at this point when all rooms are connected by a point
             # This means that either there is a single node (a single room) or the whole corridor is free space
             if len(corridor) > 0:
                 # Generate a boundary around the current corridor path
-                corridor_grid = corridor.get_margined_grid(corridor_size)
+                corridor_grid += corridor.get_margined_grid(corridor_size)
             elif len(current_corridor_nodes) == 1:
                 # If there is just one node then generate a small corridor over the only node
-                corridor_grid = Grid([ generate_point_rect(current_corridor_nodes[0], corridor_size) ])
+                corridor_grid += Grid([ generate_point_rect(current_corridor_nodes[0], corridor_size) ])
             elif len(corridor_free_regions) > 0:
                 # If we have corridor free regions then wait, the grid will be set later on
                 pass
             else:
                 raise RuntimeError('There is something wrong with the corridor backbone')
-            # Display the very first corridor boundary
-            if debug: 
+            # Display the very first corridor boundary, if any
+            if debug and corridor_grid:
                 elements_to_display = corridor_grid.get_perimeter_segments('blue')
                 self.update_display(extra=elements_to_display, title='Displaying first corridor boundary')
 
-            # Set the regions of the corridor which must be removed
+            # Find and fix the regions of the corridor which must be removed
             # e.g. regions out of the parent boundary, in case it is not adaptable
             # e.g. regions over rigid rooms which must not be modified
-            excluding_regions = Grid()
-
-            # Find the regions of the corridor which are out of the parent (self)
-            current_grid = self.grid if self.grid else exterior_polygon.grid
-            out_regions = corridor_grid - current_grid
-
-            # In case we have out regions...
-            if out_regions and not self._child_adaptable_boundary:
-                excluding_regions += out_regions
-
-            # Check also if the corridor overlaps with rigid rooms (rooms which must not be modified)
-            rigid_regions = rigid_grid.get_overlap_grid(corridor_grid) if rigid_grid else None
-
-            # In case we have rigid regions we must exclude them
-            if rigid_regions:
-                excluding_regions += rigid_regions
-
-            # If there are excluding regions then handle them now
-            if excluding_regions:
-            
+            # Once this regions are removed from the corridor, expand if necessary other regions to compensate
+            # Note tha this function may be called more than once
+            def fix_excluding_regions():
+                nonlocal corridor_grid
+                # Sum up all excluding regions
+                excluding_regions = Grid()
+                # Find the regions of the corridor which are out of the parent (self)
+                current_grid = self.grid if self.grid else exterior_polygon.grid
+                out_regions = corridor_grid - current_grid
+                # In case we have out regions...
+                if out_regions and not self._child_adaptable_boundary:
+                    excluding_regions += out_regions
+                # Check also if the corridor overlaps with rigid rooms (rooms which must not be modified)
+                rigid_regions = rigid_grid.get_overlap_grid(corridor_grid) if rigid_grid else None
+                # In case we have rigid regions we must exclude them
+                if rigid_regions:
+                    excluding_regions += rigid_regions
+                # If there are no excluding regions then we are done
+                if not excluding_regions: return
+                # If there are excluding regions then handle them now
                 # Now we must substract excluding regions from the current corridor
                 corridor_grid -= excluding_regions
-
                 # Check the corridor has not been fully consumed
                 if not corridor_grid:
                     raise RuntimeError('Corridor was all in excluding regions')
-
                 # Get the corridor boundary segments
                 corridor_boundaries = corridor_grid.boundaries
                 corridor_boundary_segments = sum([ boundary.segments for boundary in corridor_boundaries ], [])
-
                 # Display the corridor boundaries after excluding regions removal
                 if debug:
                     elements_to_display = [ segment.get_colored_segment('blue') for segment in corridor_boundary_segments ]
                     self.update_display(extra=elements_to_display, title='Displaying corridor boundaries after removing the excluding regions')
-
                 # And now we must expand the corridor regions where we substracted the excluding regions
                 # Otherwise the corridor would have regions which do not respect the minimum size
                 for corridor_boundary in corridor_grid.boundaries:
@@ -2193,6 +2190,8 @@ class Room:
                 if debug:
                     elements_to_display = corridor_grid.get_perimeter_segments('blue')
                     self.update_display(extra=elements_to_display, title='Displaying corridor boundaries after expanding to compensate the removal of excluding regions')
+            # Call the function we just defined
+            fix_excluding_regions()
 
             # Now add the free grid to the corridor grid
             # DANI: Esto tal vez se puede replantear. No es necesario y perdemos la free grid (espacio claimable)
@@ -2245,6 +2244,10 @@ class Room:
             if debug:
                 elements_to_display = corridor_grid.get_perimeter_segments('blue')
                 self.update_display(extra=elements_to_display, title='Displaying corridor boundaries after removing regions not respecting the corridor minimum size')
+
+            # Run another excluding-fixing now
+            # Note that the keep_minimum logic may have expanded some regions over excluding areas
+            fix_excluding_regions()
 
             # Now set the corridor grid officially
             self.corridor_grid += corridor_grid
