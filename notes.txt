@@ -35,9 +35,6 @@ los pasillos conectados a free space a veces quedan mal (cuando entran al free s
 	* solucionará uno de los problemas más habituales de la cruz
 	* intentar que las habitaciones sean más cuadradas
 
-- Enseñarle a salir de bucles
-	* Detectar cuando hay bucles
-
 - Plantearse utilizar el hecho de que una habitación en contacto con free space
 no pueda expandir ninguna frontera con free space (ni simple ni combinada)
 como detonante para que cada una de esta/s regiones de free space sean desplazadas por otra habitación

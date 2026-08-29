@@ -2160,6 +2160,7 @@ class Grid:
         self._columns = None
         self._area = None
         self._boundaries = None
+        self._cksum = None
 
     def __str__ (self) -> str:
         return f'<Grid {self.rects}>'
@@ -3266,6 +3267,24 @@ class Grid:
     def get_perimeter_segments (self, color : str = 'black') -> List[Segment]:
         boundary_segments = sum([ boundary.segments for boundary in self.boundaries ], [])
         return [ segment.get_colored_segment(color) for segment in boundary_segments ]
+
+    # Get a checksum of the grid to compare if two grids are the same in a cheaper way
+    def get_cksum (self) -> str:
+        # If we already have a value then return it
+        if self._cksum is not None:
+            return self._cksum
+        # Otherwise we must localize it
+        n_rects = len(self.rects)
+        if n_rects == 0: return None
+        area = self.area
+        x_min = self.get_x_min()
+        y_min = self.get_y_min()
+        x_max = self.get_x_max()
+        y_max = self.get_y_max()
+        self._cksum = f'{n_rects}-{area}-{x_min}-{y_min}-{x_max}-{y_max}'
+        return self._cksum
+    # Check-sum of the grid
+    cksum = property(get_cksum, None, None, "Check-sum of the grid")
 
 # A path is a group of connected segments
 class Path:

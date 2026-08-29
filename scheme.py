@@ -557,6 +557,8 @@ class Room:
         self._free_grid = None
         self._available_grid = None
         self._rigid_grid = None
+        # Keep track of already tried brother configurations
+        self.already_visited_brother_configurations = set()
         # Set representation parameters
         self.name = name
         self.segments_color = segments_color
@@ -3022,6 +3024,16 @@ class Room:
             raise RuntimeError(f'Trying to fit {self.name} but it has no initial grid/boundary')
         if self.rigid:
             raise RuntimeError(f'Trying to fit {self.name} but it is rigid')
+        # Check if we are trying to fit a distribution already tried before
+        # This prevents ending in a infinite loop
+        # Note that tried distributions are stored in this room and not in the parent
+        # Otherwise it would fail when multiple brothers are asked to compensate after corridor placement 
+        distribution_cksum = self.parent.get_children_distribution_cksum()
+        if distribution_cksum in self.already_visited_brother_configurations:
+            if verbose: print('Already tried configuration -> Go back')
+            return False
+        # Add this new distribution's cksum to the set
+        self.already_visited_brother_configurations.add(distribution_cksum)
         # Calculate how much area we need to expand
         required_area = self.get_required_area(behaviour=behaviour, verbose=verbose)
         # If the area is already satisfied then stop here
@@ -4341,6 +4353,13 @@ class Room:
     # The display flag may be passed in order to generate a dynamic graph to display the solving process
     def solve (self) -> bool:
         return self.solve_children(recursive=True)
+
+    # Get a check-sum of the children rooms distribution in the current time
+    # This allows to know if we are having the same distribution without a full check which may be expensive
+    def get_children_distribution_cksum (self) -> str:
+        children_cksums = [ child.grid.cksum for child in self.children ]
+        total_cksums = [ *children_cksums, self.corridor_grid ]
+        return tuple(total_cksums)
 
     # Make a copy of the current room
     def copy (self) -> 'Room':
