@@ -593,11 +593,8 @@ class Room:
             if self._children_by_names.get(child.name, False):
                 raise InputError(f'Duplicated child name {child.name}')
             self._children_by_names[child.name] = child
-        # Set the children rooms
-        self._children = children
-        # Set every child parent as self to maintain coherence
-        for child in children:
-            child._parent = self
+        # # Set the children rooms
+        self.children = children
         # Check input minimum and maximum area formats to make sense
         for value in [ min_area, max_area ]:
             # A numeric value is accepted
@@ -643,7 +640,7 @@ class Room:
         if self.children:
             # Now set some parameters in children
             for child in self.children:
-                child._post_init(self)
+                child._post_init()
             # If a boundary was passed then check children to fit on it
             if self.area:
                 # Check areas of all children rooms to do not sum up more than the parent area
@@ -654,20 +651,31 @@ class Room:
 
     # Set a function which sets other initial values once the parent has been set
     # This function is called by the parent once it has been initiated
-    def _post_init (self, parent):
+    def _post_init (self):
+        parent = self.parent
         # Set the child adaptable boundary as false, since this is not the root room
         self._child_adaptable_boundary = False
         # In case the parent has a boundary, check this room may fit on it
         if parent.boundary:
             # Check this room is inside the parent boundary, if they have a predefined boundary
             if self.boundary and self.boundary not in parent.grid:
-                raise InputError('The child room "' + self.name + '" is out of the parent boundary')
+                raise InputError(f'The child room "{self.name}" is out of the parent boundary')
             # Check if this rooms minimum size fits in the parent boundary
             if not self.boundary and not parent.does_room_fit(self, force=True):
-                raise InputError('The child room "' + self.name + '" minimum size does not fit in the parent boundary')
+                raise InputError(f'The child room "{self.name}" minimum size does not fit in the parent boundary')
         # If this room (not the root) has a max_corners input parameter
         if self.max_corners:
             raise InputError('Parameter max_corners is supported only in the root room')
+
+    # Set another init which is called once the root has been set
+    # Note that the root has no way to know it is the root, so we use a trick to run this
+    # This is solved the moment any room in the hyerarchy is asked to be solved
+    def _root_init (self):
+        # Set the corridor sizes at this moment
+        self.corridor_size
+        # Call the root init recursively to further children
+        for child in self.children:
+            child._root_init()
 
     # Check if a room fits in this room according to its minimum size
     # Check free space by default and all space if the argument 'force' is passed
@@ -1154,6 +1162,7 @@ class Room:
         if self.parent_building:
             self._min_size = self.parent_building.room_args.get('min_size', None)
             return self._min_size
+        breakpoint()
         raise InputError(f'Cannot find minimum size for room {self.name}. Please, set the minimum size in the root room or the buildings room args')
     min_size = property(get_min_size, None, None, "The room minimum space")
 
@@ -1427,9 +1436,14 @@ class Room:
             return False
         if verbose: print(f'Setting {self.name} child room {child.name} grid succeeded to set inital grid')
         # Proceed with the expansion of this child room until it reaches its forced area
-        if not child.fit_to_required_area(behaviour='conformist', verbose=True):
-            child.grid = None # Reset the room grid
-            return False
+        if not child.fit_to_required_area(behaviour='exigent', verbose=True):
+            if verbose: print(f'Setting {self.name} child room {child.name} grid failed with exigent strategy, retrying as conformist')
+            # If it failed then try again with a different, more conservative strategy
+            child.grid = initial_child_grid # Get the inital grid again
+            if not child.fit_to_required_area(behaviour='conformist', verbose=True):
+                if verbose: print(f'Setting {self.name} child room {child.name} grid failed with conformist strategy as well')
+                child.grid = None # Reset the room grid
+                return False
         if verbose: print(f'Setting {self.name} child room {child.name} grid succeeded to fully fit')
         # We have a successful candidate, so yield
         return True
@@ -2267,7 +2281,7 @@ class Room:
             if not child.truncate_grid(self.corridor_grid, force=True, skip_update_display=True):
                 if verbose: print(f'The space required by the corridor cannot be claimed from {child.name}')
                 return False
-        # Show the relocated doors
+        # Show the early corridor
         self.update_display(title='Displaying early corridor')
 
         # Discarded spots may be generated while placing the early corridor
@@ -4074,11 +4088,12 @@ class Room:
             # If we must force fit the expansion then claim as much extra space as needed to fit the new expansion
             if force:
                 self.grid = backup[self]
-                self.grid = self.parent.free_grid.force_fit(new_grid, self.min_size, self.min_size, expand=True)
+                forced_grid = self.parent.free_grid.force_fit(new_grid, self.min_size, self.min_size, expand=True)
                 # If we failed to fit the grid then surrender
-                if type(self.grid) is Exception:
+                if type(forced_grid) is Exception:
                     if verbose: print(f'Expanding grid of room {self.name} at {expansion_grid} failed when force fitting parent room')
                     return False
+                self.grid = forced_grid
             else:
                 if verbose:
                     print(f'Expanding grid of room {self.name} at {expansion_grid} failed:')
@@ -4352,6 +4367,10 @@ class Room:
     # Solve room distributions
     # The display flag may be passed in order to generate a dynamic graph to display the solving process
     def solve (self) -> bool:
+        # Run the final init of the rooms now that the fully hyerarchy is stablished
+        root = self.get_root_room()
+        root._root_init()
+        # Now run the solving logic
         return self.solve_children(recursive=True)
 
     # Get a check-sum of the children rooms distribution in the current time

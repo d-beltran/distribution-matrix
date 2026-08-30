@@ -1,5 +1,5 @@
 from typing import Union, Generator, Optional
-from math import isclose, inf
+from math import inf
 
 # Auxiliar functions widely used along the whole code
 
@@ -38,26 +38,20 @@ def resolute(num, base_offset = 0):
 # Calculate the minimum resolution
 # i.e. changes below this resolution make no sense
 minimum_resolution = 1 / 10 ** base_resolution
+test_difference = minimum_resolution / 2
 # Set functions to compare float according to the minimum resolution
+# Note that we always add or susbstract half the minimum resolution
+# Otherwise the float error could make some comparisions fail when their difference is exactly the minimum resultion
 def equal (a : float, b : float) -> bool:
-    return a < b + minimum_resolution and a > b - minimum_resolution
+    return a < b + test_difference and a > b - test_difference
 def greater (a : float, b : float) -> bool:
-    return a > b + minimum_resolution
+    return a > b + test_difference
 def lower (a : float, b : float) -> bool:
-    return a < b - minimum_resolution
+    return a < b - test_difference
 def equal_or_greater (a : float, b : float) -> bool:
     return equal(a, b) or greater(a, b)
 def equal_or_lower (a : float, b : float) -> bool:
     return equal(a, b) or lower(a, b)
-
-# Set another function to check if two numbers are very close, out of resolution matters
-# We do the double check because the 'isclose' function may fail for values close to 0
-# see https://stackoverflow.com/questions/35324893/using-math-isclose-function-with-values-close-to-0
-def same_number(a : number, b : number) -> bool:
-    # DANI: Esto debería funcionar siempre pero son 4 operaciones
-    #return isclose(a,b) or isclose(a+1,b+1)
-    # Esto debería funcionar bien
-    return isclose(a,b, abs_tol=minimum_resolution)
 
 # Just for better display
 def round_to_hundredths (number : number) -> number:

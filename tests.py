@@ -107,6 +107,7 @@ test_room_1 = Room(
         Point(100,40),
         Point(100,0),
     ])),
+    min_size=10,
     corridor_size=7,
     door_args={
         'width': 5,
@@ -333,7 +334,7 @@ test_building_1 = Building(
     room_args = { 'height': 20 }
 )
 
-# Apartments with 4 floors, no extra free space, first upper floor is copied upwards
+# Test
 test_building_2 = Building(
     room_args = { 'height': 20, 'corridor_size': 10, 'min_size': 20 },
     floors = {
@@ -389,5 +390,150 @@ test_building_2 = Building(
                     ]),
             ]
         )
+    },
+)
+
+# Apartments with multiple floors, no extra free space, first upper floor is copied upwards
+test_building_3 = Building(
+    room_args = { 'height': 20, 'corridor_size': 10, 'min_size': 20 },
+    floors = {
+        0: Room(
+            name='Primera planta',
+            min_area=15000,
+            max_area=15000,
+            max_corners = 6,
+            children = [
+                Room(
+                    name='Sala de mantenimiento',
+                    min_area=800,
+                    max_area=1000,
+                    fill_color='blue'
+                ),
+                Room(
+                    name='Sala de máquinas',
+                    min_area=1000,
+                    max_area=1200,
+                    fill_color='green'
+                ),
+            ]
+        ),
+        1: Room(
+            name='Segunda planta',
+            children = [
+                Room(
+                    name='Apartamento A',
+                    min_area='40%',
+                    max_area='60%',
+                    fill_color='red',
+                    children=[
+                        Room(
+                            name='Cocina',
+                            min_area='10%',
+                            max_area='25%',
+                            fill_color='purple'),
+                        Room(
+                            name='Comedor',
+                            min_area='12%',
+                            max_area='45%',
+                            fill_color='orange'),
+                        Room(
+                            name='Habitación',
+                            min_area='10%',
+                            max_area='18%',
+                            fill_color='blue'),
+                        Room(
+                            name='Lavabo',
+                            min_area='08%',
+                            max_area='12%',
+                            fill_color='green')
+                    ]),
+                Room(
+                    name='Apartamento B',
+                    min_area='40%',
+                    max_area='60%',
+                    fill_color='red',
+                    children=[
+                        Room(
+                            name='Cocina',
+                            min_area='10%',
+                            max_area='25%',
+                            fill_color='purple'),
+                        Room(
+                            name='Comedor',
+                            min_area='12%',
+                            max_area='45%',
+                            fill_color='orange'),
+                        Room(
+                            name='Habitación',
+                            min_area='10%',
+                            max_area='18%',
+                            fill_color='blue'),
+                        Room(
+                            name='Lavabo',
+                            min_area='08%',
+                            max_area='12%',
+                            fill_color='green')
+                    ]),
+            ]
+        ),
+        # 2: Room(
+        #     name='Tercera planta',
+        #     children = [
+        #         Room(
+        #             name='Apartamento A',
+        #             min_area='40%',
+        #             max_area='60%',
+        #             fill_color='red',
+        #             children=[
+        #                 Room(
+        #                     name='Cocina',
+        #                     min_area='10%',
+        #                     max_area='25%',
+        #                     fill_color='purple'),
+        #                 Room(
+        #                     name='Comedor',
+        #                     min_area='12%',
+        #                     max_area='45%',
+        #                     fill_color='orange'),
+        #                 Room(
+        #                     name='Habitación',
+        #                     min_area='10%',
+        #                     max_area='18%',
+        #                     fill_color='blue'),
+        #                 Room(
+        #                     name='Lavabo',
+        #                     min_area='08%',
+        #                     max_area='12%',
+        #                     fill_color='green')
+        #             ]),
+        #         Room(
+        #             name='Apartamento B',
+        #             min_area='40%',
+        #             max_area='60%',
+        #             fill_color='red',
+        #             children=[
+        #                 Room(
+        #                     name='Cocina',
+        #                     min_area='10%',
+        #                     max_area='25%',
+        #                     fill_color='purple'),
+        #                 Room(
+        #                     name='Comedor',
+        #                     min_area='12%',
+        #                     max_area='45%',
+        #                     fill_color='orange'),
+        #                 Room(
+        #                     name='Habitación',
+        #                     min_area='10%',
+        #                     max_area='18%',
+        #                     fill_color='blue'),
+        #                 Room(
+        #                     name='Lavabo',
+        #                     min_area='08%',
+        #                     max_area='12%',
+        #                     fill_color='green')
+        #             ]),
+        #     ]
+        # ),
     },
 )

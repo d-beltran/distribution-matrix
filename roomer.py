@@ -23,7 +23,7 @@ if __name__ == '__main__':
 
     #test = test_room_1
     #test = test_building_1
-    test = test_building_2
+    test = test_building_3
 
     # Record the current time so we can then calculate how much time it took to run all the process
     start_time = time()
@@ -36,6 +36,13 @@ if __name__ == '__main__':
             print('Done :)')
         else:
             print('Failed :(')
+    # An input error means the problem itself can not be solved as it was defined
+    # Note that it is caught apart so it is clearly reported and not mistaken for a crash
+    # Note that it inherits from SystemExit, so otherwise it would kill the script silently
+    # WARNING: Its message would be printed by python through stderr, while the whole log goes to stdout
+    # WARNING: Thus it would show up misplaced among thousands of lines and it would be missed
+    except InputError as error:
+        print(f'Input error: {error}')
     except Exception as e:
         print_exc()
 

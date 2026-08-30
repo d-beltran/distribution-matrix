@@ -95,7 +95,7 @@ class Vector:
 
     def __eq__(self, other):
         if isinstance(other, self.__class__):
-            return same_number(self.x, other.x) and same_number(self.y, other.y)
+            return equal(self.x, other.x) and equal(self.y, other.y)
         return False
 
     def __hash__(self):
@@ -149,7 +149,7 @@ class Vector:
         return sqrt( self.x**2 + self.y**2 )
 
     def get_slope (self) -> Optional[number]:
-        if same_number(self.x, 0):
+        if equal(self.x, 0):
             return None
         return self.y / self.x
 
@@ -162,10 +162,10 @@ class Vector:
 
     # Find out if the vector is totally vertical
     def is_vertical (self) -> bool:
-        return same_number(self.x, 0)
+        return equal(self.x, 0)
     # Find out if the segment is totally horizontal
     def is_horizontal (self) -> bool:
-        return same_number(self.y, 0)
+        return equal(self.y, 0)
 
     # Find out if the segment is diagonal
     def is_diagonal (self) -> bool:
@@ -174,8 +174,8 @@ class Vector:
     # Find out if two vectors are equivalent
     # i.e. they have the same direction and magnitude, no matter the sense
     def is_equivalent_to (self, other : 'Vector') -> bool:
-        same_slope = same_number(self.get_slope(), other.get_slope())
-        same_magnitude = same_number(self.get_magnitude(), other.get_magnitude())
+        same_slope = equal(self.get_slope(), other.get_slope())
+        same_magnitude = equal(self.get_magnitude(), other.get_magnitude())
         return same_slope and same_magnitude
 
     # Get the angle between this vector and other vector
@@ -424,7 +424,7 @@ class Segment(Line):
             # Now that we know the point is in the line, check if it is between both segment points
             distance1 = self.a.get_distance_to(other)
             distance2 = self.b.get_distance_to(other)
-            return same_number(distance1 + distance2, self.length)
+            return equal(distance1 + distance2, self.length)
         if isinstance(other, self.__class__):
             return other.a in self and other.b in self
         return False
@@ -2556,6 +2556,9 @@ class Grid:
                     left = min(sample_point.x, projected_point.x)
                     right = max(sample_point.x, projected_point.x)
                 else: raise ValueError('This function does not support diagonals')
+                # Make sure the rect is correct
+                if equal_or_greater(left, right) or equal_or_greater(bottom, top):
+                    raise RuntimeError(f'Segment "{segment}" is too short or inexistent')
                 # Set the margin region
                 margin_region = Rect(x_min = left, y_min = bottom, x_max = right, y_max = top)
                 margin_grid = Grid([margin_region])
