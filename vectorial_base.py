@@ -2986,6 +2986,16 @@ class Grid:
             compensated_grid = compensated_corridor.get_margined_grid(all_inside)
             return compensated_grid
 
+    # Check if the grid would fit another grid while respecting a minimum margin
+    def does_grid_fit (self, other : 'Grid', minimum : number) -> bool:
+        new_grid = self - other
+        return new_grid.check_minimum(minimum)
+
+    # Check if the grid would fit a rect while respecting a minimum margin
+    def does_rect_fit (self, rect : Rect, minimum : number) -> bool:
+        rect_grid = Grid([rect])
+        return self.does_grid_fit(rect_grid, minimum)
+
     # One by one for each *available rectangle, where available rectangles are the splitted rectangles
     # Get as many rectanges as possible which are connected horizontally to the current rectangle
     # Get as many rows of rectangles as possible which are connected vertically to all previous rectangles

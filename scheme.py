@@ -673,6 +673,12 @@ class Room:
     def _root_init (self):
         # Set the corridor sizes at this moment
         self.corridor_size
+        # Make sure minimum size of children are no larger than parent minimum size
+        # This condition is very important, otherwise it could be impossible fitting a child after
+        # Plus if there where regions where children can not fit and regions where they can it would be more complicated
+        free_limit = self.get_free_limit()
+        if self.min_size and lower(self.min_size, free_limit):
+            raise InputError(f'Room {self.name} has a minimum size of {self.min_size} but at least one of its children has a more restrictive minimum size ({free_limit})')
         # Call the root init recursively to further children
         for child in self.children:
             child._root_init()
@@ -737,7 +743,6 @@ class Room:
             self.reset_rigid_grid()
             self.reset_discarded_grid()
         if child_room.doors:
-            print(child_room)
             child_room.reserve_doors_parent_required_space()
 
     # Get the brother rooms
@@ -1273,7 +1278,13 @@ class Room:
     # The room height
     height = property(get_height, set_height, None, "The room height")
 
-    # Parent free limit is the maximum min size of all other rooms: the parent and the brothers
+    # The free limit is the maximum min size of all other rooms: the parent and the brothers
+    def get_free_limit(self) -> number:
+        # Configure the child room to respect the parent free min size limit according to its brothers
+        all_min_sizes = [ self.min_size ] + [ child.min_size for child in self.children ]
+        return max(all_min_sizes)
+
+    # Parent free limit is the maximum min size of all other rooms: the parent and the brothers, but not this room
     def get_parent_free_limit(self) -> number:
         # Configure the child room to respect the parent free min size limit according to its brothers
         other_rooms = [ self.parent ] + [ brother for brother in self.get_brother_rooms()]
@@ -4716,7 +4727,12 @@ class Stairs:
                 # DANI: Sin embargo esta función aún no soporta el "espacio libre ya asignado" de la escalera
                 lower_spot = next(lower_available_space.generate_fitting_spots(lower_x_size, lower_y_size), None)
                 if lower_spot is None: continue
+                # Make sure the lower spot respects the minimum size
+                if not lower_available_space.does_rect_fit(lower_spot, self.lower_floor.min_size): continue
+                # Get the corresponding upper spot
                 upper_spot = lower_spot.get_offset_rect(x_position_offset = x_offset, y_position_offset = y_offset)
+                # Make sure the upper spot fits as well
+                if not upper_available_space.does_rect_fit(upper_spot, self.upper_floor.min_size): continue
                 # Show the current position of the spots if we are to debug
                 if debug:
                     lower_available_space.color, upper_available_space.color = 'red', 'blue'
