@@ -1450,7 +1450,7 @@ class Room:
         if not child.fit_to_required_area(behaviour='exigent', verbose=True):
             if verbose: print(f'Setting {self.name} child room {child.name} grid failed with exigent strategy, retrying as conformist')
             # If it failed then try again with a different, more conservative strategy
-            child.grid = initial_child_grid # Get the inital grid again
+            # Note that the previous failure will recover a backup with the fitted initial grid, so there is no need to set it here
             if not child.fit_to_required_area(behaviour='conformist', verbose=True):
                 if verbose: print(f'Setting {self.name} child room {child.name} grid failed with conformist strategy as well')
                 child.grid = None # Reset the room grid
