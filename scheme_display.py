@@ -17,12 +17,9 @@ warnings.filterwarnings("ignore")
 from auxiliar import GLOBAL
 
 # Set a list with all system values at each recorded step
-frames = []
+global_frames = []
 # Set a queue for the frames, since they are passed to a process
-queue = Queue()
-
-# Track any time the previous slider value
-previous_slider_value = None
+frames_queue = Queue()
 
 # Updater called from the system
 def add_frame (data : list, title : Optional[str] = None):
@@ -36,7 +33,7 @@ def add_frame (data : list, title : Optional[str] = None):
     # If so stop here
     if GLOBAL['frame_count'] > GLOBAL['frames_limit']: raise SystemExit('Reached displayed frames limit')
     display_message = title if title else 'No title'
-    print(f' [ frame {len(frames)} ] - {display_message}')
+    print(f' [ frame {len(global_frames)} ] - {display_message}')
     if type(data) != list:
         data = [data]
     # Remove duplicates
@@ -46,9 +43,9 @@ def add_frame (data : list, title : Optional[str] = None):
     # This is for the fillings only, to add color
     rects = get_rects_from_anything(data)
     traced = [ element for element in data if hasattr(element, 'name') ]
-    frames.append((segments, rects, traced, display_message))
+    global_frames.append((segments, rects, traced, display_message))
     GLOBAL['frame_count'] += 1
-    queue.put(frames)
+    frames_queue.put(global_frames)
 
 # Show the heatmap
 def represent (queue):
@@ -65,9 +62,9 @@ def represent (queue):
     axslider = plt.axes([0.25, .03, 0.50, 0.02])
     slider = Slider(axslider, label='Frame', valmin=0, valmax=len(frames), valinit=len(frames), valstep=1, valfmt='%0.0f')
 
+    # Functions for when the user clicks in the previous/next arrows
     def previous_frame (event):
         slider.set_val(slider.val - 1)
-
     def next_frame (event):
         slider.set_val(slider.val + 1)
 
@@ -82,13 +79,27 @@ def represent (queue):
     ax.set_title('(empty)', y=-0.15)
     fig.subplots_adjust(bottom=0.18)
 
+    # Track any time the previous slider value
+    previous_slider_value = None
+    # Keep trak of the queue size
+    # Thus if the size has not changed we can skip the update
+    # This is usefult at the end, when the main process is over but the display is still alive
+    previous_frame_count = 0
+
     # Animation updater
     def update_frame (i):
-        global frames
-        global previous_slider_value
+        nonlocal frames
+        nonlocal previous_slider_value
+        nonlocal previous_frame_count
         # Update frames when the queue is not empty
-        if queue.qsize() > 0:
+        frame_count = queue.qsize()
+        # If the number the frames has raisen then we must get the new frames
+        # Also make sure to not get the frames when the queue is empty
+        if frame_count > previous_frame_count:
             frames = queue.get()
+            previous_frame_count = frame_count
+            
+        # Set the slider range
         minimum = 0
         maximum = len(frames) - 1
         # Update the slider val in case it is out of minimum/maximum range
@@ -112,7 +123,7 @@ def represent (queue):
         slider_value = int(slider.val)
         if slider_value == previous_slider_value:
             return
-
+        # Update the tracked slider value
         previous_slider_value = slider_value
 
         # Clear previous segments and rects
@@ -176,8 +187,8 @@ def setup_display (frames_limit : Optional[int] = None):
     if frames_limit != None:
         GLOBAL['frames_limit'] = frames_limit
     # Start the display logic
-    queue.put(frames)
-    p = Process(target=represent, args=(queue, ))
+    frames_queue.put(global_frames)
+    p = Process(target=represent, args=(frames_queue, ))
     p.start()
 
 # --------------------------------------------------------------------------------------------------
