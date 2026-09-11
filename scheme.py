@@ -492,7 +492,9 @@ class Door:
             reverse = self.reverse,
             room = self.room,
         )
-        
+
+# Set a flag for the default behaviour when fitting a room to a target area
+DEFAULT_BEHAVIOUR = 'def'
         
 # A room is a smart boundary that may contain other boundaries with conservative areas and size restrictions
 class Room:
@@ -507,6 +509,10 @@ class Room:
         max_area : Optional[Union[number, str]] = None,
         # Minimum size in both x and y dimensions
         min_size : Optional[number] = None,
+        # Set the default behaviour for this room when trying to fit in its parent
+        # This tells its policy when trying to reach its target area
+        # Accepted arguments are 'exigent', 'conformist', 'greedy' and 'humble'
+        area_fitting_behaviour : str = 'exigent',
         # Set if the room boundary may me modified
         # It is true by default when an input boundary is passed
         # It is false by default otherwise
@@ -611,6 +617,8 @@ class Room:
         # Set the internal values for minimum and maximum areas
         self.input_min_area = min_area
         self.input_max_area = max_area
+        # Set the default behaviour for this room when fbeing fitted to a target area
+        self.area_fitting_behaviour = area_fitting_behaviour
         # Set the internal value for the expected final area
         self._target_area = None
         # Set the maximum number of corners
@@ -1447,9 +1455,15 @@ class Room:
             return False
         if verbose: print(f'Setting {self.name} child room {child.name} grid succeeded to set inital grid')
         # Proceed with the expansion of this child room until it reaches its forced area
-        if not child.fit_to_required_area(behaviour='exigent', verbose=True):
-            if verbose: print(f'Setting {self.name} child room {child.name} grid failed with exigent strategy, retrying as conformist')
-            # If it failed then try again with a different, more conservative strategy
+        if not child.fit_to_required_area(verbose=True):
+            chill_behaviour = child.area_fitting_behaviour
+            if verbose: print(f'Setting {self.name} child room {child.name} grid failed with {chill_behaviour} strategy')
+            # If it failed then try again with a different, more conservative/conformist strategy
+            # If the default strategy was conformist already then we are done
+            if chill_behaviour == 'conformist':
+                child.grid = None # Reset the room grid
+                return False
+            if verbose: print(' Retrying with a conformist strategy')
             # Note that the previous failure will recover a backup with the fitted initial grid, so there is no need to set it here
             if not child.fit_to_required_area(behaviour='conformist', verbose=True):
                 if verbose: print(f'Setting {self.name} child room {child.name} grid failed with conformist strategy as well')
@@ -2540,6 +2554,7 @@ class Room:
                         towards_point = next((point for point in available_segment.points if point in corridor_outside_corners), None)
                         # This should never happen, theorically
                         if not towards_point:
+                            print(f'There is a problem with {available_segment}')
                             raise ValueError('There is not a point which is in the corridor segment and another which is not, as expected')
                         # Get the other point
                         other_point = next(point for point in available_segment.points if point != towards_point)
@@ -2728,7 +2743,7 @@ class Room:
                     self.restore_grid_backup(backup, title='Restored grid backup while reducing corners')
                     continue
                 # Relocate children to fit in the new boundary
-                truncated_children = [ child for child in self.children if not child.is_fit_to_required_area(behaviour='exigent')  ]
+                truncated_children = [ child for child in self.children if not child.is_fit_to_required_area()  ]
                 child_conflict = False
                 for child in truncated_children:
                     if not child.fit_to_required_area():
@@ -2933,7 +2948,7 @@ class Room:
                         self.restore_grid_backup(backup, title='Restored grid backup while reducing children corners')
                         continue
                     # Relocate children to fit in the new boundary
-                    truncated_children = [ child for child in self.children if not child.is_fit_to_required_area(behaviour='exigent')  ]
+                    truncated_children = [ child for child in self.children if not child.is_fit_to_required_area()  ]
                     child_conflict = False
                     for child in truncated_children:
                         # Save a backup of the current child in case we have to recover its boundary later
@@ -3032,7 +3047,9 @@ class Room:
         raise ValueError(f'Not supported behaviour: {behaviour}')        
 
     # Check if this room is already fit to its required area
-    def is_fit_to_required_area (self, behaviour : str) -> bool:
+    def is_fit_to_required_area (self, behaviour : str = DEFAULT_BEHAVIOUR) -> bool:
+        # If the behaviour is set to default then use the room default behaviour
+        if behaviour == DEFAULT_BEHAVIOUR: behaviour = self.area_fitting_behaviour
         required_area = self.get_required_area(behaviour=behaviour)
         # print(f'Fitting {self.name} to target area: {self.min_area} - {self.max_area}')
         # print(f'  Current area: {self.area} -> Required area: {required_area}')
@@ -3044,7 +3061,7 @@ class Room:
     # Restricted segments are segments which must remain as are
     def fit_to_required_area (self,
         restricted_segments : list = [],
-        behaviour : str = 'default',
+        behaviour : str = DEFAULT_BEHAVIOUR,
         verbose : bool = True,
         _recursion_depth : int = 0,
     ) -> bool:
@@ -3053,8 +3070,8 @@ class Room:
         # If we reach a certain recursion depth then we surrender
         # This way we avoid entering in infinite loops of pushes between the same rooms
         if _recursion_depth > 5: return False
-    def fit_to_required_area (self, restricted_segments : list = [], behaviour : str = 'exigent', verbose : bool = False) -> bool:
-        if verbose: print(f'Fitting {self.name}')
+        # If the behaviour is set to default then use the room default behaviour
+        if behaviour == DEFAULT_BEHAVIOUR: behaviour = self.area_fitting_behaviour
         if verbose: print(f'Fitting {self.name} (recursion depth {_recursion_depth})')
         # A room with no initial boundary/grid is not to be fitted
         if not self.grid:
