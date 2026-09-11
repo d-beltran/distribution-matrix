@@ -1633,17 +1633,25 @@ class Room:
         path_rigid_rooms = [ room for room in self.children if room.rigid ]
         if not self._child_adaptable_boundary:
             path_rigid_rooms.append(self)
+        # Check if the parent has rigid doors
+        parent_has_rigid_doors = len([ door for door in self.doors if door.rigid ]) > 0
         # Find which rooms are in contact to each node and if nodes are in the exterior boundary
         # Find also which nodes are doors
         for node_point, node_data in nodes.items():
             # First find the node rooms
             rooms = set()
             for child in self.children:
-                if not child.boundary:
-                    continue
+                # Children with no boundary are skipped
+                # DANI: Esto puede pasar?
+                if not child.boundary: continue
+                # If the child has rigid doors then reaching its exterior polygon is not enough to include the room in the corridor
+                child_has_rigid_doors = len([ door for door in child.doors if door.rigid ]) > 0
+                if child_has_rigid_doors: continue
+                # Otherwise check if the node is in the exterior polygon of the child
                 if node_point in child.boundary.exterior_polygon:
                     rooms.add(child)
-            if node_point in exterior_polygon:
+            # Same logic with the oarent
+            if not parent_has_rigid_doors and node_point in exterior_polygon:
                 rooms.add(self)
             node_data['rooms'] = list(rooms)
             # Now find out if it is a door
@@ -2025,14 +2033,14 @@ class Room:
         # if is_corridor_splitted:
         #     pass
 
+        # Display the current corridor
+        elements_to_display = [ segment.get_colored_segment('red') for segment in current_corridor ]
+        self.update_display(extra=elements_to_display, title='Display the corridor backbone')
+
         # Check the current corridor contains al nodes at this point
         current_rooms = set(sum([ nodes[point]['rooms'] for point in current_corridor_nodes ],[]))
         if not is_corridor_finished(current_rooms, current_corridor_nodes):
             raise ValueError('Failed to set the corridor')
-
-        # Display the current corridor
-        elements_to_display = [ segment.get_colored_segment('red') for segment in current_corridor ]
-        self.update_display(extra=elements_to_display, title='Display the corridor backbone')
 
         # Return all the results inside a dict
         # It will include not only the backbone but also other intenral varibales which my be used further
