@@ -3042,8 +3042,20 @@ class Room:
     # Expand or contract this room until it reaches the forced area
     # In case it is not able to fit at some point recover the original situation
     # Restricted segments are segments which must remain as are
+    def fit_to_required_area (self,
+        restricted_segments : list = [],
+        behaviour : str = 'default',
+        verbose : bool = True,
+        _recursion_depth : int = 0,
+    ) -> bool:
+        # Add 1 to the recursion depth
+        _recursion_depth += 1
+        # If we reach a certain recursion depth then we surrender
+        # This way we avoid entering in infinite loops of pushes between the same rooms
+        if _recursion_depth > 5: return False
     def fit_to_required_area (self, restricted_segments : list = [], behaviour : str = 'exigent', verbose : bool = False) -> bool:
         if verbose: print(f'Fitting {self.name}')
+        if verbose: print(f'Fitting {self.name} (recursion depth {_recursion_depth})')
         # A room with no initial boundary/grid is not to be fitted
         if not self.grid:
             raise RuntimeError(f'Trying to fit {self.name} but it has no initial grid/boundary')
@@ -3102,7 +3114,7 @@ class Room:
                     # Get the most suitable frontier to expand and try to expand it
                     # If the expansions fails, try with the next one
                     for frontier, loan_permission in self.get_best_frontiers(restricted_segments, verbose=verbose):
-                        if self.expand_frontier(frontier, required_area, loan_permission, behaviour=behaviour, verbose=verbose):
+                        if self.expand_frontier(frontier, required_area, loan_permission, behaviour=behaviour, verbose=verbose, _recursion_depth=_recursion_depth):
                             return True
                     return False
                 # Expand
@@ -3119,7 +3131,7 @@ class Room:
                     # DANI: De momento uso la misma lógica que la de la expansión porque no va mal
                     # DANI: i.e. evitar contraer fronteras del padre y priorizar fronteras libres es bueno
                     for frontier, loan_permission in self.get_best_frontiers(restricted_segments, contraction=True, verbose=verbose):
-                        if self.contract_frontier(frontier, -required_area, verbose=verbose):
+                        if self.contract_frontier(frontier, -required_area, verbose=verbose, _recursion_depth=_recursion_depth):
                             return True
                     return False
                 # Contract
@@ -3382,6 +3394,7 @@ class Room:
         easy : bool = False,
         check_parent_free_grid : bool = True,
         verbose : bool = False,
+        _recursion_depth : int = 0,
     ) -> bool:
         if verbose: print(f'Pushing boundary segment {segment}')
         # Get the push direction
@@ -3404,7 +3417,7 @@ class Room:
         new_rect = Rect.from_segments([segment, new_side])
         # Make a grid out of the new rect and expand the grid
         new_grid = Grid([new_rect])
-        return self.expand_grid(new_grid, is_loaned=is_loaned, behaviour=behaviour, easy=easy, check_parent_free_grid=check_parent_free_grid, force=is_loaned)
+        return self.expand_grid(new_grid, is_loaned=is_loaned, behaviour=behaviour, easy=easy, check_parent_free_grid=check_parent_free_grid, force=is_loaned, _recursion_depth=_recursion_depth)
     
     # Pull a segment in the boundary
     # Check everything is fine after the pull and, if so, return True
@@ -3415,6 +3428,7 @@ class Room:
         force_child_truncation : bool = False,
         check_parent_free_grid : bool = True,
         verbose : bool = False,
+        _recursion_depth : int = 0,
     ) -> bool:
         if verbose: print(f'Pulling boundary segment {segment}')
         # Get the pull direction
@@ -3430,7 +3444,7 @@ class Room:
         # Make a grid out of the new rect
         removed_region = Grid([new_rect])
         # Truncate self grid
-        return self.truncate_grid(removed_region, force=force_child_truncation, check_parent_free_grid=check_parent_free_grid, verbose=verbose)
+        return self.truncate_grid(removed_region, force=force_child_truncation, check_parent_free_grid=check_parent_free_grid, verbose=verbose, _recursion_depth=_recursion_depth)
 
     # Try to expand a specific room frontier
     # Note that the frontier must contain the room it belongs to
@@ -3442,6 +3456,7 @@ class Room:
         allowed_loan_push : bool = False,
         behaviour : str = 'exigent',
         verbose : bool = False,
+        _recursion_depth : int = 0,
     ) -> bool:
         if verbose: print(f'Expanding frontier {frontier}')
         # Set the push segment protocol according to the loan permission
@@ -3604,7 +3619,7 @@ class Room:
             # Now that we have the definitive push length, we actually push the segment
             is_loaned = protocol == 3
             if not self.push_boundary_segment(pushed_segment, push_length, behaviour=behaviour,
-                is_loaned=is_loaned, verbose=verbose):
+                is_loaned=is_loaned, verbose=verbose, _recursion_depth=_recursion_depth):
                 # If the push failed with a greedy push then try a conservative push
                 if protocol == 1:
                     return push_segment(pushed_segment, 2, verbose=verbose)
@@ -3683,7 +3698,7 @@ class Room:
     # Note that the frontier must contain the room it belongs to
     # Set the required (maximum) area it can contract
     # Return True if the contraction was succesful or False if there was no contraction
-    def contract_frontier (self, frontier : Segment, required_area : number, verbose : bool = False) -> bool:
+    def contract_frontier (self, frontier : Segment, required_area : number, verbose : bool = False, _recursion_depth : int = 0) -> bool:
         if verbose: print(f'Contracting frontier {frontier}')
         # Find the maximum rectangles which are in contact with our frontier
         grid = self.grid
@@ -3766,7 +3781,7 @@ class Room:
                 #print('WARNING: The pull length is too small: ' + str(pull_length))
                 return False
             # We must substract the new rect from this room and check everything is fine after
-            if not self.pull_boundary_segment(pulled_segment, pull_length):
+            if not self.pull_boundary_segment(pulled_segment, pull_length, _recursion_depth=_recursion_depth):
                 # If the pull failed with the greedy protocol then try it again with the moderate protocol
                 # Pass the already tried length so the pull is not repeated
                 if protocol != 2:
@@ -3921,7 +3936,8 @@ class Room:
         easy : bool = False,
         check_parent_free_grid : bool = True,
         skip_update_display : bool = False,
-        verbose : bool = False
+        verbose : bool = False,
+        _recursion_depth : int = 0,
     ) -> bool:
         if verbose: print(f'Truncating {self.name}')
         grid = self.grid
@@ -3980,7 +3996,7 @@ class Room:
             # Save a backup of the current child in case we have to recover its boundary later
             child_grid_backup = child.grid
             # Truncate the child grid
-            if not child.truncate_grid(removed_region, force=force, check_parent_free_grid=check_parent_free_grid):
+            if not child.truncate_grid(removed_region, force=force, check_parent_free_grid=check_parent_free_grid, _recursion_depth=_recursion_depth):
                 # If the truncate process failed then restore backups and return True
                 self.restore_grid_backup(backup, title='Restored grid backup while truncating')
                 return False
@@ -4021,7 +4037,7 @@ class Room:
             # If not then try to expand the truncated room accordingly to the truncated region to make it respect the minimum
             else:
                 compensation_grid = self.grid.get_compensation_grid(region, self.min_size)
-                if not self.expand_grid(compensation_grid, check_parent_free_grid=check_parent_free_grid):
+                if not self.expand_grid(compensation_grid, check_parent_free_grid=check_parent_free_grid, _recursion_depth=_recursion_depth):
                     if verbose: print(' Failed to truncate grid: The room would not respect minimum size and it can not be compensated -> Restoring backup')
                     self.restore_grid_backup(backup, title='Restored grid backup while truncating')
                     return False
@@ -4058,7 +4074,8 @@ class Room:
         is_loaned : bool = False,
         behaviour : str = 'exigent',
         easy : bool = False,
-        verbose : bool = False
+        verbose : bool = False,
+        _recursion_depth : int = 0,
     ) -> bool:
         if verbose: print(f'Expanding grid from room {self.name} at {expansion_grid}')
         new_grid = None
@@ -4119,7 +4136,7 @@ class Room:
             # If parent boundaries are flexible then we must expand the parent grid as well
             if self.parent._child_adaptable_boundary:
                 # If parent grid can not be expanded then go back
-                if not self.parent.expand_grid(expansion_grid):
+                if not self.parent.expand_grid(expansion_grid, _recursion_depth=_recursion_depth):
                     if verbose:
                         print(f'Expanding grid of room {self.name} at {expansion_grid} failed:')
                         print('  Parent grid failed to expand -> Restoring backup')
@@ -4166,7 +4183,7 @@ class Room:
                 # We do not save it yet to the bacup object since the grid would be backed up automatically if failed to truncate the grid
                 brother_grid_backup = brother_room.grid
                 # Try to truncate the brother room grid
-                if not brother_room.truncate_grid(expansion_grid, easy=easy):
+                if not brother_room.truncate_grid(expansion_grid, easy=easy, _recursion_depth=_recursion_depth):
                     if verbose:
                         print(f'Expanding grid of room {self.name} at {expansion_grid} failed:')
                         print('  Grid was expanded over a brother room which failed to truncate its grid -> Restoring backup')
@@ -4184,7 +4201,7 @@ class Room:
                 for boundary in expansion_grid.boundaries:
                     new_segments += boundary.segments
                 # Now run the fitting
-                if not self.fit_to_required_area(restricted_segments=new_segments, behaviour=behaviour):
+                if not self.fit_to_required_area(restricted_segments=new_segments, behaviour=behaviour, _recursion_depth=_recursion_depth):
                     if verbose:
                         print(f'Expanding grid of room {self.name} at {expansion_grid} failed:')
                         print('  Failed to fit self room after loaned expansion -> Restoring backup')
@@ -4199,7 +4216,7 @@ class Room:
                         continue
                     if verbose: print(f'  Compensating {brother_room.name} area')
                     # Try to fit the brother room
-                    if not brother_room.fit_to_required_area(behaviour=behaviour):
+                    if not brother_room.fit_to_required_area(behaviour=behaviour, _recursion_depth=_recursion_depth):
                         if verbose:
                             print(f'Expanding grid of room {self.name} at {expansion_grid} failed:')
                             print('  Grid was expanded over a brother room which failed to comepnsate area after truncation -> Restoring backup')
