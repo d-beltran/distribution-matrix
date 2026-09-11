@@ -84,19 +84,28 @@ def represent (queue):
     # Keep trak of the queue size
     # Thus if the size has not changed we can skip the update
     # This is usefult at the end, when the main process is over but the display is still alive
-    previous_frame_count = 0
+    previous_frame_count = -1
+    # Set the queue to be used when requesting frames
+    # Note that it may be further removed if we don't want to keep reading frames
+    frames_queue = queue
 
     # Animation updater
     def update_frame (i):
         nonlocal frames
+        nonlocal frames_queue
         nonlocal previous_slider_value
         nonlocal previous_frame_count
-        # Update frames when the queue is not empty
-        frame_count = queue.qsize()
         # If the number the frames has raisen then we must get the new frames
         # Also make sure to not get the frames when the queue is empty
-        if frame_count > previous_frame_count:
-            frames = queue.get()
+        if frames_queue and frames_queue.qsize() > 0:
+            frames = frames_queue.get()
+            frame_count = len(frames)
+            # Normally the model is way faster than the display
+            # We should always see a big difference of frames here
+            # I we don't then we assum the model has finished
+            # If there are no new frames then 
+            if frame_count == previous_frame_count:
+                frames_queue = None
             previous_frame_count = frame_count
             
         # Set the slider range
