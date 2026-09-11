@@ -3,12 +3,19 @@ from vectorial_base import *
 from scheme import *
 from auxiliar import round_to_hundredths
 
+# Import some predefined test polygons
+from tests import *
+
 # Import some python libraries to trace and benchmark
 from traceback import print_exc
 from time import time
 
-# Import some predefined test polygons
-from tests import *
+# Get user arguments when calling this script
+from sys import argv
+
+# Set a custom frame limit
+frame_stop = None
+if len(argv) > 1: frame_stop = int(argv[1])
 
 # This is for windows to dont loop
 if __name__ == '__main__':
@@ -18,7 +25,7 @@ if __name__ == '__main__':
 
     # Represent current rooms tagged as display = True
     if display:
-        setup_display(frames_limit=10000)
+        setup_display(frames_limit=frame_stop)
 
 
     #test = test_room_1
