@@ -328,14 +328,21 @@ class Line:
 
     # Check if a point is inside the line
     # WARNING: This function is independent from __contain__ since it must be inherited by the Segment class
+    # WARNING: Do not check this through the "y = slope * x + intercept" formula
+    # WARNING: For steep lines, a tiny (sub-resolution) rounding error in point.x gets multiplied
+    # WARNING: by the slope and may end up well over the intended resolution in y, producing false
+    # WARNING: negatives for points which are actually on the line (e.g. exact segment intersections)
+    # WARNING: The perpendicular distance to the line is used instead, since it is slope-independent
+    # WARNING: Do not compare this distance with 'equal(distance, 0)': its tolerance (half the
+    # WARNING: resolution) is tighter than the worst case rounding drift a point can carry, since
+    # WARNING: 'x' and 'y' are each independently rounded to the resolution grid. A point up to
+    # WARNING: half a resolution unit off in both axes may end up as far as ~0.71 resolution units
+    # WARNING: (diagonally) from its true position, so the full resolution unit is used as tolerance
     def line_contains_point (self, point : Point) -> bool:
-        if self.is_vertical():
-            x = self.get_x_intercept()
-            return resolute(x) == point.x
-        slope = self.get_slope()
-        intercept = self.get_y_intercept()
-        y = point.x * slope + intercept
-        return resolute(y) == point.y
+        relative = point - self.point
+        cross = relative.x * self.vector.y - relative.y * self.vector.x
+        distance = abs(cross) / self.vector.get_magnitude()
+        return distance < minimum_resolution
 
     # Get the intersection point between two lines
     # DANI: Esto está hecho en la libreta
@@ -508,20 +515,25 @@ class Segment(Line):
     # in_extremis = 1 -> Intersections which are the 'extrem' point of only one of the segments are also considered
     # in_extremis = 2 -> All intersections are considered
     def get_intersection_point (self, segment, in_extremis : int = 2) -> Optional[Point]:
-        xdiff = Vector(self.a.x - self.b.x, segment.a.x - segment.b.x)
-        ydiff = Vector(self.a.y - self.b.y, segment.a.y - segment.b.y)
+        # WARNING: We use plain tuples here, not the Vector class
+        # WARNING: The Vector class resolutes (rounds) its coordinates on construction, which is correct
+        # WARNING: for real spatial vectors, but self_det/segment_det/d below are just intermediate
+        # WARNING: determinant scalars, not coordinates. Rounding them before dividing by 'div' can
+        # WARNING: amplify the rounding error far beyond the intended resolution, specially when 'div' is small
+        xdiff = (self.a.x - self.b.x, segment.a.x - segment.b.x)
+        ydiff = (self.a.y - self.b.y, segment.a.y - segment.b.y)
 
         def det(a, b) -> number:
-            return a.x * b.y - a.y * b.x
+            return a[0] * b[1] - a[1] * b[0]
 
         div = det(xdiff, ydiff)
         # segments are paralel
         if div == 0:
             return None
 
-        self_det = det( Vector(self.a.x, self.a.y), Vector(self.b.x, self.b.y) )
-        segment_det = det( Vector(segment.a.x, segment.a.y), Vector(segment.b.x, segment.b.y))
-        d = Vector(self_det, segment_det)
+        self_det = self.a.x * self.b.y - self.a.y * self.b.x
+        segment_det = segment.a.x * segment.b.y - segment.a.y * segment.b.x
+        d = (self_det, segment_det)
         x = det(d, xdiff) / div
         y = det(d, ydiff) / div
         intersection_point = Point(x, y)
@@ -1738,21 +1750,23 @@ class Polygon:
             tracing1 = Segment(corner, corner + entry_segment.vector.normalized() * self.size, color='green')
             tracing2 = Segment(corner, corner + (-exit_segment.vector.normalized()) * self.size, color='green')
 
+            # Set the limit segments for this specific corner
+            # i.e. all limit segments but the ones making the corner itself
+            corner_limit_segments = [ limit_segment for limit_segment in limit_segments if limit_segment not in corner.segments ]
+
             insider_segments = []
             for segment in [tracing1, tracing2]:
 
                 # Get the intersection point of the specfied segment with each polygon limit
                 intersection_points = []
-                for limit_segment in limit_segments:
-                    # Skip the segments of the main corner
-                    if limit_segment in corner.segments:
-                        continue
+                # Iterate limit segments
+                for limit_segment in corner_limit_segments:
+                    # Find if we are intersecting with this specific corner
                     point = limit_segment.get_intersection_point(segment)
                     if point:
                         # Intersection point may be the corner even ignoring corner segments
                         # This happens when one of the corner segments has been splited
-                        if point == corner:
-                            continue
+                        if point == corner: continue
                         intersection_points.append(point)
                 # Find out also if the segment intersects any corner
                 for limit_point in limit_points:
@@ -1766,11 +1780,15 @@ class Polygon:
                 # This may fail, for example, if interior polygons are overlapped
                 if len(intersection_points) == 0:
                     # Represent polygons in the problematic boundary
-                    for limit_segment in limit_segments:
+                    for limit_segment in corner_limit_segments:
                         limit_segment.color = 'black'
                     segment.color = 'green'
-                    add_frame(limit_segments + list(mark_point(corner, 'red')) + [segment], title='Debug')
-                    raise RuntimeError('An inside segment has no intersection point: ' + str(segment))
+                    entry_segment.color = 'blue'
+                    exit_segment.color = 'blue'
+                    corner_mark_segments = list(mark_point(corner, 'red'))
+                    add_frame(corner_limit_segments + corner_mark_segments + [segment, entry_segment, exit_segment], title='Debug')
+                    breakpoint()
+                    raise RuntimeError(f'An inside segment has no intersection point: {segment}')
 
                 # Sort the points by distance
                 def by_distance(point):
