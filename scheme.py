@@ -3222,7 +3222,7 @@ class Room:
         # As an exception, short frontiers connected to at least 1 inside corner may be expanded
         # However these frontiers will have a push length limit
         def is_suitable (frontier : Segment) -> bool:
-            return frontier.length >= self.min_size or frontier.a in inside_corners or frontier.b in inside_corners
+            return equal_or_greater(frontier.length, self.min_size) or frontier.a in inside_corners or frontier.b in inside_corners
 
         # Short frontiers could be also expanded together with other connected and aligned frontiers
         # These compound frontiers must be taken in count also although they are harder to expand
@@ -3298,7 +3298,7 @@ class Room:
         # If there is no free space then the room with more area to give away in proportion
         # Then use this value to set the "score" of each brother room frontiers and sort them
         def sort_by_shortest_path (frontiers_group : list, verbose : bool = False) -> list:
-            if verbose: print('Sorting best frontiers')
+            if verbose: print('Sorting best brother frontiers')
             # Find out if there is free space
             is_free_space_available = bool(self.parent.free_grid)
             if verbose: print(f'  There is free space: {is_free_space_available}')
@@ -3384,6 +3384,7 @@ class Room:
         # If all of them fail then try with loaned push allowed
         sorted_free_frontiers = first_normal_then_loaned(priorize_single_frontiers(free_frontiers))
         # Yield frontiers and loan permissions
+        if verbose: print('Trying with free frontiers first')
         for frontier, loan_permission in sorted_free_frontiers:
             yield frontier, loan_permission
         # Then we try with the brother frontiers
