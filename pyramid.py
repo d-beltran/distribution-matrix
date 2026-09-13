@@ -193,6 +193,15 @@ def serial_digger (
     current_room = rooms_to_solve[0]
     # Get the remaining rooms
     following_rooms = rooms_to_solve[1:]
+    # Before starting the complicated logic, there is an scenario where we can finish this easily
+    # If this is the last room, and the leaving free space is a single region which respects the room minimum size
+    # Then we can fit the room directly there
+    # DANI: No está funcionando, hay que pedirle a Claude que lo ponga en su sitio
+    room_fits =  starting_configuration.free_grid
+    if len(following_rooms) == 0 and starting_configuration.free_grid.is_unified() and \
+        starting_configuration.free_grid.check_minimum(current_room.min_size):
+        current_room.grid = starting_configuration.free_grid
+        return True
     # Set the search
     # Note that there is no results queue, since the result is returned and not reported
     # Note that the pyramid is a regular object here and not a proxy to a manager process
