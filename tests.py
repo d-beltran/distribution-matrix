@@ -1,4 +1,8 @@
-from scheme import *
+from scheme.door import Door
+from scheme.room import Room
+from scheme.stairs import Stairs
+from scheme.building import Building
+
 from vectorial_base import *
 
 # Perímetro en L

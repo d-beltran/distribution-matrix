@@ -1,7 +1,7 @@
-from scheme_display import setup_display
+from utils.display import setup_display
 from vectorial_base import *
 from scheme import *
-from auxiliar import round_to_hundredths
+from utils.auxiliar import round_to_hundredths
 
 # Import some predefined test polygons
 from tests import *
@@ -10,12 +10,23 @@ from tests import *
 from traceback import print_exc
 from time import time
 
+# Import other python built-in dependencies
+import random
+
 # Get user arguments when calling this script
 from sys import argv
 
 # Set a custom frame limit
 frame_stop = None
 if len(argv) > 1: frame_stop = int(argv[1])
+
+# Set the seed and print it
+seed = None
+if len(argv) > 2: seed = int(argv[2])
+if seed is None:
+    seed = round(random.random() * 999999)
+print(f'Seed {seed}')
+random.seed(seed)
 
 # This is for windows to dont loop
 if __name__ == '__main__':
@@ -56,4 +67,4 @@ if __name__ == '__main__':
     # Calculate how much it took to run the whole process and output the result
     end_time = time()
     total_time = round_to_hundredths(end_time - start_time)
-    print(f' -- The process took {total_time} seconds to run --')
+    print(f' -- The process took {total_time} seconds to run (seed {seed}) --')

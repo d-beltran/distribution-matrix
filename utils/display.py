@@ -14,7 +14,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 # Import global variables
-from auxiliar import GLOBAL
+from utils.auxiliar import GLOBAL
 
 # Set a list with all system values at each recorded step
 global_frames = []

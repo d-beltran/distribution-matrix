@@ -6,7 +6,7 @@ from traceback import format_exception
 
 from typing import List, Union, Optional
 
-from auxiliar import GLOBAL
+from utils.auxiliar import GLOBAL
 
 # Get the number of available CPUs
 AVAILABLE_CPUS : int = cpu_count()

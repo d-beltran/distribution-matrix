@@ -1,7 +1,7 @@
 from typing import Union, Optional, List, Set, Tuple, Generator, Callable
 
-from auxiliar import *
-from scheme_display import add_frame
+from utils.auxiliar import *
+from utils.display import add_frame
 
 import itertools
 
