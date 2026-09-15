@@ -1,4 +1,4 @@
-8=> RAM 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=> 8=>
+RAM
 
 el corridor backbone pasar por un segmento entre padre y stairs, dado que ambos son rígidos no se forma pasillo y luego el pasillo está splitted
 	seed 465896 en windows de Emma
