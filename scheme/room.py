@@ -757,6 +757,7 @@ class Room:
         self._doors = new_doors
         for door in self._doors:
             door.room = self
+            door.name = f"{self.name}'s door"
         #self.reserve_doors_self_required_space()
         self.reserve_doors_parent_required_space()
 

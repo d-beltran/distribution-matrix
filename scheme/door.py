@@ -7,6 +7,7 @@ from vectorial_base import *
 
 # A door is a segment in a boundary
 # When boundaries are transformed to walls with tickness, doors become holes in the wall
+# Doors connect children rooms to the parent room corridor
 class Door:
     def __init__ (self,
         # A point may be passed. If no point is passed then it is assigned automatically
@@ -28,10 +29,15 @@ class Door:
         # Set if the doors direction points outside the room instead of inside
         reverse : bool = False,
         # Set the parent room
-        room : Optional['Room'] = None
+        room : Optional['Room'] = None,
+        # Set a name for the room
+        # This is a representation parameters and it has no effect in the logic
+        name : Optional[str] = None,
     ):  
+        # Save input values as internal values
         # These values are usually None at this point
         # They are usually set further from the door room 'door_args' value
+        self.name = name
         self._width = width
         self._margin = margin
         self._length = length
@@ -43,17 +49,17 @@ class Door:
         self._pivot = pivot
         self.rigid = rigid
         if self.rigid and not self.point:
-            # DANI: Esto es solo de momento, pero podemos hacer que el rigid tenga efecto una vez se asigna el punto
-            raise InputError('A point must be defined if the rigid flag is passed')
+            raise InputError('A point must be defined if the door is to be rigid')
         self.reverse = reverse
         # The room this door belongs to
         self.room = room
 
     def __repr__ (self):
-        point = str(self.point) if self.point else 'No point'
-        width = str(self.width) if self.width else 'No width'
-        margin = str(self.margin) if self.margin else 'No margin'
-        return f'<Door {point} {width} ({margin})>'
+        name = self.name if self.name else 'Unnamed'
+        point = f'placed in {self._point}' if self._point else '(not placed)'
+        width = f'with a width of {self._width}' if self._width else '(widthless)'
+        margin = f'and with a margin of {self._margin}' if self._margin else '(marginless)'
+        return f'<Door "{name}" {point} {width} {margin}>'
 
     # Get the width
     def get_width (self) -> number:
