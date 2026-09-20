@@ -29,6 +29,7 @@ class Point:
 
     def __init__(self, x : number, y : number):
         # Save the coordinates in resoluted format applying the precision limit
+        # WARNING: This intoduces some error but it is critical to support equal recongition in hashes
         self.x = resolute(x)
         self.y = resolute(y)
         # Save both coordinates as a tuple
@@ -41,13 +42,14 @@ class Point:
         return str(self)
 
     def __eq__(self, other):
+        # IMPORTANT: There is no need to use the 'equal' function here as all x/y values are resoluted
         if isinstance(other, self.__class__) or issubclass(self.__class__, other.__class__):
             return self.x == other.x and self.y == other.y
         return False
 
     def __hash__(self):
         return hash((self.x, self.y))
-    
+
     # Point + Vector -> Point, Point + Point -> Vector
     def __add__(self, other):
         if isinstance(other, self.__class__) or issubclass(self.__class__, other.__class__):
@@ -74,9 +76,11 @@ class Point:
 class Vector:
 
     def __init__(self, x : number, y : number):
-        # Save the coordinates as the whole float
-        self.x = resolute(x)
-        self.y = resolute(y)
+        # IMPORTANT: Vector's x and y are not resoluted on purpose
+        # Points must fit in a sort of "resolution grid", but vectors may be diagonal
+        # Diagonal vector, if resoluted, will have a lot of error in the rounding
+        self.x = x
+        self.y = y
 
     # Set the vector from a slope
     # If slope is None a vertical vector is returned
@@ -88,7 +92,7 @@ class Vector:
         return cls(x,y)
 
     def __str__(self):
-        return f'(x: {self.x}, y: {self.y})'
+        return f'(x: {resolute(self.x)}, y: {resolute(self.y)})'
 
     def __repr__(self):
         return str(self)
@@ -99,7 +103,7 @@ class Vector:
         return False
 
     def __hash__(self):
-        return hash((self.x, self.y))
+        return hash((resolute(self.x), resolute(self.y)))
 
     def __neg__(self):
         return Vector(-self.x, -self.y)
@@ -156,7 +160,7 @@ class Vector:
     # Return a new vector with identical direction and sense but magnitude = 1
     def normalized (self) -> 'Vector':
         magnitude = self.get_magnitude()
-        if magnitude == 0:
+        if equal(magnitude, 0):
             raise ValueError('Can not normalize Vector(0,0)')
         return self / magnitude
 
@@ -212,6 +216,13 @@ LEFT = Vector(-1, 0)
 RIGHT = Vector(1, 0)
 UP = Vector(0, 1)
 DOWN = Vector(0, -1)
+
+# Set the resolution-based margin to consider a dot is in a line
+# Note that flexibility is mandatory for diagonal lines when all points are "resoluted"
+# This is the result of a long discussion with Claude
+# DANI: No entiendo por que si la linea es perfectamente vertical o horizontal no podemos usar minimum_size / 2
+def get_line_tolerance (dx : number, dy : number, magnitude : number) -> number:
+    return 2 * minimum_resolution * (abs(dx) + abs(dy)) / magnitude
 
 # A line defined by a point and a directional vector
 class Line:
@@ -279,7 +290,7 @@ class Line:
     # Return None in case the line is horizontal
     def get_x_intercept(self) -> number:
         slope = self.get_slope()
-        if slope == 0:
+        if slope is not None and equal(slope, 0):
             return None
         point = self.point
         if slope == None:
@@ -317,7 +328,11 @@ class Line:
 
     # Check if 2 lines are paralel
     def is_paralel_to (self, other : 'Line') -> bool:
-        return self.get_slope() == other.get_slope()
+        self_slope = self.get_slope()
+        other_slope = other.get_slope()
+        if self_slope is None or other_slope is None:
+            return self_slope is None and other_slope is None
+        return equal(self_slope, other_slope)
 
     # Check if 2 lines are matematically identical
     # WARNING: This function is independent from __eq__ since it must be inherited by the Segment class
@@ -329,20 +344,14 @@ class Line:
     # Check if a point is inside the line
     # WARNING: This function is independent from __contain__ since it must be inherited by the Segment class
     # WARNING: Do not check this through the "y = slope * x + intercept" formula
-    # WARNING: For steep lines, a tiny (sub-resolution) rounding error in point.x gets multiplied
-    # WARNING: by the slope and may end up well over the intended resolution in y, producing false
-    # WARNING: negatives for points which are actually on the line (e.g. exact segment intersections)
-    # WARNING: The perpendicular distance to the line is used instead, since it is slope-independent
-    # WARNING: Do not compare this distance with 'equal(distance, 0)': its tolerance (half the
-    # WARNING: resolution) is tighter than the worst case rounding drift a point can carry, since
-    # WARNING: 'x' and 'y' are each independently rounded to the resolution grid. A point up to
-    # WARNING: half a resolution unit off in both axes may end up as far as ~0.71 resolution units
-    # WARNING: (diagonally) from its true position, so the full resolution unit is used as tolerance
+    # This was the old way to make this calculation but according to Claude this was causing a resolution error
     def line_contains_point (self, point : Point) -> bool:
         relative = point - self.point
+        magnitude = self.vector.get_magnitude()
         cross = relative.x * self.vector.y - relative.y * self.vector.x
-        distance = abs(cross) / self.vector.get_magnitude()
-        return distance < minimum_resolution
+        distance = abs(cross) / magnitude
+        tolerance = get_line_tolerance(self.vector.x, self.vector.y, magnitude)
+        return distance < tolerance
 
     # Get the intersection point between two lines
     # DANI: Esto está hecho en la libreta
@@ -428,10 +437,17 @@ class Segment(Line):
             # WARNING: The more far the segment points are the less resolution this method has
             if not self.line_contains_point(other):
                 return False
-            # Now that we know the point is in the line, check if it is between both segment points
-            distance1 = self.a.get_distance_to(other)
-            distance2 = self.b.get_distance_to(other)
-            return equal(distance1 + distance2, self.length)
+            # Now that we know the point is (near enough) on the line, check it falls between
+            # both segment points by projecting it onto the segment direction and checking the
+            # projected distance from 'a' falls within [0, length]
+            # This was done by Claude
+            dx = other.x - self.a.x
+            dy = other.y - self.a.y
+            ddx = self.b.x - self.a.x
+            ddy = self.b.y - self.a.y
+            along = (dx * ddx + dy * ddy) / self.length
+            tolerance = get_line_tolerance(ddx, ddy, self.length)
+            return -tolerance < along < self.length + tolerance
         if isinstance(other, self.__class__):
             return other.a in self and other.b in self
         return False
@@ -528,7 +544,7 @@ class Segment(Line):
 
         div = det(xdiff, ydiff)
         # segments are paralel
-        if div == 0:
+        if equal(div, 0):
             return None
 
         self_det = self.a.x * self.b.y - self.a.y * self.b.x
@@ -676,7 +692,7 @@ class Segment(Line):
         # Check the margin width to be suitable for self segment length
         if self.length < 2 * margin:
             raise ValueError('Margins (' + str(margin) + ') would consume this segment totally: ' + str(self))
-        if self.length == 2 * margin:
+        if equal(self.length, 2 * margin):
             raise ValueError('Margins (' + str(margin) + ') would consume this segment exact length: ' + str(self))
         # Build the margined segment
         new_a = self.a + self.direction * margin
@@ -820,6 +836,7 @@ class Rect:
         y_min = min(y_coords)
         y_max = max(y_coords)
         # If any minimum and maximum values match then the rectangle has no area
+        # IMPORTANT: There is no need to use the 'equal' function here as all x/y values are resoluted
         if x_min == x_max or y_min == y_max:
             print(segments)
             raise RuntimeError('The rectangle has no area')
@@ -856,6 +873,7 @@ class Rect:
 
     def __eq__(self, other):
         if isinstance(other, self.__class__):
+            # IMPORTANT: There is no need to use the 'equal' function here as all x/y values are resoluted
             return self.x_min == other.x_min and self.y_min == other.y_min and self.x_max == other.x_max and self.y_max == other.y_max
         return False
 
@@ -863,6 +881,7 @@ class Rect:
         return hash((self.x_min, self.y_min, self.x_max, self.y_max))
 
     def __contains__(self, other):
+        # IMPORTANT: There is no need to use the 'equal' function here as all x/y values are resoluted
         if isinstance(other, Point):
             in_x = other.x >= self.x_min and other.x <= self.x_max
             in_y = other.y >= self.y_min and other.y <= self.y_max
@@ -892,6 +911,7 @@ class Rect:
     # i.e. one of their segments is totally overlapping
     # Note that rectangles cannot overlap
     def is_connected_with (self, other : 'Rect') -> bool:
+        # IMPORTANT: There is no need to use the 'equal' function here as all x/y values are resoluted
         # They are aligned horizontally
         if self.x_min == other.x_min and self.x_max == other.x_max:
             # The other rect is below self rect
@@ -1029,8 +1049,8 @@ class Rect:
         x_steps = list(pairwise([ self.x_min, *formatted_x_splits, self.x_max ]))
         y_steps = list(pairwise([ self.y_min, *formatted_y_splits, self.y_max ]))
         # Remove steps where both values are identical
-        x_steps = [ step for step in x_steps if step[0] != step[1] ]
-        y_steps = [ step for step in y_steps if step[0] != step[1] ]
+        x_steps = [ step for step in x_steps if not equal(step[0], step[1]) ]
+        y_steps = [ step for step in y_steps if not equal(step[0], step[1]) ]
         # Create as many rectangles as required
         for x_min, x_max in x_steps:
             for y_min, y_max in y_steps:
@@ -1110,7 +1130,7 @@ class Rect:
             elif new_b_x > self.x_max:
                 new_b_x = self.x_max
             # If the coords are the same then it means the segment was out of the rectangle
-            if new_a_x == new_b_x:
+            if equal(new_a_x, new_b_x):
                 return None
             new_a = Point(new_a_x, y)
             new_b = Point(new_b_x, y)
@@ -1131,7 +1151,7 @@ class Rect:
             elif new_b_y > self.y_max:
                 new_b_y = self.y_max
             # If the coords are the same then it means the segment was out of the rectangle
-            if new_a_y == new_b_y:
+            if equal(new_a_y, new_b_y):
                 return None
             new_a = Point(x, new_a_y)
             new_b = Point(x, new_b_y)
@@ -1146,6 +1166,7 @@ class Rect:
     # Given another rectangle, it returns the overlapping region with this rectangle, if exists, as a new rectangle
     # DANI: Muchas funciones que usan esta no están preparadas para que el resultado no sea un rect
     def get_overlap_rect (self, rect : 'Rect', borders : bool = True) -> Optional[ Union[ 'Point', 'Rect', 'Segment'] ]:
+        # IMPORTANT: There is no need to use the 'equal' function here as all x/y values are resoluted
         # Find the overlap in the 'x' dimension
         # Get the maximum of the minimums
         x_minimum = max(self.x_min, rect.x_min)
@@ -1496,7 +1517,7 @@ class Polygon:
         for current, nextone in pairwise(self.segments, retro=True):
             # Given two continue segment vectors, find out the angle between them
             angle = current.get_angle_with(nextone)
-            if angle == 0:
+            if equal(angle, 0):
                 # If you see this error there may be splitted segments in your polygon
                 # Use the non-canonical class method to set your polygon
                 raise ValueError('There are 2 aligned segments: ' + str(current) + ' and ' + str(nextone))
@@ -1506,7 +1527,7 @@ class Polygon:
             precorners.append((point, [current, nextone], clockwise))
 
         # There should be always 360 more grades in one direction than in the other (may be clockwise or counterclockwise)
-        if abs(angle_count) != 360:
+        if not equal(abs(angle_count), 360):
             # If you see this error there may be splitted segments in your polygon
             # Use the non-canonical class method to set your polygon
             add_frame(self.segments, 'Wrong polygon error')
@@ -2834,11 +2855,11 @@ class Grid:
             # Yield lower left corner spot
             yield Rect(rect.x_min, rect.y_min, rect.x_min + x_fit_size, rect.y_min + y_fit_size)
             # Yield lower right corner spot
-            different_width = rect.x_size != x_fit_size
+            different_width = not equal(rect.x_size, x_fit_size)
             if different_width:
                 yield Rect(rect.x_max - x_fit_size, rect.y_min, rect.x_max, rect.y_min + y_fit_size)
             # Yield upper left corner spot
-            different_height = rect.y_size != y_fit_size
+            different_height = not equal(rect.y_size, y_fit_size)
             if different_height:
                 yield Rect(rect.x_min, rect.y_max - y_fit_size, rect.x_min + x_fit_size, rect.y_max)
             # Yield upper right corner spot
@@ -2852,6 +2873,7 @@ class Grid:
 
     # Some functions are defined to find colliding rects
     # Note that these functions rely on the fact that grids must never have overlapping rects
+    # IMPORTANT: There is no need to use the 'equal' function here as all x/y values are resoluted
     def get_left_rect (self, rect : Rect) -> Optional[Rect]:
         x_max = rect.x_min
         y_max = rect.y_max
