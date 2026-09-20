@@ -880,11 +880,12 @@ class Room:
         # This is because then the reducing corneres process requires real free space to work
         self._child_adaptable_boundary = False
 
-        # If there is a limit of corners in the room (i.e. this is the root room) then reshape children now
-        if self._child_adaptable_boundary and self.max_corners:
-            self.reduce_corners()
-        # Reshape children to reduce unnecessary corners as well
-        self.reduce_children_corners()
+        # DANI: No entiendo que hace esto aquí, no tiene sentido, así que lo comento y ya lo borraré
+        # # If there is a limit of corners in the room (i.e. this is the root room) then reshape children now
+        # if self._child_adaptable_boundary and self.max_corners:
+        #     self.reduce_corners()
+        # # Reshape children to reduce unnecessary corners as well
+        # self.reduce_children_corners()
 
         # Relocate the doors to the most suitable placement now that boundaries will change no more
         any_relocated_door = False
@@ -3064,12 +3065,15 @@ class Room:
 
         # One and only one of the rows/columns will always include the segment
         space = next((rect for rect in rects if frontier in rect), None)
-        if space == None:
+        if space is None:
             # If this happens it may mean there is a problem with the grid
             add_frame(rects +  [ frontier.get_colored_segment('red') ], 'Debug')
             room_names = ', '.join([ room.name for room in rooms ])
             raise RuntimeError(f'Frontier {frontier} has no space in rooms {room_names}')
-        space_contact = next(segment for segment in space.segments if frontier in segment)
+        space_contact = next((segment for segment in space.segments if frontier in segment), None)
+        if space_contact is None:
+            add_frame([ space ] +  [ frontier.get_colored_segment('red') ], 'Debug')
+            raise RuntimeError('Frontier is not in space. This should never happen.')
         space_forward_limit = space.get_size()[forward]
 
         # Get the forward expansion limit according to maximum rectangles
@@ -3272,10 +3276,13 @@ class Room:
 
         # One and only one of the rows/columns will always include the segment
         space = next((rect for rect in rects if frontier in rect), None)
-        if space == None:
+        if space is None:
             # If this happens it may mean there is a problem with the grid
             raise RuntimeError(f'Frontier {frontier} has no space in {rects}')
-        space_contact = next(segment for segment in space.segments if frontier in segment)
+        space_contact = next((segment for segment in space.segments if frontier in segment), None)
+        if space_contact is None:
+            add_frame([ space ] +  [ frontier.get_colored_segment('red') ], 'Debug')
+            raise RuntimeError('Frontier is not in space. This should never happen.')
         space_forward_limit = space.get_size()[forward]
         margin_limit = self.min_size
         margined_space_forward_limit = space_forward_limit - margin_limit
