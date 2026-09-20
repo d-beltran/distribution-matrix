@@ -4,6 +4,9 @@ el corridor backbone pasar por un segmento entre padre y stairs, dado que ambos 
 	seed 465896 en windows de Emma
 	* hay que descartar el uso de segmentos que pertenecen únicamente a rooms rígidas para el corridor backbone
 si las stairs quedan asiladas, sin tocar ninguna pared, falla en formarse el corridor backbone
+	-> que una habitación no pueda contener a otra habitación hermana que tenga puertas
+
+revisar por que no "reorganiza espacio" / reduce esquinas con los dos apartamentos enromes 
 
 setup_stairs -> que chequee para cada room si hay espacio o no en lower y upper
 	que tenga en cuenta los stacking
