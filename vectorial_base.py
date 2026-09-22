@@ -3317,9 +3317,13 @@ class Grid:
 
     # Get all perimeters segments
     # This is used for displaying reasons usually
-    def get_perimeter_segments (self, color : str = 'black') -> List[Segment]:
-        boundary_segments = sum([ boundary.segments for boundary in self.boundaries ], [])
-        return [ segment.get_colored_segment(color) for segment in boundary_segments ]
+    def get_perimeter_segments (self) -> List[Segment]:
+        return sum([ boundary.segments for boundary in self.boundaries ], [])
+
+    # Get all perimeters segments
+    # This is used for displaying reasons usually
+    def get_colored_perimeter_segments (self, color : str = 'black') -> List[Segment]:
+        return [ segment.get_colored_segment(color) for segment in self.get_perimeter_segments() ]
 
     # Get a checksum of the grid to compare if two grids are the same in a cheaper way
     def get_cksum (self) -> str:

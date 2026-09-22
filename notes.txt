@@ -1,10 +1,11 @@
 RAM
 
-el corridor backbone pasar por un segmento entre padre y stairs, dado que ambos son rígidos no se forma pasillo y luego el pasillo está splitted
-	seed 465896 en windows de Emma
-	* hay que descartar el uso de segmentos que pertenecen únicamente a rooms rígidas para el corridor backbone
-si las stairs quedan asiladas, sin tocar ninguna pared, falla en formarse el corridor backbone
+Failed to set the corridor
 	-> que una habitación no pueda contener a otra habitación hermana que tenga puertas
+	* OJO: que un child se quede rodeado por free space también tiene el mismo resultado
+
+RuntimeError: Grid rects are wrong: unaligned corners
+ -- The process took 3.48 seconds to run (seed 124612)
 
 revisar por que no "reorganiza espacio" / reduce esquinas con los dos apartamentos enromes 
 

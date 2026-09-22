@@ -157,9 +157,9 @@ class Stairs:
             self.set_place()
         # Set the rooms
         boundary = Boundary(self.polygon)
-        self._lower_room = Room(boundary=boundary, doors=[ self._lower_door ], rigid=True, min_size=self.width, name='Lower')
+        self._lower_room = Room(boundary=boundary, doors=[ self._lower_door ], rigid=True, min_size=self.width, name='Lower staris')
         self.lower_floor.add_child(self._lower_room)
-        self._upper_room = Room(boundary=boundary, doors=[ self._upper_door ], rigid=True, min_size=self.width, name='Upper')
+        self._upper_room = Room(boundary=boundary, doors=[ self._upper_door ], rigid=True, min_size=self.width, name='Upper staris')
         self.upper_floor.add_child(self._upper_room)
 
     # Get the lower door

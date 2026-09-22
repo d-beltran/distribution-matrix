@@ -1101,21 +1101,22 @@ class Room:
         # Doors which have a point must be reached by the corridor
         # Doors which do not have a point must be set after the corridor and then the corridor may be expanded to reach them
         # Save already stablished door points in a set for nodes to further know if they are doors or not
-        already_set_door_points = set()
+        already_set_door_points = {}
         # Save rooms which have door nodes since there is no need to include them in the required rooms list
         # Door nodes are mandatory so these rooms will be included anyway
         already_doored_rooms = set()
         # Split self and children boundaries at the doors
         for room in [ self, *self.children ]:
-            if not room.boundary:
-                continue
-            # Get points from already set doors
-            current_door_points = [ door.point for door in room.doors if door.point ]
+            if not room.boundary: continue
+            # Get already set doors and their points
+            current_door_points = []
+            for door in room.doors:
+                if not door.point: continue
+                current_door_points.append(door.point)
+                already_set_door_points[door.point] = door
             # Split each of the room segments at the door points
             for room_segment in room.boundary.segments:
                 available_segments += room_segment.split_at_points(current_door_points)
-            # Update the set with all already set door points
-            already_set_door_points.update(current_door_points)
             # Add the current room to the set of already doored rooms
             if len(current_door_points) > 0:
                 already_doored_rooms.add(room)
@@ -1158,13 +1159,21 @@ class Room:
         for node_point, node_data in nodes.items():
             # First find the node rooms
             rooms = set()
+            # Find out if it is a door
+            is_door = node_point in already_set_door_points
+            node_data['is_door'] = is_door
+            # If it is a door then it grants access to the room it belongs
+            # Note that this is the only way to access to rooms with rigid doors
+            if is_door:
+                door = already_set_door_points[node_point]
+                rooms.add(door.room)
+            # Iterate parent children rooms
             for child in self.children:
+                # If the child is already included (we had a door) then skip this
+                if child in rooms: continue
                 # Children with no boundary are skipped
                 # DANI: Esto puede pasar?
                 if not child.boundary: continue
-                # If the child has rigid doors then reaching its exterior polygon is not enough to include the room in the corridor
-                child_has_rigid_doors = len([ door for door in child.doors if door.rigid ]) > 0
-                if child_has_rigid_doors: continue
                 # Otherwise check if the node is in the exterior polygon of the child
                 if node_point in child.boundary.exterior_polygon:
                     rooms.add(child)
@@ -1172,9 +1181,6 @@ class Room:
             if not parent_has_rigid_doors and node_point in exterior_polygon:
                 rooms.add(self)
             node_data['rooms'] = list(rooms)
-            # Now find out if it is a door
-            is_door = node_point in already_set_door_points
-            node_data['is_door'] = is_door
             # Note that a door node should always have 2 rooms
             # The exception is an scenario where the corridor is set while there is parent free space available yet
             # Note that if a door node is surrounded by 2 rigid rooms then it will be not reachable by the corridor
@@ -1225,12 +1231,15 @@ class Room:
             path_nodes = []
             for starting_segment in node_data['connected_segments']:
                 # Get the path rooms
-                # A path must always have 2 and only 2 rooms in a scenario where children have fully consumed parent area
-                # However, if the corridor is set while there is still free space it may happen that a node has only 1 room
+                # A path should have 2 and only 2 rooms in a scenario where children have fully consumed parent area
+                # However, if the corridor is set while there is still free space it may happen that a segment has only 1 room
                 path_rooms = [ room for room in node_data['rooms'] if starting_segment in room.boundary.exterior_polygon ]
-                # Check if both rooms from this path are rigid rooms
+                # Check if all rooms from this path are rigid rooms
                 # In that case we discard the path rigth now since we can not build a corridor here
+                if len(path_rooms) == 0:
+                    raise RuntimeError(f'Segment {starting_segment} has no associated rooms')
                 if len(path_rooms) == 2 and all([ room in path_rigid_rooms for room in path_rooms ]):
+                    print(f'Skipping {starting_segment} with {path_rooms}')
                     continue
                 last_segment = starting_segment
                 last_point = next(point for point in last_segment.points if point != node_point)
@@ -1677,7 +1686,7 @@ class Room:
                 raise RuntimeError('There is something wrong with the corridor backbone')
             # Display the very first corridor boundary, if any
             if debug and corridor_grid:
-                elements_to_display = corridor_grid.get_perimeter_segments('blue')
+                elements_to_display = corridor_grid.get_colored_perimeter_segments('blue')
                 self.update_display(extra=elements_to_display, title='Displaying first corridor boundary')
 
             # Find and fix the regions of the corridor which must be removed
@@ -1745,7 +1754,7 @@ class Room:
                     extension_grid = extension_corridor.get_margined_grid(all_inside)
                     # Display the segments used as reference for the excluded region
                     if debug:
-                        elements_to_display = extension_grid.get_perimeter_segments('purple')
+                        elements_to_display = extension_grid.get_colored_perimeter_segments('purple')
                         self.update_display(extra = elements_to_display, title = 'DEBUG: Extension segments')
                     # elements_to_display = [ segment.get_colored_segment('purple') for segment in extension_boundaries[0].segments ]
                     # self.update_display(extra=elements_to_display, title='Debug 2')
@@ -1755,7 +1764,7 @@ class Room:
 
                 # Display the corridor boundaries
                 if debug:
-                    elements_to_display = corridor_grid.get_perimeter_segments('blue')
+                    elements_to_display = corridor_grid.get_colored_perimeter_segments('blue')
                     self.update_display(extra=elements_to_display, title='Displaying corridor boundaries after expanding to compensate the removal of excluding regions')
             # Call the function we just defined
             fix_excluding_regions()
@@ -1766,7 +1775,7 @@ class Room:
                 corridor_grid += self.free_grid
                 # Display the corridor boundaries
                 if debug:
-                    elements_to_display = corridor_grid.get_perimeter_segments('blue')
+                    elements_to_display = corridor_grid.get_colored_perimeter_segments('blue')
                     self.update_display(extra=elements_to_display, title='Displaying corridor boundaries after adding back the parent free space')
 
             # Check the corridor is not splitted, but unified in a single grid
@@ -1789,7 +1798,7 @@ class Room:
                     sample_corner = next(iter(common_corners))
                     corridor_grid += Grid([ generate_point_rect(sample_corner, corridor_size, corridor_size*2) ])
                     if debug:
-                        elements_to_display = corridor_grid.get_perimeter_segments('blue')
+                        elements_to_display = corridor_grid.get_colored_perimeter_segments('blue')
                         self.update_display(extra=elements_to_display, title='Displaying corridor boundaries after connecting two splitted regions')
                 # If we found a matching corner then give it another try after modifying the grid
                 if matching_corner: continue
@@ -1809,7 +1818,7 @@ class Room:
 
             # Display the corridor boundaries
             if debug:
-                elements_to_display = corridor_grid.get_perimeter_segments('blue')
+                elements_to_display = corridor_grid.get_colored_perimeter_segments('blue')
                 self.update_display(extra=elements_to_display, title='Displaying corridor boundaries after removing regions not respecting the corridor minimum size')
 
             # Run another excluding-fixing now
@@ -3648,7 +3657,7 @@ class Room:
                 if verbose:
                     print(f'Expanding grid of room {self.name} at {expansion_grid} failed:')
                     print('  Minimum size of the expanded grid would be not respected')
-                    self.update_display(title='Grid expansion failure', extra=expansion_grid.get_perimeter_segments('red'))
+                    self.update_display(title='Grid expansion failure', extra=expansion_grid.get_colored_perimeter_segments('red'))
                 return False
         # Make a backup of the current grid
         backup = { self: self.grid }
@@ -3676,7 +3685,7 @@ class Room:
                 if verbose:
                     print(f'Expanding grid of room {self.name} at {expansion_grid} failed:')
                     print('  Parent minimum size would be not respected -> Restoring backup')
-                    self.update_display(title='Grid expansion failure', extra=expansion_grid.get_perimeter_segments('red'))
+                    self.update_display(title='Grid expansion failure', extra=expansion_grid.get_colored_perimeter_segments('red'))
                 # add_frame(self.parent.free_grid, 'Debug')
                 self.restore_grid_backup(backup, title='Restored grid backup while expanding grid')
                 return False
@@ -3690,7 +3699,7 @@ class Room:
                     if verbose:
                         print(f'Expanding grid of room {self.name} at {expansion_grid} failed:')
                         print('  Parent grid failed to expand -> Restoring backup')
-                        self.update_display(title='Grid expansion failure', extra=expansion_grid.get_perimeter_segments('red'))
+                        self.update_display(title='Grid expansion failure', extra=expansion_grid.get_colored_perimeter_segments('red'))
                     self.restore_grid_backup(backup, title='Restored grid backup while expanding grid')
                     return False
             # If parent boundaries are rigid then we can not expand
@@ -3698,7 +3707,7 @@ class Room:
                 if verbose:
                     print(f'Expanding grid of room {self.name} at {expansion_grid} failed:')
                     print('  Grid was expanded outer the parent grid -> Restoring backup')
-                    self.update_display(title='Grid expansion failure', extra=expansion_grid.get_perimeter_segments('red'))
+                    self.update_display(title='Grid expansion failure', extra=expansion_grid.get_colored_perimeter_segments('red'))
                 self.restore_grid_backup(backup, title='Restored grid backup while expanding grid')
                 return False
         # Check if we are overlapping other spaces
@@ -3708,7 +3717,7 @@ class Room:
                 if verbose:
                     print(f'Expanding grid of room {self.name} at {expansion_grid} failed:')
                     print('  Grid was expanded over the corridor -> Restoring backup')
-                    self.update_display(title='Grid expansion failure', extra=expansion_grid.get_perimeter_segments('red'))
+                    self.update_display(title='Grid expansion failure', extra=expansion_grid.get_colored_perimeter_segments('red'))
                 self.restore_grid_backup(backup, title='Restored grid backup while expanding grid')
                 return False
             # If we have a adaptable parent then check we did not expand over any parent door outside space
@@ -3717,7 +3726,7 @@ class Room:
                 if verbose:
                     print(f'Expanding grid of room {self.name} at {expansion_grid} failed:')
                     print('  Parent doors would be not respected')
-                    self.update_display(title='Grid expansion failure', extra=expansion_grid.get_perimeter_segments('red'))
+                    self.update_display(title='Grid expansion failure', extra=expansion_grid.get_colored_perimeter_segments('red'))
                 return False
             # Now truncate all brothers
             # Note that doors which are not respected after the expansion are relocated here if possible
@@ -3737,7 +3746,7 @@ class Room:
                     if verbose:
                         print(f'Expanding grid of room {self.name} at {expansion_grid} failed:')
                         print('  Grid was expanded over a brother room which failed to truncate its grid -> Restoring backup')
-                        self.update_display(title='Grid expansion failure', extra=expansion_grid.get_perimeter_segments('red'))
+                        self.update_display(title='Grid expansion failure', extra=expansion_grid.get_colored_perimeter_segments('red'))
                     self.restore_grid_backup(backup, title='Restored grid backup while expanding grid')
                     return False
                 # Now save the previous backup
@@ -3755,7 +3764,7 @@ class Room:
                     if verbose:
                         print(f'Expanding grid of room {self.name} at {expansion_grid} failed:')
                         print('  Failed to fit self room after loaned expansion -> Restoring backup')
-                        self.update_display(title='Grid expansion failure', extra=expansion_grid.get_perimeter_segments('red'))
+                        self.update_display(title='Grid expansion failure', extra=expansion_grid.get_colored_perimeter_segments('red'))
                     self.restore_grid_backup(backup, title='Restored grid backup while expanding grid')
                     return False
             # Now if we must compensate then fit truncated brothers
@@ -3770,7 +3779,7 @@ class Room:
                         if verbose:
                             print(f'Expanding grid of room {self.name} at {expansion_grid} failed:')
                             print('  Grid was expanded over a brother room which failed to comepnsate area after truncation -> Restoring backup')
-                            self.update_display(title='Grid expansion failure', extra=expansion_grid.get_perimeter_segments('red'))
+                            self.update_display(title='Grid expansion failure', extra=expansion_grid.get_colored_perimeter_segments('red'))
                         self.restore_grid_backup(backup, title='Restored grid backup while expanding grid')
                         return False
         # At this point the expand succeed
