@@ -1726,41 +1726,53 @@ class Room:
                     self.update_display(extra=elements_to_display, title='Displaying corridor boundaries after removing the excluding regions')
                 # And now we must expand the corridor regions where we substracted the excluding regions
                 # Otherwise the corridor would have regions which do not respect the minimum size
+                # Note that after substracting the excluding regions some parts of the corridor grid may be splitten in 2 (see figure 12)
+                # Get all excluded reference segments together, no matter what boundary they belong to, or we may have connectivity problems:
+                # Every compensation grid looks after its region, so there would be a shrink between splitted regions in the final grid
+                # Keep trach of the boundary they belong to as well
+                segment_exterior_polygon = {}
+                excluded_reference_segments = []
                 for corridor_boundary in corridor_grid.boundaries:
                     # IMPORTANT: Use the overlap with the path segments instead of the excluding region boundary segments
                     # IMPORTANT: Otherwise, we may expand the corridor over unnecessary space. See figure 7
                     # The region to be expanded is deducted from the segments in the path which overlap the already truncated corridor boundary
-                    excluded_reference_segments = corridor_boundary.get_segments_overlap_segments(current_corridor)
+                    current_excluded_reference_segments = corridor_boundary.get_segments_overlap_segments(current_corridor)
                     # Get the corridor exterior polygon
                     corridor_polygon = corridor_boundary.exterior_polygon
-                    # Once we have these segments we must "project" a corridor from them
-                    # This is like creating a corridor along the exterior polygon, which is fully inside of the polygon
-                    def all_inside (segment : Segment, direction : Vector) -> number:
-                        # For the dead ends
-                        # Note that for dead ends direction will always be equal to segment.direction, and not -segment.direction
-                        if direction == segment.direction:
-                            return 0
-                        # For the inside
-                        if direction == corridor_polygon.get_border_inside(segment):
-                            return corridor_size
-                        # For the outside
+                    # Asign the polygon to every segment
+                    for segment in current_excluded_reference_segments:
+                        segment_exterior_polygon[segment] = corridor_polygon
+                    # Add the segments to the overall list
+                    excluded_reference_segments += current_excluded_reference_segments
+                # Once we have these segments we must "project" a corridor from them
+                # This is like creating a corridor along the exterior polygon, which is fully inside of the polygon
+                def all_inside (segment : Segment, direction : Vector) -> number:
+                    # For the dead ends
+                    # Note that for dead ends direction will always be equal to segment.direction, and not -segment.direction
+                    if direction == segment.direction:
                         return 0
-                    # Display the segments used as reference for the excluded region
-                    if debug:
-                        elements_to_display = [ segment.get_colored_segment('green') for segment in excluded_reference_segments ]
-                        self.update_display(extra = elements_to_display, title = 'DEBUG: Excluded reference segments')
-                    # Generate the extension boundary from the excluded reference segments
-                    extension_corridor = Path(excluded_reference_segments)
-                    extension_grid = extension_corridor.get_margined_grid(all_inside)
-                    # Display the segments used as reference for the excluded region
-                    if debug:
-                        elements_to_display = extension_grid.get_colored_perimeter_segments('purple')
-                        self.update_display(extra = elements_to_display, title = 'DEBUG: Extension segments')
-                    # elements_to_display = [ segment.get_colored_segment('purple') for segment in extension_boundaries[0].segments ]
-                    # self.update_display(extra=elements_to_display, title='Debug 2')
-                    # Now add the extended grid to the corridor grid
-                    # Note that both grids will always overlap
-                    corridor_grid += extension_grid
+                    # For the inside
+                    corridor_polygon = segment_exterior_polygon[segment]
+                    if direction == corridor_polygon.get_border_inside(segment):
+                        return corridor_size
+                    # For the outside
+                    return 0
+                # Display the segments used as reference for the excluded region
+                if debug:
+                    elements_to_display = [ segment.get_colored_segment('green') for segment in excluded_reference_segments ]
+                    self.update_display(extra = elements_to_display, title = 'DEBUG: Excluded reference segments')
+                # Generate the extension boundary from the excluded reference segments
+                extension_corridor = Path(excluded_reference_segments)
+                extension_grid = extension_corridor.get_margined_grid(all_inside)
+                # Display the segments used as reference for the excluded region
+                if debug:
+                    elements_to_display = extension_grid.get_colored_perimeter_segments('purple')
+                    self.update_display(extra = elements_to_display, title = 'DEBUG: Extension segments')
+                # elements_to_display = [ segment.get_colored_segment('purple') for segment in extension_boundaries[0].segments ]
+                # self.update_display(extra=elements_to_display, title='Debug 2')
+                # Now add the extended grid to the corridor grid
+                # Note that both grids will always overlap
+                corridor_grid += extension_grid
 
                 # Display the corridor boundaries
                 if debug:
@@ -1815,6 +1827,11 @@ class Room:
             # Check the corridor has not been fully consumed
             if not corridor_grid:
                 raise RuntimeError(f'Corridor was not respecting minimum size in room {self.name}')
+
+            # Make sure the corridor is respecting the minimum size now
+            # Note that after the previous check we could have 2 regions regions separated by a bottleneck
+            if not corridor_grid.check_minimum(self.corridor_size):
+                raise RuntimeError(f'Corridor is not respecting minimum size. This should never happen.')
 
             # Display the corridor boundaries
             if debug:
