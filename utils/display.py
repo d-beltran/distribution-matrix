@@ -51,7 +51,10 @@ def add_frame (data : list, title : Optional[str] = None):
 def represent (queue):
 
     # Setup
-    fig, ax = plt.subplots()
+    # Use the constrained layout so the legend (above) and the title (below) never overlap the image
+    # Reserve the bottom of the figure for the slider and buttons, which are not managed by the layout
+    fig, ax = plt.subplots(layout='constrained')
+    fig.get_layout_engine().set(rect=(0, 0.07, 1, 0.93))
     frames = queue.get()
 
     # Remove top and right box segments
@@ -76,8 +79,8 @@ def represent (queue):
     bnext.on_clicked(next_frame)
 
     # Add the title
-    ax.set_title('(empty)', y=-0.15)
-    fig.subplots_adjust(bottom=0.18)
+    # Use the x label as title, so it is always placed below the tick labels
+    ax.set_xlabel('(empty)')
 
     # Track any time the previous slider value
     previous_slider_value = None
@@ -178,11 +181,12 @@ def represent (queue):
             handles.append(patch)
         columns_number = math.ceil( len(handles) / 2 )
         if columns_number > 0:
-            ax.legend(handles=handles, loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=columns_number)
+            # Anchor the legend bottom just above the axes top, so it grows upwards and never overlaps the image
+            ax.legend(handles=handles, loc='lower center', bbox_to_anchor=(0.5, 1.02), ncol=columns_number)
         #legend.handles = handles
 
         # Add the title
-        ax.set_title(display_message, y=-0.15)
+        ax.set_xlabel(display_message)
         
     # Run the animation and show the plot
     anim = animation.FuncAnimation(fig, update_frame)
