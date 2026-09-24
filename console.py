@@ -14,15 +14,21 @@ from time import time
 import random
 
 # Get user arguments when calling this script
-from sys import argv
+from argparse import ArgumentParser
+parser = ArgumentParser(description='Solve the room distribution')
+parser.add_argument('-f', '--frame-stop', type=int, default=None,
+    help='Stop the display after this number of frames')
+parser.add_argument('-s', '--seed', type=int, default=None,
+    help='Random seed (a random one is generated if not provided)')
+parser.add_argument('--no-display', dest='display', action='store_false',
+    help='Do not display the solving process')
+args = parser.parse_args()
 
 # Set a custom frame limit
-frame_stop = None
-if len(argv) > 1: frame_stop = int(argv[1])
+frame_stop = args.frame_stop
 
 # Set the seed and print it
-seed = None
-if len(argv) > 2: seed = int(argv[2])
+seed = args.seed
 if seed is None:
     seed = round(random.random() * 999999)
 print(f'Seed {seed}')
@@ -32,7 +38,7 @@ random.seed(seed)
 if __name__ == '__main__':
 
     # Set if we want to display the solving process
-    display = True
+    display = args.display
 
     # Represent current rooms tagged as display = True
     if display:
