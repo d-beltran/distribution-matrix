@@ -3,6 +3,12 @@ RAM
 Failed to set the corridor
 	-> que una habitación no pueda contener a otra habitación hermana que tenga puertas
 	* OJO: que un child se quede rodeado por free space también tiene el mismo resultado
+		ValueError: Failed to set the corridor
+ 		-- The process took 0.5 seconds to run (seed 792353) --
+		room.py -> linea 1660
+
+RuntimeError: Failed to expand corridor for reaching room Lavabo
+ -- The process took 1.4 seconds to run (seed 99484) --
 
 RuntimeError: Grid rects are wrong: unaligned corners
  -- The process took 3.48 seconds to run (seed 124612)

@@ -6,7 +6,7 @@ from traceback import format_exception
 
 from typing import List, Union, Optional
 
-from utils.auxiliar import GLOBAL
+from utils.auxiliar import GLOBAL, equal_or_lower, equal_or_greater
 
 # Get the number of available CPUs
 AVAILABLE_CPUS : int = cpu_count()
@@ -196,9 +196,11 @@ def serial_digger (
     # Before starting the complicated logic, there is an scenario where we can finish this easily
     # If this is the last room, and the leaving free space is a single region which respects the room minimum size
     # Then we can fit the room directly there
-    # DANI: No está funcionando, hay que pedirle a Claude que lo ponga en su sitio
-    room_fits =  starting_configuration.free_grid
-    if len(following_rooms) == 0 and starting_configuration.free_grid.is_unified() and \
+    # Check also that the last spot is not bigger than the required area
+    if len(following_rooms) == 0 and \
+        equal_or_lower(starting_configuration.free_grid.area, current_room.max_area) and \
+        equal_or_greater(starting_configuration.free_grid.area, current_room.min_area) and \
+        starting_configuration.free_grid.is_unified() and \
         starting_configuration.free_grid.check_minimum(current_room.min_size):
         current_room.grid = starting_configuration.free_grid
         return True
@@ -253,8 +255,9 @@ class PyramidLevel:
         # Set the generator of raw spots for the next room to be placed
         # Note that this generator is created here, thus inside the manager process
         # This is essential since generators can not be pickled and thus they can not be sent between processes
+        # Note that spots are sorted according to the next room windowed value
         next_room = remaining_rooms[0]
-        self.spots_generator = fitting_grid.generate_fitting_spots(next_room.min_size, next_room.min_size)
+        self.spots_generator = distribution.generate_child_spots(next_room, fitting_grid)
 
 # The pyramid of possible room configurations, which is shared between every process
 # Both the main process and the paralel processes claim spots from it to explore new branches

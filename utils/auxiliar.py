@@ -1,4 +1,5 @@
 from typing import Union, Generator, Optional
+from multiprocessing import Queue
 from math import inf
 
 # Auxiliar functions widely used along the whole code
@@ -13,7 +14,9 @@ GLOBAL = {
     # This is useful for debugging
     'frames_limit': inf,
     # Count the number of frames displayed
-    'frame_count': 0
+    'frame_count': 0,
+    # Store the frames queue
+    'frames_queue': Queue(),
 }
 
 # Exception for when user input is wrong

@@ -220,8 +220,13 @@ DOWN = Vector(0, -1)
 # Set the resolution-based margin to consider a dot is in a line
 # Note that flexibility is mandatory for diagonal lines when all points are "resoluted"
 # This is the result of a long discussion with Claude
-# DANI: No entiendo por que si la linea es perfectamente vertical o horizontal no podemos usar minimum_size / 2
+# Perfectly vertical or horizontal lines have no rounding error at all, since all points are resoluted
+# In this case the tolerance MUST be below the minimum resolution
+# Otherwise a point which is one resolution unit away (i.e. a different point) would be considered in the line
+# This would make, for instance, polygons with one-resolution-unit steps be wrongly splitted in rectangles
 def get_line_tolerance (dx : number, dy : number, magnitude : number) -> number:
+    if equal(dx, 0) or equal(dy, 0):
+        return test_difference
     return 2 * minimum_resolution * (abs(dx) + abs(dy)) / magnitude
 
 # A line defined by a point and a directional vector

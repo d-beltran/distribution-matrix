@@ -7,6 +7,7 @@ from vectorial_base import *
 from utils.display import add_frame
 
 from scheme.door import Door
+from scheme.window import Window
 from scheme.room import Room
 from scheme.stairs import Stairs
 
@@ -176,6 +177,16 @@ class Building:
                         #     for stair in stairs:
                         #         extra_space = Grid([ stair.upper_room.doors[0].get_required_space(inside=False) ])
                         #         floor.forced_grid += extra_space
+            # Set the facade windows now that the floor boundary is set, before the stairs are placed
+            # Floors with a boundary inherited from the lower floor inherit its windows as well, so all floors share the same axes
+            # Basements have no windows unless they are forced
+            if floor.input_windows == None and not floor.input_boundary and floor_number != 0:
+                if floor_number > 0:
+                    lower_floor_windows = self.floors[lower_floor_number].windows
+                    floor.windows = [ Window(point=window.point, width=window.width, margin=window.margin) for window in lower_floor_windows ]
+                floor.set_facade_windows(fill=False)
+            else:
+                floor.set_facade_windows()
             # In case this floor has not forced doors there will be not doors incase it is not the base
             if floor.input_doors == None and floor_number != 0:
                 floor.doors = []

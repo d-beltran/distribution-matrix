@@ -5,7 +5,8 @@ from matplotlib.widgets import Slider, Button
 import matplotlib.patches as mpatches
 
 import math
-from multiprocessing import Process, Queue
+from multiprocessing import Process
+from threading import Thread
 
 from typing import Optional, List
 
@@ -18,8 +19,6 @@ from utils.auxiliar import GLOBAL
 
 # Set a list with all system values at each recorded step
 global_frames = []
-# Set a queue for the frames, since they are passed to a process
-frames_queue = Queue()
 
 # Updater called from the system
 def add_frame (data : list, title : Optional[str] = None):
@@ -43,26 +42,42 @@ def add_frame (data : list, title : Optional[str] = None):
     # This is for the fillings only, to add color
     rects = get_rects_from_anything(data)
     traced = [ element for element in data if hasattr(element, 'name') ]
-    global_frames.append((segments, rects, traced, display_message))
+    frame = (segments, rects, traced, display_message)
+    global_frames.append(frame)
     GLOBAL['frame_count'] += 1
-    frames_queue.put(global_frames)
+    # Send only the new frame to the display process, which keeps its own list of frames
+    # Note that a frame is never modified after this point, so it does not matter when the queue pickles it
+    frames_queue = GLOBAL['frames_queue']
+    frames_queue.put(frame)
 
 # Show the heatmap
-def represent (queue):
+# The frames queue must be passed as argument
+# WARNING: Do not get it from GLOBAL, since the child process may not inherit the parent memory (e.g. forkserver)
+# WARNING: In such case the child would import a new and disconnected queue
+def represent (frames_queue):
 
     # Setup
     # Use the constrained layout so the legend (above) and the title (below) never overlap the image
     # Reserve the bottom of the figure for the slider and buttons, which are not managed by the layout
-    fig, ax = plt.subplots(layout='constrained')
-    fig.get_layout_engine().set(rect=(0, 0.07, 1, 0.93))
-    frames = queue.get()
+    # Make the window bigger than the default so tall or wide drawings are not too small
+    fig, ax = plt.subplots(layout='constrained', figsize=(12, 8.5))
+    fig.get_layout_engine().set(rect=(0, 0.05, 1, 0.95))
+    # Set the list of frames received so far
+    frames = []
+    # Keep reading frames from the queue in a background thread
+    # Thus the queue is always emptied, even while the display is busy drawing
+    # WARNING: Frames are heavy and the queue pipe is small, so reading only between draws is too slow
+    def read_frames ():
+        while True:
+            frames.append(frames_queue.get())
+    Thread(target=read_frames, daemon=True).start()
 
     # Remove top and right box segments
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
 
     # Slider
-    axslider = plt.axes([0.25, .03, 0.50, 0.02])
+    axslider = plt.axes([0.25, .02, 0.50, 0.02])
     slider = Slider(axslider, label='Frame', valmin=0, valmax=len(frames), valinit=len(frames), valstep=1, valfmt='%0.0f')
 
     # Functions for when the user clicks in the previous/next arrows
@@ -84,33 +99,10 @@ def represent (queue):
 
     # Track any time the previous slider value
     previous_slider_value = None
-    # Keep trak of the queue size
-    # Thus if the size has not changed we can skip the update
-    # This is usefult at the end, when the main process is over but the display is still alive
-    previous_frame_count = -1
-    # Set the queue to be used when requesting frames
-    # Note that it may be further removed if we don't want to keep reading frames
-    frames_queue = queue
 
     # Animation updater
     def update_frame (i):
-        nonlocal frames
-        nonlocal frames_queue
         nonlocal previous_slider_value
-        nonlocal previous_frame_count
-        # If the number the frames has raisen then we must get the new frames
-        # Also make sure to not get the frames when the queue is empty
-        if frames_queue and frames_queue.qsize() > 0:
-            frames = frames_queue.get()
-            frame_count = len(frames)
-            # Normally the model is way faster than the display
-            # We should always see a big difference of frames here
-            # I we don't then we assum the model has finished
-            # If there are no new frames then 
-            if frame_count == previous_frame_count:
-                frames_queue = None
-            previous_frame_count = frame_count
-            
         # Set the slider range
         minimum = 0
         maximum = len(frames) - 1
@@ -144,6 +136,8 @@ def represent (queue):
         # Make axes respect the 1:1 ration
         # Otherwise the whole image is deformed in case there is a dmension larger than the other
         ax.axes.set_aspect('equal')
+        # Stick the image to the bottom so the title is close to the frames slider
+        ax.set_anchor('S')
 
         # In case something went wrong in the solving process and there are no frames from the begining
         # Prevent error logs from the display to be shown in the console
@@ -200,8 +194,8 @@ def setup_display (frames_limit : Optional[int] = None):
     if frames_limit != None:
         GLOBAL['frames_limit'] = frames_limit
     # Start the display logic
-    frames_queue.put(global_frames)
-    p = Process(target=represent, args=(frames_queue, ))
+    # Note that the queue is passed as argument so both processes share the same queue
+    p = Process(target=represent, args=(GLOBAL['frames_queue'], ))
     p.start()
 
 # --------------------------------------------------------------------------------------------------
@@ -254,6 +248,16 @@ def get_segments_from_anything (things : list) -> List['Segment']:
                 # Create a new segment to represent the door open
                 open_door_segment = door.get_open_door()
                 thing_segments.append(open_door_segment)
+        # If it is a room or something with windows
+        if hasattr(thing, 'windows'):
+            windows = thing.windows or []
+            for window in windows:
+                segment = window.segment
+                if not segment:
+                    continue
+                segment.color = 'grey'
+                segment.z = 17 # Make this segment display in the top layer
+                thing_segments.append(segment)
         # Make sure the new segments inherit the z property, if they have it
         if hasattr(thing, 'z'):
             for segment in thing_segments:

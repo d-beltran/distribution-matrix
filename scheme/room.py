@@ -8,9 +8,13 @@ from utils.pyramid import paralelizer
 from utils.display import add_frame
 
 from scheme.door import Door
+from scheme.window import Window
 
 # Set a flag for the default behaviour when fitting a room to a target area
 DEFAULT_BEHAVIOUR = 'def'
+
+# Set the accepted values for the windowed room option
+WINDOWED_OPTIONS = ('mandatory', 'indifferent', 'forbidden')
 
 # A room is a smart boundary that may contain other boundaries with conservative areas and size restrictions
 class Room:
@@ -44,6 +48,23 @@ class Room:
         # The default inputs for all doors whose inputs are not specified
         # These options are inherited by children rooms whose options are not specified
         door_args : Optional[Dict] = None,
+        # The windows of the room
+        # Root only. Windows must have a point in the room boundary (i.e. the facade)
+        # Windows are set before the solving process and they never move
+        windows : Optional[List[Window]] = None,
+        # The default inputs for all windows whose inputs are not specified
+        # Root only
+        window_args : Optional[Dict] = None,
+        # Set the distance between automatic windows
+        # The facade gaps which are left free by input windows are filled with automatic windows according to this distance
+        # i.e. a gap gets as many automatic windows as times this distance fits in it (at least one if the window fits)
+        # Set 0 to disable automatic windows
+        # Root only
+        window_ratio : Optional[number] = None,
+        # Set if the room must end up with windows
+        # Accepted values are 'mandatory', 'indifferent' and 'forbidden'
+        # Not supported in the root room
+        windowed : str = 'indifferent',
         # Set the room height
         # This height is the used to raise the 3D scheme
         # However, it may also affect the 2D distribution, since stairs rely on this height to calculate their lengths
@@ -156,6 +177,31 @@ class Room:
         # If there is no input doors then set a single defualt door, by default
         # Note that to set no doors the input must be '[]' instead of 'None'
         self.doors = doors if doors != None else [ Door() ]
+        # Save input window args
+        self._window_args = window_args
+        # Set the windows
+        # Note that further windows may be added automatically according to the window ratio
+        self._windows = None
+        self.input_windows = windows
+        self.windows = windows if windows != None else []
+        # Save input window ratio
+        if window_ratio != None and window_ratio < 0:
+            raise InputError(f'Window ratio must not be negative in room {name}. Set 0 to disable automatic windows')
+        self._window_ratio = window_ratio
+        # Set if the facade windows are already set
+        # This happens once in the root room, before the solving process
+        self._facade_windows_set = False
+        # Set if the room must end up with windows
+        if windowed not in WINDOWED_OPTIONS:
+            raise InputError(f'Windowed option "{windowed}" in room {name} is not supported. Use one of: ' + ', '.join(WINDOWED_OPTIONS))
+        self.input_windowed = windowed
+        # The windowed value after inheritance from the rest of the rooms (see _set_windowed_recursive)
+        self.windowed = windowed
+        # The segments of all windows in the root room, which is where the facade is
+        # They are shared by all rooms in the hierarchy so we do not need to reach the root to find them
+        # Note that copies of rooms in the solving process have no parent and thus they can not reach the root
+        # Note also that only segments are stored so rooms remain light to be sent between processes
+        self._window_segments = []
         # Set the room corridor size
         self._corridor_size = corridor_size
         # Set an empty grid as the discarded space
@@ -190,6 +236,15 @@ class Room:
         # If this room (not the root) has a max_corners input parameter
         if self.max_corners:
             raise InputError('Parameter max_corners is supported only in the root room')
+        # Windows are set in the root room only
+        # Children rooms may only tell if they must have windows or not through the windowed parameter
+        if self.input_windows != None:
+            raise InputError(f'Windows are supported only in the root room, but room "{self.name}" has windows. '
+                'Use the "windowed" parameter instead')
+        if self._window_args != None:
+            raise InputError(f'Parameter window_args is supported only in the root room, but room "{self.name}" has it')
+        if self._window_ratio != None:
+            raise InputError(f'Parameter window_ratio is supported only in the root room, but room "{self.name}" has it')
 
     # Set another init which is called once the root has been set
     # Note that the root has no way to know it is the root, so we use a trick to run this
@@ -206,6 +261,41 @@ class Room:
         # Call the root init recursively to further children
         for child in self.children:
             child._root_init()
+
+    # Set windowed values according to the whole hierarchy
+    # A room with a mandatory windowed child must be mandatory as well, since its windows are the only windows its children may get
+    # A room inside a forbidden windowed parent must be forbidden as well, since there are no windows it may get
+    # This function is to be called in the root room, which may not be windowed
+    def _set_windowed_recursive (self):
+        if self.input_windowed != 'indifferent':
+            raise InputError(f'Parameter windowed is not supported in the root room, but room "{self.name}" has it')
+        # Propagate mandatory windowed values upwards
+        def propagate_mandatory (room : 'Room'):
+            for child in room.children:
+                propagate_mandatory(child)
+            if room.windowed == 'mandatory': return
+            mandatory_children = [ child for child in room.children if child.windowed == 'mandatory' ]
+            if len(mandatory_children) == 0: return
+            if room.windowed == 'forbidden':
+                raise InputError(f'Room "{room.name}" has forbidden windows but its child room "{mandatory_children[0].name}" has mandatory windows')
+            room.windowed = 'mandatory'
+        for child in self.children:
+            propagate_mandatory(child)
+        # Propagate forbidden windowed values downwards
+        # Note that a mandatory child here is not possible, since it would have been catched while propagating mandatory values
+        def propagate_forbidden (room : 'Room'):
+            for child in room.children:
+                if room.windowed == 'forbidden':
+                    child.windowed = 'forbidden'
+                propagate_forbidden(child)
+        propagate_forbidden(self)
+
+    # Get the number of windows this room requires to contain at the end
+    # Mandatory rooms require at least one window and at least the windows required by their children
+    def get_required_windows (self) -> int:
+        if self.windowed != 'mandatory':
+            return 0
+        return max(1, sum([ child.get_required_windows() for child in self.children ]))
 
     # Check if a room fits in this room according to its minimum size
     # Check free space by default and all space if the argument 'force' is passed
@@ -780,6 +870,219 @@ class Room:
     # The room doors
     doors = property(get_doors, set_doors, None, "The room doors")
 
+    # Get the window arguments
+    def get_window_args (self) -> dict:
+        # If we have a stored value already then return it
+        if self._window_args:
+            return self._window_args
+        # If we are not the root, inherit parent default window arguments
+        if self.parent:
+            self._window_args = self.parent.window_args
+            return self._window_args
+        # If we are the root but there is a parent building with window args then inherit its value
+        if self.parent_building and self.parent_building.room_args.get('window_args', None):
+            self._window_args = self.parent_building.room_args['window_args']
+            return self._window_args
+        # Otherwise make windows as wide as doors by default
+        self._window_args = {
+            'width': self.door_args['width'],
+            'margin': self.door_args['margin'],
+        }
+        return self._window_args
+
+    # Set the window arguments (regular setter)
+    def set_window_args (self, new_window_args : dict):
+        self._window_args = new_window_args
+
+    # Arguments to set windows by default in this room
+    window_args = property(get_window_args, set_window_args, None, "Arguments to set windows by default in this room")
+
+    # Get the windows (regular getter)
+    def get_windows (self) -> List[Window]:
+        return self._windows
+
+    # Set the windows
+    # As soon as windows are set, set self room as the parent room of each window
+    def set_windows (self, new_windows : List[Window]):
+        self._windows = new_windows
+        for window in self._windows:
+            window.room = self
+            window.name = f"{self.name}'s window"
+
+    # The room windows
+    windows = property(get_windows, set_windows, None, "The room windows")
+
+    # Get the window ratio
+    def get_window_ratio (self) -> number:
+        # If we have a stored value already then return it
+        if self._window_ratio != None:
+            return self._window_ratio
+        # If we are the root but there is a parent building with a window ratio then inherit its value
+        if self.parent_building and self.parent_building.room_args.get('window_ratio', None) != None:
+            self._window_ratio = self.parent_building.room_args['window_ratio']
+            return self._window_ratio
+        # Otherwise set a window every 3 margined window widths by default
+        window_args = self.window_args
+        self._window_ratio = (window_args['width'] + window_args['margin'] * 2) * 3
+        return self._window_ratio
+
+    # Set the window ratio (regular setter)
+    def set_window_ratio (self, new_window_ratio : number):
+        self._window_ratio = new_window_ratio
+
+    # Distance between automatic windows in this room
+    window_ratio = property(get_window_ratio, set_window_ratio, None, "Distance between automatic windows in this room")
+
+    # Get the free facade segments where a window fits
+    # i.e. boundary segments after substracting already set windows and doors (without their margins)
+    # Note that margins may overlap other margins, just like it happens with doors
+    def get_free_facade_segments (self) -> List[Segment]:
+        sample_window = Window(room=self)
+        minimum_segment_length = sample_window.margined_width
+        occupied_segments = [ opening.segment for opening in self.doors + self.windows if opening.point ]
+        free_segments = []
+        for segment in self.boundary.segments:
+            for free_segment in segment.substract_segments(occupied_segments):
+                if not lower(free_segment.length, minimum_segment_length):
+                    free_segments.append(free_segment)
+        return free_segments
+
+    # Set the facade windows in the root room
+    # Input windows are checked and then the rest of the facade is filled with automatic windows according to the window ratio
+    # Every free gap gets as many windows as times the window ratio fits in it (at least one) and they are evenly distributed
+    # This must be done once the root boundary is set and before the solving process
+    # The automatic filling may be skipped (e.g. in floors which inherit windows from the lower floor)
+    def set_facade_windows (self, fill : bool = True):
+        # If windows are already set then there is nothing to do
+        if self._facade_windows_set:
+            return
+        if self.parent:
+            raise RuntimeError(f'Facade windows are to be set in the root room, but room "{self.name}" has a parent')
+        if not self.boundary:
+            raise InputError(f'Cannot set windows in room "{self.name}" since it has no boundary')
+        # Check input windows to be over the boundary and not overlapping each other or doors
+        already_checked_segments = [ door.segment for door in self.doors if door.point ]
+        for window in self.windows:
+            if not window.point:
+                raise InputError(f'Window {window} in room "{self.name}" has no point. Automatic windows are set through the window ratio')
+            try:
+                window_segment = window.margined_segment
+            except ValueError as error:
+                raise InputError(f'Window {window} in room "{self.name}" does not fit in the boundary: {error}')
+            if any(window.segment.get_overlap_segment(segment) for segment in already_checked_segments):
+                raise InputError(f'Window {window} in room "{self.name}" is overlapping another window or door')
+            already_checked_segments.append(window.segment)
+        # Fill the rest of the facade with automatic windows
+        if fill and self.window_ratio > 0:
+            sample_window = Window(room=self)
+            margined_width = sample_window.margined_width
+            automatic_windows = []
+            for segment in self.get_free_facade_segments():
+                # Every window must fit with its margins
+                maximum_windows = int(segment.length / margined_width)
+                windows_count = min(max(1, int(segment.length / self.window_ratio)), maximum_windows)
+                for index in range(windows_count):
+                    automatic_window = Window(room=self)
+                    automatic_window.point = segment.a + segment.vector * ((index + 0.5) / windows_count)
+                    automatic_windows.append(automatic_window)
+            # Note that windows are set together so they are all renamed and parented
+            if len(automatic_windows) > 0:
+                self.windows = self.windows + automatic_windows
+        self._facade_windows_set = True
+
+    # Get the segments of all facade windows (i.e. root room windows)
+    def get_window_segments (self) -> List[Segment]:
+        return self._window_segments
+
+    # Get the segments of facade windows which are fully contained in this room boundary
+    def get_contained_window_segments (self) -> List[Segment]:
+        if not self.boundary:
+            return []
+        boundary_segments = self.boundary.segments
+        return [ window_segment for window_segment in self._window_segments
+            if any(window_segment in segment for segment in boundary_segments) ]
+
+    # Check if every child accomplishes its windowed requirements
+    # i.e. mandatory children contain enough windows and forbidden children contain no windows at all
+    def check_children_windowed (self, verbose : bool = False) -> bool:
+        for child in self.children:
+            if child.windowed == 'indifferent':
+                continue
+            windows_count = len(child.get_contained_window_segments())
+            if child.windowed == 'mandatory':
+                required_windows = child.get_required_windows()
+                if windows_count < required_windows:
+                    if verbose: print(f'Room {child.name} requires {required_windows} windows but it has {windows_count}')
+                    return False
+            elif child.windowed == 'forbidden':
+                if windows_count > 0:
+                    if verbose: print(f'Room {child.name} must have no windows but it has {windows_count}')
+                    return False
+        return True
+
+    # Check if any of the given segments touches any facade window
+    def do_segments_touch_windows (self, segments : List[Segment]) -> bool:
+        for window_segment in self._window_segments:
+            for segment in segments:
+                overlap_segment = segment.get_overlap_segment(window_segment)
+                if overlap_segment and overlap_segment.length > 0:
+                    return True
+        return False
+
+    # Check if a spot touches any facade window
+    def does_spot_touch_windows (self, spot : Rect) -> bool:
+        return self.do_segments_touch_windows(spot.segments)
+
+    # Check if a grid touches any facade window
+    def does_grid_touch_windows (self, grid : Grid) -> bool:
+        grid_segments = sum([ boundary.segments for boundary in grid.boundaries ], [])
+        return self.do_segments_touch_windows(grid_segments)
+
+    # Generate spots to place a child room in the fitting grid
+    # Spots are sorted according to the child windowed value
+    # Mandatory children try first spots which touch windows while forbidden children try them at the end
+    def generate_child_spots (self, child : 'Room', fitting_grid : Grid) -> Generator[Rect, None, None]:
+        spots = fitting_grid.generate_fitting_spots(child.min_size, child.min_size)
+        if child.windowed == 'indifferent' or len(self._window_segments) == 0:
+            yield from spots
+            return
+        touching_spots = []
+        other_spots = []
+        for spot in spots:
+            if self.does_spot_touch_windows(spot):
+                touching_spots.append(spot)
+            else:
+                other_spots.append(spot)
+        if child.windowed == 'mandatory':
+            yield from touching_spots + other_spots
+            return
+        # Rooms with forbidden windows must not touch windows at all, since they would not be able to expand
+        # However spots are usually generated in the corners of the fitting grid, which are usually in the facade
+        # For this reason, generate additional spots after substracting the regions around windows from the fitting grid
+        # Note that the room minimum size is used as the region depth to avoid generating too thin regions
+        # Note that regions are merged one by one since they may overlap (e.g. windows next to a corner)
+        window_regions = Grid()
+        for window_segment in self._window_segments:
+            window_regions += Grid([ self.get_window_region(window_segment, child.min_size) ])
+        windowless_fitting_grid = fitting_grid - window_regions
+        windowless_spots = []
+        if windowless_fitting_grid:
+            windowless_spots = list(windowless_fitting_grid.generate_fitting_spots(child.min_size, child.min_size))
+        yield from windowless_spots + [ spot for spot in other_spots if spot not in windowless_spots ] + touching_spots
+
+    # Get a rect around a window segment with the given depth on both sides of the segment
+    # Note that the region out of the facade does not matter since it is out of any room
+    def get_window_region (self, window_segment : Segment, depth : number) -> Rect:
+        x_min = min(window_segment.a.x, window_segment.b.x)
+        x_max = max(window_segment.a.x, window_segment.b.x)
+        y_min = min(window_segment.a.y, window_segment.b.y)
+        y_max = max(window_segment.a.y, window_segment.b.y)
+        if window_segment.is_vertical():
+            return Rect(x_min - depth, y_min, x_max + depth, y_max)
+        if window_segment.is_horizontal():
+            return Rect(x_min, y_min - depth, x_max, y_max + depth)
+        raise ValueError('Diagonal windows are not supported')
+
     # Get the height
     def get_height (self) -> number:
         # If there is a stored value already then return it
@@ -900,6 +1203,11 @@ class Room:
         if any_relocated_door:
             self.update_display(title='Relocated doors')
 
+        # Check children windowed requirements now that boundaries will change no more
+        # Note that the corridor may have truncated children, so this can not be checked before
+        if not self.check_children_windowed():
+            return False
+
         # If we made it this far then we have succeeded
         return True
 
@@ -948,7 +1256,7 @@ class Room:
         # Keep track already tried initial grids so we do not loose time repeating the same
         tried_fitted_initial_grids = set()
         # Get a random spot from the fitting space and set the initial grid there
-        for spot in fitting_grid.generate_fitting_spots(child.min_size, child.min_size):
+        for spot in self.generate_child_spots(child, fitting_grid):
             # Try if the initial grid leads to a correct child fitting
             yield self._get_child_spot_args(child, spot, target_parent_grid, tried_fitted_initial_grids, verbose)
         # If we already tried all possible spots then we surrender
@@ -973,7 +1281,7 @@ class Room:
             return False
         if verbose: print(f'Setting {self.name} child room {child.name} grid succeeded to set inital grid')
         # Proceed with the expansion of this child room until it reaches its forced area
-        if not child.fit_to_required_area(verbose=True):
+        if not child.fit_to_required_area():
             chill_behaviour = child.area_fitting_behaviour
             if verbose: print(f'Setting {self.name} child room {child.name} grid failed with {chill_behaviour} strategy')
             # If it failed then try again with a different, more conservative/conformist strategy
@@ -1348,6 +1656,9 @@ class Room:
             #     elements_to_display = [ segment.get_colored_segment('red') for segment in current_corridor ]
             #     self.update_display(extra=elements_to_display, title='Display the corridor made out of free regions')
 
+        # DANI: Tenemos que comprobar que grupos de nodos y paths están conectados entre ellos
+        # DANI: SI hay más de un grupo entonces tenemos que crear un is_corridor_finished para cada grupo y seguir
+
         # Set a function to check if the corridor is finished, given a list of rooms and nodes
         def is_corridor_finished (corridor_rooms : List['Room'], corridor_nodes :List[Point]) -> bool:
             # Check all required rooms are in the corridor
@@ -1464,6 +1775,8 @@ class Room:
                     following_available_path_nodes,
                     following_rooms
                 )
+        print(nodes)
+        breakpoint()
         # Check if we already have any corridor
         # If not, try to find a starting point (e.g. an already set door)
         if len(current_corridor_nodes) == 0:
@@ -2502,16 +2815,12 @@ class Room:
                     # Relocate children to fit in the new boundary
                     truncated_children = [ child for child in self.children if not child.is_fit_to_required_area()  ]
                     child_conflict = False
+                    # Note that all children were already backed up before the pull/push
                     for child in truncated_children:
-                        # Save a backup of the current child in case we have to recover its boundary later
-                        child_boundary_backup = child.boundary
                         if not child.fit_to_required_area():
                             if verbose: print(f'Something went wrong while refitting {child.name}')
                             child_conflict = True
                             break
-                        # Now add the child boundary to the backup
-                        # Note that this is not done before since in case of failure the current children is backuped already
-                        backup[child] = child_boundary_backup
                     # If there was a failure during children relocation then restore the boundary backups and proceed to the next zigzag
                     if child_conflict:
                         self.restore_grid_backup(backup, title='Restored grid backup while reducing children corners')
@@ -2596,7 +2905,7 @@ class Room:
                 return resolute(self.min_area - self.area)
             # If the current area is exactly within the target area range then we are done
             return 0
-        raise ValueError(f'Not supported behaviour: {behaviour}')        
+        raise ValueError(f'Not supported behaviour: {behaviour}')
 
     # Check if this room is already fit to its required area
     def is_fit_to_required_area (self, behaviour : str = DEFAULT_BEHAVIOUR) -> bool:
@@ -3551,6 +3860,9 @@ class Room:
             if verbose: print(' Failed to truncate grid: The room would be splitted')
             return False
         truncated_boundary = truncated_boundaries[0]
+        # Save a backup of self and children grids, including their doors
+        # Note that this must be done before relocating doors, so they are restored as well if anything fails later
+        backup = self.make_grid_backup()
         # Check doors to be respected
         if not force and not self.check_doors_required_spaces(truncated_grid):
             if verbose: print(' Door conflict when truncating: Doors will be relocated')
@@ -3560,27 +3872,19 @@ class Room:
         # DANI: Es posible que se coma toda la habitación??
         if not force and len(truncated_boundaries) == 0:
             if verbose: print(' Failed to truncate grid: The room has been fully consumed')
+            self.restore_grid_backup(backup, title='Restored grid backup while truncating')
             return False
-        # Start saving a backup of self and children boundaries
-        backup = {}
         # Now we must substract the removed region from every child with an already existing boundary
         # Note that it is not usual truncating a room with already set children, but we try to support this
         for child in self.children:
             # If th child is not yet set then skip it
             if not child.grid:
                 continue
-            # Save a backup of the current child in case we have to recover its boundary later
-            child_grid_backup = child.grid
             # Truncate the child grid
             if not child.truncate_grid(removed_region, force=force, check_parent_free_grid=check_parent_free_grid, _recursion_depth=_recursion_depth):
                 # If the truncate process failed then restore backups and return True
                 self.restore_grid_backup(backup, title='Restored grid backup while truncating')
                 return False
-            # Now add the child grid to the backup
-            # Note that this is not done before since in case of failure the current children is backuped already
-            backup[child] = child_grid_backup
-        # Save a backup of the current grid
-        backup[self] = self.grid
         # Set the truncated grid as the current grid
         self.set_grid(truncated_grid, skip_update_display=skip_update_display)
         # Check the truncated grid to still respecting the minimum size
@@ -3665,6 +3969,11 @@ class Room:
         if not new_grid.check_minimum(self.min_size):
             # If we must force fit the expansion then claim as much extra space as needed to fit the new expansion
             if force:
+                # Force fitting requires the parent free grid to be respecting the minimum size already
+                # This may not happen while a child is being set with its initial grid, since the parent free grid is not checked then
+                if not self.parent.free_grid.check_minimum(self.min_size):
+                    if verbose: print(f'Expanding grid of room {self.name} at {expansion_grid} failed: Parent free grid is not respecting the minimum size so it can not be force fitted')
+                    return False
                 new_grid = self.parent.free_grid.force_fit(new_grid, self.min_size, new_grid.min_size, expand=True)
                 # If we failed to fit the grid then surrender
                 if type(new_grid) is Exception:
@@ -3676,8 +3985,12 @@ class Room:
                     print('  Minimum size of the expanded grid would be not respected')
                     self.update_display(title='Grid expansion failure', extra=expansion_grid.get_colored_perimeter_segments('red'))
                 return False
-        # Make a backup of the current grid
-        backup = { self: self.grid }
+        # Make a backup of the current grid and all brother grids
+        # Note that brother grids must be backed up here and not only when they are truncated
+        # Truncated brothers may be compensated and, in order to do so, they may invade other brothers
+        # If the expansion fails after then all these indirectly modified brothers must be restored as well
+        # Otherwise their lost regions would remain as free space which may not respect the minimum size
+        backup = self.parent.make_grid_backup(children_only=True) if self.parent else { self: self.make_grid_backup_entry() }
         # Set the new grid as the current grid
         self.grid = new_grid
         # If the room has no parent then we are done
@@ -3691,8 +4004,13 @@ class Room:
         if check_parent_free_grid and not self.parent.free_grid.check_minimum(parent_free_limit):
             # If we must force fit the expansion then claim as much extra space as needed to fit the new expansion
             if force:
-                self.grid = backup[self]
-                forced_grid = self.parent.free_grid.force_fit(new_grid, self.min_size, self.min_size, expand=True)
+                self.grid = backup[self]['grid']
+                # Force fitting requires the parent free grid to be respecting the minimum size already
+                # This may not happen while a child is being set with its initial grid, since the parent free grid is not checked then
+                if not self.parent.free_grid.check_minimum(self.min_size):
+                    if verbose: print(f'Expanding grid of room {self.name} at {expansion_grid} failed: Parent free grid is not respecting the minimum size so it can not be force fitted')
+                    return False
+                forced_grid =self.parent.free_grid.force_fit(new_grid, self.min_size, self.min_size, expand=True)
                 # If we failed to fit the grid then surrender
                 if type(forced_grid) is Exception:
                     if verbose: print(f'Expanding grid of room {self.name} at {expansion_grid} failed when force fitting parent room')
@@ -3737,6 +4055,14 @@ class Room:
                     self.update_display(title='Grid expansion failure', extra=expansion_grid.get_colored_perimeter_segments('red'))
                 self.restore_grid_backup(backup, title='Restored grid backup while expanding grid')
                 return False
+            # Check if a room with forbidden windows is expanding over any window and, if so, abort the expansion
+            if self.windowed == 'forbidden' and self.does_grid_touch_windows(new_grid):
+                if verbose:
+                    print(f'Expanding grid of room {self.name} at {expansion_grid} failed:')
+                    print('  Grid was expanded over a window in a room with forbidden windows -> Restoring backup')
+                    self.update_display(title='Grid expansion failure', extra=expansion_grid.get_colored_perimeter_segments('red'))
+                self.restore_grid_backup(backup, title='Restored grid backup while expanding grid')
+                return False
             # If we have a adaptable parent then check we did not expand over any parent door outside space
             if self.parent._child_adaptable_boundary and not self.parent.check_doors_side(new_grid, inside=False):
                 # DANI: Tal vez se podría provar a recolocar la door, pero no quiero perder más tiempo con lo child adaptable
@@ -3755,9 +4081,6 @@ class Room:
                 if not expansion_grid.get_overlap_grid(brother_room.grid): continue
                 invaded_brother_rooms.append(brother_room)
                 if verbose: print(f'  Truncating {brother_room.name}')
-                # Make a backup grid of the current brother
-                # We do not save it yet to the bacup object since the grid would be backed up automatically if failed to truncate the grid
-                brother_grid_backup = brother_room.grid
                 # Try to truncate the brother room grid
                 if not brother_room.truncate_grid(expansion_grid, easy=easy, _recursion_depth=_recursion_depth):
                     if verbose:
@@ -3766,8 +4089,6 @@ class Room:
                         self.update_display(title='Grid expansion failure', extra=expansion_grid.get_colored_perimeter_segments('red'))
                     self.restore_grid_backup(backup, title='Restored grid backup while expanding grid')
                     return False
-                # Now save the previous backup
-                backup[brother_room] = brother_grid_backup
             # If this is a loaned push then we must retrieve the area debt at this point
             # Otherwise, if we invade other rooms it may happen that there is not free space enought for them to expand after
             if is_loaned and self.get_required_area(behaviour=behaviour) < 0:
@@ -3899,21 +4220,36 @@ class Room:
             rooms += room.get_rooms_recuersive()
         return rooms
 
+    # Make a backup of the room grid
+    # Doors are backed up as well since they may be relocated when the grid is modified
+    # Note that windows are not backed up since they never move during the solving process
+    def make_grid_backup_entry (self) -> dict:
+        return {
+            'grid': self.grid,
+            'doors': { door: door.make_backup() for door in self.doors },
+        }
+
+    # Restore a backup of the room grid, including doors
+    def restore_grid_backup_entry (self, entry : dict):
+        self.set_grid(entry['grid'], skip_update_display=True)
+        for door, door_backup in entry['doors'].items():
+            door.restore_backup(door_backup)
+
     # Make backup of self and children room grids
-    # A backup is a dict where keys are rooms and values are grids
+    # A backup is a dict where keys are rooms and values are grid backup entries (see make_grid_backup_entry)
     def make_grid_backup (self, children_only : bool = False) -> dict:
         backup = {}
         if not children_only:
-            backup[self] = self.grid
+            backup[self] = self.make_grid_backup_entry()
         for child in self.children:
-            backup[child] = child.grid
+            backup[child] = child.make_grid_backup_entry()
         return backup
 
     # Restore backup of room grids
-    # A backup is a dict where keys are rooms and values are grids
+    # A backup is a dict where keys are rooms and values are grid backup entries (see make_grid_backup_entry)
     def restore_grid_backup (self, backup : dict, title : str = 'Restored grid backup'):
-        for room, grid_backup in backup.items():
-            room.set_grid(grid_backup, skip_update_display=True)
+        for room, entry in backup.items():
+            room.restore_grid_backup_entry(entry)
         self.update_display(title=title)
 
     # Make a full backup of the room, including its children, corridor and doors
@@ -3974,6 +4310,20 @@ class Room:
         # Run the final init of the rooms now that the fully hyerarchy is stablished
         root = self.get_root_room()
         root._root_init()
+        # Set the windows in the facade before anything else, so children rooms adapt to them
+        # Note that they may be set already (e.g. by the parent building)
+        root.set_facade_windows()
+        if len(root.windows) > 0:
+            root.update_display(title='Set facade windows')
+        # Share the window segments with all rooms in the hierarchy
+        window_segments = [ window.segment for window in root.windows ]
+        for room in root.get_rooms_recuersive():
+            room._window_segments = window_segments
+        # Set the windowed values according to the whole hierarchy and check there are enough windows
+        root._set_windowed_recursive()
+        required_windows = sum([ child.get_required_windows() for child in root.children ])
+        if required_windows > len(window_segments):
+            raise InputError(f'Rooms require {required_windows} windows but there are only {len(window_segments)} windows in the facade')
         # Now run the solving logic
         return self.solve_children(recursive=True)
 
@@ -3988,7 +4338,7 @@ class Room:
     def copy (self) -> 'Room':
         # Make an empty copy
         copy = Room.__new__(Room)
-        # Pase the current contents
+        # Paste the current contents
         copy.__dict__.update(self.__dict__)
         # Edit some fields which may need a deeper copy
         # Copy every door
@@ -4003,6 +4353,11 @@ class Room:
 
     # Convert this instance in another instance by copying all its atributes
     def paste(self, other : 'Room'):
+        # Keep the current parent, since the other room may be a copy and copies have no parent
+        parent = self._parent
+        # Paste the new contents
         self.__dict__.update(other.__dict__)
+        # Restore the parent
+        self._parent = parent
         # Make sure this room becomes the parent of every child
         self.children = self.children
