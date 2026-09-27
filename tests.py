@@ -410,14 +410,14 @@ test_building_3 = Building(
                 Room(
                     name='Sala de mantenimiento',
                     # Cuadrado de 30x30 en el centro de la planta, sin tocar ninguna pared
-                    boundary=Boundary(Polygon.from_corners([
-                        Point(-15,-12),
-                        Point(-15,+18),
-                        Point(+15,+18),
-                        Point(+15,-12),
-                    ])),
-                    # min_area=800,
-                    # max_area=1000,
+                    # boundary=Boundary(Polygon.from_corners([
+                    #     Point(-15,-12),
+                    #     Point(-15,+18),
+                    #     Point(+15,+18),
+                    #     Point(+15,-12),
+                    # ])),
+                    min_area=800,
+                    max_area=1000,
                     fill_color='blue'
                 ),
                 Room(

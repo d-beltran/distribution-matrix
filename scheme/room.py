@@ -1531,8 +1531,14 @@ class Room:
             #     if not main_door.point:
             #         main_door.point = only_node
             return None
-        # Then a path between non-redundant nodes is a list of segments, which are connected by redundant nodes
-        for node_point, node_data in non_redundant_nodes.items():
+        # If there are multiple non-redundant nodes then we must make a corridor
+        # Trace all paths between non-redundant nodes
+        # A path between non-redundant nodes is a list of segments, which are connected by redundant nodes
+        # Keep track of all nodes (also the redundant ones) we connect on the way
+        nodes_to_cover = set(nodes.keys())
+        def setup_non_relevant_node (node_point : Point, node_data : dict):
+            # Remove the main point from the pending list
+            nodes_to_cover.discard(node_point)
             # Find all current node paths to other non-redundant nodes
             paths = []
             # Save the non-redundant node each path is leading to
@@ -1547,10 +1553,12 @@ class Room:
                 if len(path_rooms) == 0:
                     raise RuntimeError(f'Segment {starting_segment} has no associated rooms')
                 if len(path_rooms) == 2 and all([ room in path_rigid_rooms for room in path_rooms ]):
-                    print(f'Skipping {starting_segment} with {path_rooms}')
+                    if verbose: print(f'Skipping {starting_segment} with {path_rooms}')
                     continue
                 last_segment = starting_segment
                 last_point = next(point for point in last_segment.points if point != node_point)
+                # Remove the last point from the pending list
+                nodes_to_cover.discard(last_point)
                 last_node = nodes[last_point]
                 path = [ last_segment ]
                 # Set if the room is isolated
@@ -1560,6 +1568,8 @@ class Room:
                     # If the node is redundant then there will be always only 2 connected segments and one of them will be the last
                     last_segment = next( segment for segment in last_node['connected_segments'] if segment != last_segment )
                     last_point = next(point for point in last_segment.points if point != last_point)
+                    # Remove the last point from the pending list
+                    nodes_to_cover.discard(last_point)
                     last_node = nodes[last_point]
                     path.append(last_segment)
                     # If we closed a path not finding any new redundant point then this may be an isolated room with a set door
@@ -1588,6 +1598,34 @@ class Room:
             # Add paths and path nodes to the node data
             node_data['paths'] = paths
             node_data['path_nodes'] = path_nodes
+        # Start seting up the nodes we already know that are relevant
+        for node_point, node_data in non_redundant_nodes.items():
+            setup_non_relevant_node(node_point, node_data)
+
+        # If there are still nodes to cover at this point then it means there is an isolated room in free space
+        # Check this is the case
+        if len(nodes_to_cover) > 0:
+            # Check these remaining nodes are actually free grid interior corners
+            free_grid_corners = set()
+            for boundary in self.free_grid.boundaries:
+                for polygon in boundary.interior_polygons:
+                    free_grid_corners.update(polygon.corners)
+            # If nodes are not in free space then something is wrong
+            if not all([ node in free_grid_corners for node in nodes_to_cover ]):
+                listed_nodes = ', '.join([ str(node) for node in nodes_to_cover ])
+                raise RuntimeError(f'There are {len(nodes_to_cover)} nodes left to assign and they are not in free space: {listed_nodes}')
+
+        # Now for each group of nodes still left to cover, make one of them relevant
+        while len(nodes_to_cover) > 0:
+            # Get one of non-covered nodes
+            starting_node = next(iter(nodes_to_cover))
+            starting_node_data = nodes[starting_node]
+            # This node won't be redundant any more
+            starting_node_data['is_redundant'] = False
+            non_redundant_nodes[starting_node] = starting_node_data
+            # Setup this node as any other non-relevant node, thus connecting it with its group of nodes
+            # This will remove this node and its connected nodes from nodes_to_cover
+            setup_non_relevant_node(starting_node, starting_node_data)
 
         # ------------------------------------------------------------------------------------------------------------------------------
 
@@ -1656,22 +1694,50 @@ class Room:
             #     elements_to_display = [ segment.get_colored_segment('red') for segment in current_corridor ]
             #     self.update_display(extra=elements_to_display, title='Display the corridor made out of free regions')
 
-        # DANI: Tenemos que comprobar que grupos de nodos y paths están conectados entre ellos
-        # DANI: SI hay más de un grupo entonces tenemos que crear un is_corridor_finished para cada grupo y seguir
+        # Make groups of connected nodes and paths since we must solve each group independently
+        # Note that most times there will be only 1 group
+        # There may be more groups when the parent (self) free space is surrounding groups of isolated rooms
+        node_groups = []
+        pending_points = set(non_redundant_nodes.keys())
+        while pending_points:
+            start_point = next(iter(pending_points))
+            group_points = { start_point }
+            pending_to_visit = [ start_point ]
+            while pending_to_visit:
+                point = pending_to_visit.pop()
+                for neighbour_point in non_redundant_nodes[point]['path_nodes']:
+                    if neighbour_point not in group_points:
+                        group_points.add(neighbour_point)
+                        pending_to_visit.append(neighbour_point)
+            pending_points -= group_points
+            node_groups.append(group_points)
+
+        # Display the number of groups
+        if verbose: print(f'Found {len(node_groups)} groups of nodes to solve')
+        print(f'Found {len(node_groups)} groups of nodes to solve')
 
         # Set a function to check if the corridor is finished, given a list of rooms and nodes
-        def is_corridor_finished (corridor_rooms : List['Room'], corridor_nodes :List[Point]) -> bool:
+        def is_corridor_finished (corridor_rooms : List['Room'], corridor_nodes :List[Point], verbose : bool = False) -> bool:
             # Check all required rooms are in the corridor
             contains_all_rooms = all(room in corridor_rooms for room in required_rooms)
             if not contains_all_rooms:
+                if verbose:
+                    missing_rooms = [ room for room in required_rooms if room not in corridor_rooms ]
+                    print(f'Missing rooms: {missing_rooms}')
                 return False
             # Check all free regions are in the corridor
             contains_all_free_regions = all(node in corridor_nodes for node in free_region_nodes)
             if not contains_all_free_regions:
+                if verbose:
+                    missing_nodes = [ node for node in free_region_nodes if node not in corridor_nodes ]
+                    print(f'Missing nodes: {missing_nodes}')
                 return False
             # Check all required doors are in the corridor
             contains_all_doors = all(door_point in corridor_nodes for door_point in already_set_door_points)
             if not contains_all_doors:
+                if verbose:
+                    missing_doors = [ door_point for door_point in already_set_door_points if door_point not in corridor_nodes ]
+                    print(f'Missing doors: {missing_doors}')
                 return False
             return True
 
@@ -1685,159 +1751,201 @@ class Room:
             self.corridor_grid = functional_corridor_grid
             return None
 
-        # Trak which combinations of path nodes we have tried allready
-        # Combinations of path nodes are equivalent to combinations of paths, but easier to compare
-        # This way we do not analyze the same corridor multiple times
-        already_covered_path_nodes = []
-        # Set a function to generate corridors by recuersively joining node paths
-        def get_following_paths (
-            current_path : list,
-            current_path_nodes : list,
-            available_paths : list,
-            available_path_nodes : list,
-            current_rooms : set
-        ):
+        # Set a function to solve the corridor backbone for a single group of connected nodes and paths
+        # Every group is solved independently since there is no path connecting one group to another
+        # The group corridor segments and nodes are added to the current corridor
+        def solve_corridor_group (group_points : set):
             nonlocal current_corridor
-            nonlocal current_corridor_length
             nonlocal current_corridor_nodes
-            nonlocal already_covered_path_nodes
-            # Check if the current path nodes have been covered already and stop here if so
-            current_path_nodes_set = set(current_path_nodes)
-            if any( current_path_nodes_set == set(path_nodes) for path_nodes in already_covered_path_nodes ):
+            # Restrict the required rooms, free regions and doors to those reachable from this group
+            group_required_rooms = [ room for room in required_rooms if any( room in nodes[point]['rooms'] for point in group_points ) ]
+            group_free_region_nodes = { point: region for point, region in free_region_nodes.items() if point in group_points }
+            group_door_points = { point: door for point, door in already_set_door_points.items() if point in group_points }
+            # If this group has nothing to solve (no required rooms, no free regions and no doors) then skip it
+            if len(group_required_rooms) == 0 and len(group_free_region_nodes) == 0 and len(group_door_points) == 0:
                 return
-            # Add current path nodes to the covered list in order to avoid repeating this path further
-            already_covered_path_nodes.append(current_path_nodes)
-            # Try to expand the current corridor using all available paths
-            for i, next_path in enumerate(available_paths):
-                # Get the remaining available paths/nodes after substracting the current next path
-                following_available_paths = available_paths[0:i] + available_paths[i+1:]
-                following_available_path_nodes = available_path_nodes[0:i] + available_path_nodes[i+1:]
-                # The following node will be the other next path's node
-                following_node = available_path_nodes[i]
-                # Get the new following path after adding the last path while getting the next node
-                following_path = current_path + next_path
-                following_path_nodes = current_path_nodes + [ following_node ]
-                # Get the corresponding node data
-                following_node_data = nodes[following_node]
-                # Get the following node paths which are not already included in the current path and its nodes
-                following_node_paths = [ *following_node_data['paths'] ]
-                following_node_path_nodes = [ *following_node_data['path_nodes'] ]
-                following_rooms = set(current_rooms)
-                # In case we find a free region node we immediately add all its segments and nodes to the corridor
-                corridor_free_region = free_region_nodes.get(following_node, None)
-                if corridor_free_region:
-                    following_path += corridor_free_region['corridor_segments']
-                    following_path_nodes += corridor_free_region['corridor_nodes']
-                    for node in corridor_free_region['corridor_nodes']:
-                        node_data = nodes[node]
-                        following_node_paths += node_data['paths']
-                        following_node_path_nodes += node_data['path_nodes']
-                        following_rooms = following_rooms.union(set(node_data['rooms']))
-                # Add the following node paths/nodes to the remaning available paths/nodes
-                # Then we get the available paths/nodes for the following path
-                #print(len(following_node_paths))
-                for path, node in zip(following_node_paths, following_node_path_nodes):
-                    # If the node is already in the current path nodes list then we skip it
-                    if node in current_path_nodes:
+            # Set a function to check if the group corridor is finished, given a list of rooms and nodes
+            # Same logic as is_corridor_finished but restricted to this group rooms, free regions and doors
+            def is_corridor_group_finished (corridor_rooms : List['Room'], corridor_nodes :List[Point]) -> bool:
+                # Check all required rooms are in the corridor
+                contains_all_rooms = all(room in corridor_rooms for room in group_required_rooms)
+                if not contains_all_rooms:
+                    return False
+                # Check all free regions are in the corridor
+                contains_all_free_regions = all(node in corridor_nodes for node in group_free_region_nodes)
+                if not contains_all_free_regions:
+                    return False
+                # Check all required doors are in the corridor
+                contains_all_doors = all(door_point in corridor_nodes for door_point in group_door_points)
+                if not contains_all_doors:
+                    return False
+                return True
+            # Set the variables to store the current group corridor
+            group_corridor = []
+            group_corridor_nodes = []
+            group_corridor_length = None
+            # Trak which combinations of path nodes we have tried allready
+            # Combinations of path nodes are equivalent to combinations of paths, but easier to compare
+            # This way we do not analyze the same corridor multiple times
+            already_covered_path_nodes = []
+            # Set a function to generate corridors by recuersively joining node paths
+            def get_following_paths (
+                current_path : list,
+                current_path_nodes : list,
+                available_paths : list,
+                available_path_nodes : list,
+                current_rooms : set
+            ):
+                nonlocal group_corridor
+                nonlocal group_corridor_length
+                nonlocal group_corridor_nodes
+                nonlocal already_covered_path_nodes
+                # Check if the current path nodes have been covered already and stop here if so
+                current_path_nodes_set = set(current_path_nodes)
+                if any( current_path_nodes_set == set(path_nodes) for path_nodes in already_covered_path_nodes ):
+                    return
+                # Add current path nodes to the covered list in order to avoid repeating this path further
+                already_covered_path_nodes.append(current_path_nodes)
+                # Try to expand the current corridor using all available paths
+                for i, next_path in enumerate(available_paths):
+                    # Get the remaining available paths/nodes after substracting the current next path
+                    following_available_paths = available_paths[0:i] + available_paths[i+1:]
+                    following_available_path_nodes = available_path_nodes[0:i] + available_path_nodes[i+1:]
+                    # The following node will be the other next path's node
+                    following_node = available_path_nodes[i]
+                    # Get the new following path after adding the last path while getting the next node
+                    following_path = current_path + next_path
+                    following_path_nodes = current_path_nodes + [ following_node ]
+                    # Get the corresponding node data
+                    following_node_data = nodes[following_node]
+                    # Get the following node paths which are not already included in the current path and its nodes
+                    following_node_paths = [ *following_node_data['paths'] ]
+                    following_node_path_nodes = [ *following_node_data['path_nodes'] ]
+                    following_rooms = set(current_rooms)
+                    # In case we find a free region node we immediately add all its segments and nodes to the corridor
+                    corridor_free_region = group_free_region_nodes.get(following_node, None)
+                    if corridor_free_region:
+                        following_path += corridor_free_region['corridor_segments']
+                        following_path_nodes += corridor_free_region['corridor_nodes']
+                        for node in corridor_free_region['corridor_nodes']:
+                            node_data = nodes[node]
+                            following_node_paths += node_data['paths']
+                            following_node_path_nodes += node_data['path_nodes']
+                            following_rooms = following_rooms.union(set(node_data['rooms']))
+                    # Add the following node paths/nodes to the remaning available paths/nodes
+                    # Then we get the available paths/nodes for the following path
+                    for path, node in zip(following_node_paths, following_node_path_nodes):
+                        # If the node is already in the current path nodes list then we skip it
+                        if node in current_path_nodes:
+                            continue
+                        # In case the point is already in the list of available nodes it means we have two paths for the same node
+                        # In this case, get the shortest path
+                        if node in following_available_path_nodes:
+                            index = following_available_path_nodes.index(node)
+                            previous_path = following_available_paths[index]
+                            if get_path_length(path) < get_path_length(previous_path):
+                                following_available_paths[index] = path
+                        # Otherwise, add the current new available path and node to the lists
+                        else:
+                            following_available_paths.append(path)
+                            following_available_path_nodes.append(node)
+                    # Get the following path covered rooms
+                    following_rooms = following_rooms.union(set(following_node_data['rooms']))
+                    # DANI: Usa esto para ver los pasos intermedios
+                    #elements_to_display = [ segment.get_colored_segment('red') for segment in following_path ]
+                    #self.update_display(extra=elements_to_display, title='Corridor solver step')
+                    # If following path includes all rooms then it is a candidate to be the corridor
+                    if is_corridor_group_finished(following_rooms, following_path_nodes):
+                        # Check if this path is shorter than the current corridor
+                        # The shorter path will remain as the current corridor
+                        # Also the current corridor length may be none if this is the first attempt
+                        following_path_length = get_path_length(following_path)
+                        if group_corridor_length == None or following_path_length < group_corridor_length:
+                            group_corridor = following_path
+                            group_corridor_length = following_path_length
+                            group_corridor_nodes = following_path_nodes
                         continue
-                    # In case the point is already in the list of available nodes it means we have two paths for the same node
-                    # In this case, get the shortest path
-                    if node in following_available_path_nodes:
-                        index = following_available_path_nodes.index(node)
-                        previous_path = following_available_paths[index]
-                        if get_path_length(path) < get_path_length(previous_path):
-                            following_available_paths[index] = path
-                    # Otherwise, add the current new available path and node to the lists
-                    else:
-                        following_available_paths.append(path)
-                        following_available_path_nodes.append(node)
-                # Get the following path covered rooms
-                following_rooms = following_rooms.union(set(following_node_data['rooms']))
-                # DANI: Usa esto para ver los pasos intermedios
-                #elements_to_display = [ segment.get_colored_segment('red') for segment in following_path ]
-                #self.update_display(extra=elements_to_display, title='Corridor solver step')
-                # If following path includes all rooms then it is a candidate to be the corridor
-                if is_corridor_finished(following_rooms, following_path_nodes):
-                    # Check if this path is shorter than the current corridor
-                    # The shorter path will remain as the current corridor
-                    # Also the current corridor length may be none if this is the first attempt
-                    following_path_length = get_path_length(following_path)
-                    if current_corridor_length == None or following_path_length < current_corridor_length:
-                        current_corridor = following_path
-                        current_corridor_length = following_path_length
-                        current_corridor_nodes = following_path_nodes
-                    continue
-                # If the follwoing path does not cover all rooms yet then keep expanding it
-                get_following_paths(
-                    following_path,
-                    following_path_nodes,
-                    following_available_paths,
-                    following_available_path_nodes,
-                    following_rooms
-                )
-        print(nodes)
-        breakpoint()
-        # Check if we already have any corridor
-        # If not, try to find a starting point (e.g. an already set door)
-        if len(current_corridor_nodes) == 0:
-            if len(already_set_door_points) > 0:
-                # Get a sample set door in case we have doors and append it to the list of nodes
-                sample_set_door_point = next(iter(already_set_door_points))
-                current_corridor_nodes.append(sample_set_door_point)
-        # In case we already have a node to start, we can solve the rest of the corridor from it
-        if len(current_corridor_nodes) > 0:
-            start_path = current_corridor # It may contain segments already, from the free space
-            start_path_points = current_corridor_nodes
-            start_nodes = [ nodes[point] for point in start_path_points ]
-            start_non_redundant_nodes = [ node for node in start_nodes if not node['is_redundant'] ] # Maybe this is redundant? (ironically)
-            start_rooms = set(sum([ node['rooms'] for node in start_non_redundant_nodes ],[]))
-            start_available_paths = sum([ node['paths'] for node in start_non_redundant_nodes ],[])
-            start_available_path_nodes = sum([ node['path_nodes'] for node in start_non_redundant_nodes ],[])
-            get_following_paths(
-                start_path,
-                start_path_points,
-                start_available_paths,
-                start_available_path_nodes,
-                start_rooms
-            )
-        # Otherwise, there is no node which we know for sure it will be part from the corridor
-        # We must solve the corridor several times starting from diferent nodes
-        # We start on each non-redundant node from the room with less non-redundant nodes
-        else:
-            all_room_ocurrences = sum([ node_data['rooms'] for node_data in nodes.values() ], [])
-            rooms = list(set(all_room_ocurrences))
-            node_room_counts = { room: all_room_ocurrences.count(room) for room in rooms  }
-            room_with_less_nodes = min(node_room_counts, key=node_room_counts.get)
-            nodes_from_room_with_less_nodes = [
-                node_point for node_point, node_data in non_redundant_nodes.items() if room_with_less_nodes in node_data['rooms']
-            ]
-            # It may happen that a node alone is enough to cover all rooms (and there are not set doors yet)
-            # We must check it at this point, or it will add a random segment (path) which may be not necessary and take much space
-            # If following path includes all rooms then it is a candidate to be the corridor
-            # Note that here we do not check doors. This is because if we are here then it means there are not doors
-            for node in nodes_from_room_with_less_nodes:
-                contains_all_rooms = all(room in nodes[node]['rooms'] for room in required_rooms)
-                if contains_all_rooms:
-                    current_corridor = []
-                    current_corridor_nodes = [node]
-                    break
-            # If we failed to find a single node corridor then try so set the corridor from every node
-            if len(current_corridor_nodes) == 0:
-                for node in nodes_from_room_with_less_nodes:
-                    start_point = node
-                    start_node = nodes[start_point]
-                    start_rooms = set(start_node['rooms'])
-                    start_path = current_corridor # It may contain segments already, from the free space
-                    start_path_points = [ start_point ]
-                    start_available_paths = start_node['paths']
-                    start_available_path_nodes = start_node['path_nodes']
+                    # If the follwoing path does not cover all rooms yet then keep expanding it
                     get_following_paths(
-                        start_path,
-                        start_path_points,
-                        start_available_paths,
-                        start_available_path_nodes,
-                        start_rooms
+                        following_path,
+                        following_path_nodes,
+                        following_available_paths,
+                        following_available_path_nodes,
+                        following_rooms
                     )
+            # Check if we already have any corridor
+            # If not, try to find a starting point (e.g. an already set door)
+            if len(group_corridor_nodes) == 0:
+                if len(group_door_points) > 0:
+                    # Get a sample set door in case we have doors and append it to the list of nodes
+                    sample_set_door_point = next(iter(group_door_points))
+                    group_corridor_nodes.append(sample_set_door_point)
+            # In case we already have a node to start, we can solve the rest of the corridor from it
+            if len(group_corridor_nodes) > 0:
+                start_path = group_corridor # It may contain segments already, from the free space
+                start_path_points = group_corridor_nodes
+                start_nodes = [ nodes[point] for point in start_path_points ]
+                start_non_redundant_nodes = [ node for node in start_nodes if not node['is_redundant'] ] # Maybe this is redundant? (ironically)
+                start_rooms = set(sum([ node['rooms'] for node in start_non_redundant_nodes ],[]))
+                start_available_paths = sum([ node['paths'] for node in start_non_redundant_nodes ],[])
+                start_available_path_nodes = sum([ node['path_nodes'] for node in start_non_redundant_nodes ],[])
+                get_following_paths(
+                    start_path,
+                    start_path_points,
+                    start_available_paths,
+                    start_available_path_nodes,
+                    start_rooms
+                )
+            # Otherwise, there is no node which we know for sure it will be part from the corridor
+            # We must solve the corridor several times starting from diferent nodes
+            # We start on each non-redundant node from the room with less non-redundant nodes
+            else:
+                all_room_ocurrences = sum([ nodes[point]['rooms'] for point in group_points ], [])
+                rooms = list(set(all_room_ocurrences))
+                node_room_counts = { room: all_room_ocurrences.count(room) for room in rooms  }
+                room_with_less_nodes = min(node_room_counts, key=node_room_counts.get)
+                nodes_from_room_with_less_nodes = [
+                    node_point for node_point in group_points if room_with_less_nodes in nodes[node_point]['rooms']
+                ]
+                # It may happen that a node alone is enough to cover all rooms (and there are not set doors yet)
+                # We must check it at this point, or it will add a random segment (path) which may be not necessary and take much space
+                # If following path includes all rooms then it is a candidate to be the corridor
+                # Note that here we do not check doors. This is because if we are here then it means there are not doors
+                for node in nodes_from_room_with_less_nodes:
+                    contains_all_rooms = all(room in nodes[node]['rooms'] for room in group_required_rooms)
+                    if contains_all_rooms:
+                        group_corridor = []
+                        group_corridor_nodes = [node]
+                        break
+                # If we failed to find a single node corridor then try so set the corridor from every node
+                if len(group_corridor_nodes) == 0:
+                    for node in nodes_from_room_with_less_nodes:
+                        start_point = node
+                        start_node = nodes[start_point]
+                        start_rooms = set(start_node['rooms'])
+                        start_path = group_corridor # It may contain segments already, from the free space
+                        start_path_points = [ start_point ]
+                        start_available_paths = start_node['paths']
+                        start_available_path_nodes = start_node['path_nodes']
+                        get_following_paths(
+                            start_path,
+                            start_path_points,
+                            start_available_paths,
+                            start_available_path_nodes,
+                            start_rooms
+                        )
+
+            # At this point we have the backbone of this group's corridor
+            # Check there is something, since we already discarded groups with nothing to solve above
+            if len(group_corridor) == 0 and len(group_corridor_nodes) == 0:
+                raise ValueError('Empty corridor')
+            # Add the group corridor to the current corridor
+            current_corridor += group_corridor
+            current_corridor_nodes += group_corridor_nodes
+
+        # Solve the corridor backbone for each group of connected nodes independently
+        for group_points in node_groups:
+            solve_corridor_group(group_points)
 
         # At this point we have the backbone of the corridor
         # Check there is something
@@ -1879,7 +1987,7 @@ class Room:
 
         # Check the current corridor contains al nodes at this point
         current_rooms = set(sum([ nodes[point]['rooms'] for point in current_corridor_nodes ],[]))
-        if not is_corridor_finished(current_rooms, current_corridor_nodes):
+        if not is_corridor_finished(current_rooms, current_corridor_nodes, True):
             raise ValueError('Failed to set the corridor')
 
         # Return all the results inside a dict
