@@ -1453,6 +1453,11 @@ class Polygon:
             return None
         return corner
 
+    # Check if a point is an inside corner of the polygon
+    def is_inside_corner (self, point : 'Point') -> bool:
+        corner = self.get_corner(point)
+        return bool(corner and corner.inside)
+
     # Get the polygon grid
     # If grid was previously calculated then return it
     # Otherwise, get all rectangles which form the polygon and set a new grid with them
@@ -1992,6 +1997,11 @@ class Boundary:
         if not corner:
             return None
         return corner
+
+    # Check if a point is an inside corner of the boundary
+    # Note that corner.inside is relative to its polygon, so it is inverted for interior polygons
+    def is_inside_corner (self, point : 'Point') -> bool:
+        return any(corner == point for corner in self.inside_corners)
 
     # Get the inside corners
     def get_inside_corners (self) -> List['Corner']:
@@ -2578,9 +2588,9 @@ class Grid:
                 if segment.is_horizontal():
                     # Set left and right
                     left_corner, right_corner = sorted(segment.points, key=lambda point: point.x)
-                    if boundary.get_corner(left_corner).inside: left = left_corner.x - margin
+                    if boundary.is_inside_corner(left_corner): left = left_corner.x - margin
                     else: left = left_corner.x
-                    if boundary.get_corner(right_corner).inside: right = right_corner.x + margin
+                    if boundary.is_inside_corner(right_corner): right = right_corner.x + margin
                     else: right = right_corner.x
                     # Set top and bottom
                     sample_point = segment.points[0]
@@ -2590,9 +2600,9 @@ class Grid:
                 elif segment.is_vertical():
                     # Set top and bottom
                     bottom_corner, top_corner = sorted(segment.points, key=lambda point: point.y)
-                    if boundary.get_corner(bottom_corner).inside: bottom = bottom_corner.y - margin
+                    if boundary.is_inside_corner(bottom_corner): bottom = bottom_corner.y - margin
                     else: bottom = bottom_corner.y
-                    if boundary.get_corner(top_corner).inside: top = top_corner.y + margin
+                    if boundary.is_inside_corner(top_corner): top = top_corner.y + margin
                     else: top = top_corner.y
                     # Set left and right
                     sample_point = segment.points[0]
@@ -2794,9 +2804,9 @@ class Grid:
                 if segment.is_horizontal():
                     # Set left and right
                     left_corner, right_corner = sorted(segment.points, key=lambda point: point.x)
-                    if boundary.get_corner(left_corner).inside: left = left_corner.x - x_fit_size
+                    if boundary.is_inside_corner(left_corner): left = left_corner.x - x_fit_size
                     else: left = left_corner.x + margin
-                    if boundary.get_corner(right_corner).inside: right = right_corner.x + x_fit_size
+                    if boundary.is_inside_corner(right_corner): right = right_corner.x + x_fit_size
                     else: right = right_corner.x - margin
                     # It may happen in short segments surrounded by outside corners that margins make left be higher than right
                     # In this cases it means there is no space at all for the fitting region, so skip it
@@ -2809,9 +2819,9 @@ class Grid:
                 elif segment.is_vertical():
                     # Set top and bottom
                     bottom_corner, top_corner = sorted(segment.points, key=lambda point: point.y)
-                    if boundary.get_corner(bottom_corner).inside: bottom = bottom_corner.y - y_fit_size
+                    if boundary.is_inside_corner(bottom_corner): bottom = bottom_corner.y - y_fit_size
                     else: bottom = bottom_corner.y + margin
-                    if boundary.get_corner(top_corner).inside: top = top_corner.y + y_fit_size
+                    if boundary.is_inside_corner(top_corner): top = top_corner.y + y_fit_size
                     else: top = top_corner.y - margin
                     # It may happen in short segments surrounded by outside corners that margins make bottom be higher than top
                     # In this cases it means there is no space at all for the fitting region, so skip it

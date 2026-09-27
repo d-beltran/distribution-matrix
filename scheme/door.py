@@ -441,7 +441,7 @@ class Door:
         def sort_by_distance_to_wall (point : Point) -> number:
             boundary_segment = available_boundary.get_border_element(point)
             corners = [ available_boundary.get_corner(p) for p in boundary_segment.points ]
-            outside_corners = [ corner for corner in corners if not corner.inside ]
+            outside_corners = [ corner for corner in corners if not available_boundary.is_inside_corner(corner) ]
             if len(outside_corners) == 0:
                 return inf
             corner_distances = [ point.get_distance_to(corner) for corner in outside_corners ]

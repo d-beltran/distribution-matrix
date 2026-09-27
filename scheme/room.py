@@ -2288,6 +2288,11 @@ class Room:
         if self.discarded_grid:
             self.reassign_discarded_regions()
 
+        # Now change the behaviour of all children to become conformist with the area they claim
+        for child in self.children:
+            if child.rigid: continue
+            child.area_fitting_behaviour = 'conformist'
+
         # Get all children doors, both the already stablished and the not stablished ones
         # Add the room door also if this room is the root
         # Otherwise the door room must never be moved since it is already placed according to the parent corridor
@@ -2646,8 +2651,7 @@ class Room:
         # Now, relocate and reshape children rooms
         for child in self.children:
             if child.rigid: continue
-            current_behaviour = 'conformist' if equal(self.free_area, 0) else 'greedy'
-            if not child.fit_to_required_area(behaviour=current_behaviour):
+            if not child.fit_to_required_area():
                 if verbose: print(f'{child.name} failed to fit to required area after corridor area truncation')
                 return False
 
@@ -4058,6 +4062,7 @@ class Room:
         check_parent_free_grid : bool = True,
         check_overlaps : bool = True,
         compensate_invaded : bool = True,
+        check_surrounded : bool = True,
         force : bool = False,
         is_loaned : bool = False,
         behaviour : str = 'exigent',
@@ -4082,7 +4087,7 @@ class Room:
                 if not self.parent.free_grid.check_minimum(self.min_size):
                     if verbose: print(f'Expanding grid of room {self.name} at {expansion_grid} failed: Parent free grid is not respecting the minimum size so it can not be force fitted')
                     return False
-                new_grid = self.parent.free_grid.force_fit(new_grid, self.min_size, new_grid.min_size, expand=True)
+                new_grid = self.parent.free_grid.force_fit(new_grid, self.min_size, self.min_size, expand=True)
                 # If we failed to fit the grid then surrender
                 if type(new_grid) is Exception:
                     if verbose: print(f'Expanding grid of room {self.name} at {expansion_grid} failed when force fitting')
@@ -4226,6 +4231,21 @@ class Room:
                             print(f'Expanding grid of room {self.name} at {expansion_grid} failed:')
                             print('  Grid was expanded over a brother room which failed to comepnsate area after truncation -> Restoring backup')
                             self.update_display(title='Grid expansion failure', extra=expansion_grid.get_colored_perimeter_segments('red'))
+                        self.restore_grid_backup(backup, title='Restored grid backup while expanding grid')
+                        return False
+        # Check we are not surrounding brother rooms which are to be reached by the corridor
+        if check_surrounded:
+            # Get a list of brother rooms which are to be reached by the corridor
+            # i.e. they have doors
+            reachable_brother_rooms = [ room for room in brother_rooms if len(room.doors) > 0 ]
+            # Iterate interior polygons in the room boundary
+            for interior_polygon in self.boundary.interior_polygons:
+                # Iterate brother rooms
+                for brother_room in reachable_brother_rooms:
+                    if brother_room.grid in interior_polygon.grid:
+                        if verbose:
+                            print(f'Expanding grid of room {self.name} at {expansion_grid} failed:')
+                            print(f'  Gird has totally surrounded brother room "{brother_room.name}" thus preventing the corridor to reach it')
                         self.restore_grid_backup(backup, title='Restored grid backup while expanding grid')
                         return False
         # At this point the expand succeed
