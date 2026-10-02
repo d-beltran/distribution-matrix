@@ -3051,7 +3051,12 @@ class Room:
             raise RuntimeError(f'Trying to fit {self.name} but it has no initial grid/boundary')
         if self.rigid:
             raise RuntimeError(f'Trying to fit {self.name} but it is rigid')
-        # Check if we are trying to fit a distribution already tried before
+        # Calculate how much area we need to expand
+        required_area = self.get_required_area(behaviour=behaviour, verbose=verbose)
+        # If the area is already satisfied then stop here
+        if self.is_fit_to_required_area(behaviour=behaviour):
+            return True
+        # Check if we are trying to fit a distribution already tried and failed before
         # This prevents ending in a infinite loop
         # Note that tried distributions are stored in this room and not in the parent
         # Otherwise it would fail when multiple brothers are asked to compensate after corridor placement 
@@ -3061,11 +3066,6 @@ class Room:
             return False
         # Add this new distribution's cksum to the set
         self.already_visited_brother_configurations.add(distribution_cksum)
-        # Calculate how much area we need to expand
-        required_area = self.get_required_area(behaviour=behaviour, verbose=verbose)
-        # If the area is already satisfied then stop here
-        if self.is_fit_to_required_area(behaviour=behaviour):
-            return True
         # If more area is required and this is an exigent call then make sure there is free space available to claim
         if required_area > 0 and behaviour == 'exigent' and not self.parent.free_grid:
             raise RuntimeError(f'Trying to fit {self.name} with {required_area} required area (exigent behaviour) but there is no free space available')
