@@ -5,6 +5,8 @@ from matplotlib.widgets import Slider, Button
 import matplotlib.patches as mpatches
 
 import math
+import pickle
+import zlib
 from multiprocessing import Process
 from threading import Thread
 
@@ -16,9 +18,6 @@ warnings.filterwarnings("ignore")
 
 # Import global variables
 from utils.auxiliar import GLOBAL
-
-# Set a list with all system values at each recorded step
-global_frames = []
 
 # Updater called from the system
 def add_frame (data : list, title : Optional[str] = None):
@@ -32,7 +31,7 @@ def add_frame (data : list, title : Optional[str] = None):
     # If so stop here
     if GLOBAL['frame_count'] > GLOBAL['frames_limit']: raise SystemExit('Reached displayed frames limit')
     display_message = title if title else 'No title'
-    print(f' [ frame {len(global_frames)} ] - {display_message}')
+    print(f' [ frame {GLOBAL["frame_count"]} ] - {display_message}')
     if type(data) != list:
         data = [data]
     # Remove duplicates
@@ -43,12 +42,14 @@ def add_frame (data : list, title : Optional[str] = None):
     rects = get_rects_from_anything(data)
     traced = [ element for element in data if hasattr(element, 'name') ]
     frame = (segments, rects, traced, display_message)
-    global_frames.append(frame)
     GLOBAL['frame_count'] += 1
     # Send only the new frame to the display process, which keeps its own list of frames
-    # Note that a frame is never modified after this point, so it does not matter when the queue pickles it
+    # Pickle it now, so the frame is a snapshot of this moment even if its elements are modified later
+    # Compress it so the display can keep thousands of frames in memory
+    # WARNING: Unpickled frames are huge (~0.5 MB each) and they do not share elements between them
+    # WARNING: Keeping thousands of unpickled frames in the display fills the RAM and freezes everything
     frames_queue = GLOBAL['frames_queue']
-    frames_queue.put(frame)
+    frames_queue.put(zlib.compress(pickle.dumps(frame), 1))
 
 # Show the heatmap
 # The frames queue must be passed as argument
@@ -63,10 +64,11 @@ def represent (frames_queue):
     fig, ax = plt.subplots(layout='constrained', figsize=(12, 8.5))
     fig.get_layout_engine().set(rect=(0, 0.05, 1, 0.95))
     # Set the list of frames received so far
+    # Frames are kept compressed and they are only unpacked when they are displayed
     frames = []
     # Keep reading frames from the queue in a background thread
     # Thus the queue is always emptied, even while the display is busy drawing
-    # WARNING: Frames are heavy and the queue pipe is small, so reading only between draws is too slow
+    # Note that frames arrive as compressed bytes, so reading them is cheap and does not block the display
     def read_frames ():
         while True:
             frames.append(frames_queue.get())
@@ -147,7 +149,7 @@ def represent (frames_queue):
             return
 
         # Get everything to be displayed in the current frame
-        segments, rects, traced, display_message = frames[slider_value]
+        segments, rects, traced, display_message = pickle.loads(zlib.decompress(frames[slider_value]))
 
         # Draw all segments
         for segment in segments:
