@@ -1,4 +1,4 @@
-from typing import Union, Optional, List, Set, Tuple, Generator, Callable
+from typing import Union, Optional, List, Set, Dict, Tuple, Generator, Callable
 
 from utils.auxiliar import *
 from utils.display import add_frame
@@ -2504,6 +2504,16 @@ class Grid:
                 return True
         return False
 
+    # Check if a grid is overlapping at some rect in this grid
+    def is_grid_overlapping (self, other : 'Grid') -> bool:
+        # Iterate both grid's rects
+        for self_rect in self.rects:
+            for other_rect in other.rects:
+                # As soon as we find an overlap we are done
+                overlap = self_rect.get_overlap_rect(other_rect, borders = False)
+                if overlap: return True
+        return False
+
     # Return the overlap space between two grids splitted in rectangles
     # Note that these rectangles will not follow the grid standard rules
     def get_overlap_rects (self, grid : 'Grid') -> List[Rect]:
@@ -2621,10 +2631,12 @@ class Grid:
 
     # Generate regions which would fix a not-respecting minimum region in the grid
     # Note that a region not respecting the minimum size may be fixed in different ways
-    def generate_minimum_fixing_regions (self, minimum : number) -> Generator['Grid', None, None]:
+    def generate_minimum_fixing_regions (self, minimum : number, excluding_regions : Optional['Grid'] = None) -> Generator['Grid', None, None]:
         # Iterate minimum regions
         for segment, minimum_grid in self.generate_margin_regions(minimum):
             fixing_grid = minimum_grid - self
+            # If there is a excluding region then make sure the fix does not fall over it
+            if excluding_regions and excluding_regions.is_grid_overlapping(fixing_grid): continue
             if fixing_grid: yield fixing_grid
         
     # Generate regions which do not respect a given minimum size in the grid
@@ -3359,6 +3371,10 @@ class Grid:
     cksum = property(get_cksum, None, None, "Check-sum of the grid")
 
 # A path is a group of connected segments
+# Points between segments are called nodes
+# Each node has a dict of data where its connected segments are recorded
+# Node data may be further annotated with additional keys (e.g. the corridor solver does so)
+# Note that node annotations are not inherited by new paths (e.g. after adding or substracting segments)
 class Path:
     def __init__ (self, segments : Union[ Set[Segment], List[Segment] ] = []):
         # Set the segments as a set
@@ -3368,7 +3384,7 @@ class Path:
             self._segments = set(segments)
         else:
             raise TypeError('Paths are built from sets or lists of segments only')
-        # Unique points between segments
+        # Unique points between segments and their data
         self._nodes = None
 
     def __str__ (self) -> str:
@@ -3402,7 +3418,7 @@ class Path:
 
     def __contains__(self, other):
         if isinstance(other, Point):
-            return other in self._nodes
+            return other in self.nodes
         if isinstance(other, Segment):
             return other in self._segments
         raise ValueError(f'Path containing of {other.__class__} is not supported')
@@ -3413,12 +3429,25 @@ class Path:
     segments = property(get_segments, None, None, "Path segments (read only)")
 
     # Get the nodes
-    def get_nodes (self) -> Set[Point]:
+    # Nodes are a dict where keys are the points between segments and values are the node data
+    # Node data includes, at least, the connected segments
+    def get_nodes (self) -> Dict[Point, dict]:
+        # If we already have it calculated then return it
         if self._nodes != None:
             return self._nodes
-        self._nodes = set(sum([ list(segment.points) for segment in self.segments ], []))
+        # Otherwise find the nodes
+        self._nodes = {}
+        # Iterate segments
+        for segment in self.segments:
+            # Anotate this segment in every node which contains it
+            for point in segment.points:
+                node = self._nodes.get(point, None)
+                if node:
+                    node['connected_segments'].append(segment)
+                else:
+                    self._nodes[point] = { 'connected_segments': [segment] }
         return self._nodes
-    nodes = property(get_nodes, None, None, "Path nodes (read only)")
+    nodes = property(get_nodes, None, None, "Path nodes and their data (read only)")
 
     # Check if a segment is connected to this path and thus it could be added to the path
     def is_connected_to_segment (self, segment : Segment) -> bool:
@@ -3431,24 +3460,21 @@ class Path:
     # Set a grid around path segments
     # Size is the tickness of the new grid
     # Alternatively, the size may be a function whose input is a segments in the path and a direction
-    def get_margined_grid (self, size : Union[number, Callable], margined_ends : bool = False) -> Grid:
-        # Size must be a function
+    def get_margined_grid (self, size : Union[number, Callable], margined_ends : Union[bool, Callable] = False) -> Grid:
+        # Size must be a function which returns a number
         # If it is a number then convert it to a function which returns half the size number
         if not callable(size):
             half_size = size / 2
             def size (segment, direction) -> number:
                 return half_size
-        # Generate data for each point between segments (similar to nodes) by recording the connected segments
-        point_connected_segments = {}
-        for segment in self.segments:
-            # Get the points connected segments
-            points = segment.points
-            for point in points:
-                connected_segments = point_connected_segments.get(point, None)
-                if connected_segments:
-                    connected_segments.append(segment)
-                else:
-                    point_connected_segments[point] = [segment]
+        # Margined ends must be a function which returns a boolean
+        # If it is a bool then convert it to a function which returns a boolean
+        if not callable(margined_ends):
+            margined_ends_value = margined_ends
+            def margined_ends (end : Point) -> bool:
+                return margined_ends_value
+        # Get the connected segments of each node
+        point_connected_segments = { point: node['connected_segments'] for point, node in self.nodes.items() }
         # For each segment in path, set the space required
         required_spaces = {}
         # Also capture the highest rect width according to the size function
@@ -3494,8 +3520,7 @@ class Path:
             # In case we have only 1 connected segment it means this is a death end of the path
             if len(connected_segments) == 1:
                 # If the margined ends is passed as false then we are done
-                if not margined_ends:
-                    continue
+                if not margined_ends(point): continue
                 # Otherwise we expect the size function to be prepared for this scenario
                 # i.e. to return a valid result when the direction is paralel to the input segment
                 only_segment = connected_segments[0]
@@ -3530,6 +3555,12 @@ class Path:
             else:
                 grid += space
         return grid
+
+    # Return every node which is not between segments, but an end in the path
+    def get_ends (self) -> Generator[Point, None, None]:
+        for point, node in self.nodes.items():
+            if len(node['connected_segments']) == 1:
+                yield point
 
 
 # Auxiliar functions ---------------------------------------------------------------
@@ -3964,7 +3995,7 @@ def generate_random_polygon (
                     bone_grid = Grid([bone.get_surrounding_rect(margin=half_width)])
                     contribution_grid = bone_grid - target_bone_grid
                     # Find conflicts between other bones and the contribution grid
-                    if contribution_grid.get_overlap_grid(other_bones_grid):
+                    if contribution_grid.is_grid_overlapping(other_bones_grid):
                         continue
                     # Otherwise the bone is suitable
                     return bone

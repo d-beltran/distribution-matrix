@@ -1438,22 +1438,15 @@ class Room:
             splitted_segments += available_segment.split_at_points(other_points)
         # Remove duplicates
         # At this point there should be no overlaps between splitted segments  
-        splitted_segments = list(set(splitted_segments))
-        # Now define "nodes"
+        splitted_segments = set(splitted_segments)
+        # Set a path with all splitted segments
+        available_path = Path(splitted_segments)
+        # Now get the path "nodes"
         # Nodes are points between splitted segments (with no duplicates)
         # Each node may have from 2 up to 4 connected segments
         # Each node may have from 1 up to 4 contact rooms
-        # First find all connected segments as nodes are defined
-        # Create a dictionary with the points as keys
-        nodes = {}
-        for segment in splitted_segments:
-            points = segment.points
-            for point in points:
-                current_node = nodes.get(point, None)
-                if current_node:
-                    current_node['connected_segments'].append(segment)
-                else:
-                    nodes[point] = {'connected_segments': [segment]}
+        # Nodes come with their connected segments already and further data is annotated in the node itself
+        nodes = available_path.nodes
         # Set the rooms which are rigid for the path solving
         # i.e. if a path is surrounded by rigid rooms then it is discarded
         # Note that if parent is not child adaptable then its boundaries are also rigid
@@ -2009,8 +2002,7 @@ class Room:
         corridor_backbone = self.find_corridor_backbone(verbose=verbose)
 
         # If the returned corridor is none then it menas there is no need to stablish a corridor
-        if corridor_backbone == None:
-            return True
+        if corridor_backbone == None: return True
 
         # Set other variables to be used
         # LORE: These variables are defined in the 'find_corridor_backbone' function
@@ -2039,7 +2031,7 @@ class Room:
         # This is to avoid segments which are partially in the parent to get the full offset* in the whole segment
         # * Offset means the wall displacement when claiming the corridor area, it is explained below
         cut_points = [ corner for corner in exterior_polygon.corners if corner.inside ]
-        for segment in current_corridor:
+        for segment in list(current_corridor):
             cutted_segments = list(segment.split_at_points(cut_points))
             if len(cutted_segments) > 1:
                 current_corridor.remove(segment)
@@ -2062,7 +2054,11 @@ class Room:
         # This process is wrapped in a function because we may have to change the corridor and redo the boundary further
         # e.g. a door can not be relocated in the boundary so it must be relocated now and the corridor will change
         def make_corridor_grid (debug : bool = True):
+            # Set the corridor path
             corridor = Path(current_corridor)
+            # Display the current corridor path
+            elements_to_display = [ segment.get_colored_segment('red') for segment in corridor.segments ]
+            self.update_display(extra=elements_to_display, title='Display the corridor path')
             # Display the current corridor
             if debug:
                 elements_to_display = [ segment.get_colored_segment('red') for segment in corridor.segments ]
@@ -2151,30 +2147,30 @@ class Room:
                 # Get all excluded reference segments together, no matter what boundary they belong to, or we may have connectivity problems:
                 # Every compensation grid looks after its region, so there would be a shrink between splitted regions in the final grid
                 # Keep trach of the boundary they belong to as well
-                segment_exterior_polygon = {}
+                segment_boundary = {}
                 excluded_reference_segments = []
                 for corridor_boundary in corridor_grid.boundaries:
                     # IMPORTANT: Use the overlap with the path segments instead of the excluding region boundary segments
                     # IMPORTANT: Otherwise, we may expand the corridor over unnecessary space. See figure 7
                     # The region to be expanded is deducted from the segments in the path which overlap the already truncated corridor boundary
                     current_excluded_reference_segments = corridor_boundary.get_segments_overlap_segments(current_corridor)
-                    # Get the corridor exterior polygon
-                    corridor_polygon = corridor_boundary.exterior_polygon
-                    # Asign the polygon to every segment
+                    # Asign the boundary to every segment
+                    # Note that we keep the whole boundary and not only its exterior polygon
+                    # Segments may overlap an interior polygon (i.e. the corridor surrounds a region) and then the inside is reversed
                     for segment in current_excluded_reference_segments:
-                        segment_exterior_polygon[segment] = corridor_polygon
+                        segment_boundary[segment] = corridor_boundary
                     # Add the segments to the overall list
                     excluded_reference_segments += current_excluded_reference_segments
                 # Once we have these segments we must "project" a corridor from them
-                # This is like creating a corridor along the exterior polygon, which is fully inside of the polygon
+                # This is like creating a corridor along the boundary, which is fully inside of the boundary
                 def all_inside (segment : Segment, direction : Vector) -> number:
                     # For the dead ends
                     # Note that for dead ends direction will always be equal to segment.direction, and not -segment.direction
                     if direction == segment.direction:
-                        return 0
+                        return corridor_size
                     # For the inside
-                    corridor_polygon = segment_exterior_polygon[segment]
-                    if direction == corridor_polygon.get_border_inside(segment):
+                    corridor_boundary = segment_boundary[segment]
+                    if direction == corridor_boundary.get_border_inside(segment):
                         return corridor_size
                     # For the outside
                     return 0
@@ -2184,7 +2180,11 @@ class Room:
                     self.update_display(extra = elements_to_display, title = 'DEBUG: Excluded reference segments')
                 # Generate the extension boundary from the excluded reference segments
                 extension_corridor = Path(excluded_reference_segments)
-                extension_grid = extension_corridor.get_margined_grid(all_inside)
+                # The extension corridor path must know that some of its ends may be not actual ends in the corridor
+                corridor_ends = set(corridor.get_ends())
+                def is_not_actual_end (point : 'Point') -> bool:
+                    return point not in corridor_ends
+                extension_grid = extension_corridor.get_margined_grid(all_inside, margined_ends=is_not_actual_end)
                 # Display the segments used as reference for the excluded region
                 if debug:
                     elements_to_display = extension_grid.get_colored_perimeter_segments('purple')
@@ -2210,7 +2210,16 @@ class Room:
                 if debug:
                     elements_to_display = corridor_grid.get_colored_perimeter_segments('blue')
                     self.update_display(extra=elements_to_display, title='Displaying corridor boundaries after adding back the parent free space')
-
+                # There may be bottle necks between the original corridor grid and the newly added free space
+                # If this is the case then add extra space to fix these bottle necks
+                while not corridor_grid.check_minimum(self.corridor_size):
+                    fixing_region = next(corridor_grid.generate_minimum_fixing_regions(self.corridor_size, excluding_regions = rigid_grid), None)
+                    if fixing_region is None: raise RuntimeError('There is no fix for the bottle neck. This should not happen. Are 2 rigid regions making the bottleneck?')
+                    corridor_grid += fixing_region
+                    if debug:
+                        elements_to_display = corridor_grid.get_colored_perimeter_segments('blue')
+                        self.update_display(extra=elements_to_display, title='Displaying corridor boundaries after fixing bottleneck with parent free space')
+                
             # Check the corridor is not splitted, but unified in a single grid
             # If we have more than one, excepctionally, we can fix it if they are connected by a point
             # This may happen when the free space is divded (see figure 11)
@@ -2344,7 +2353,7 @@ class Room:
                     if not self._child_adaptable_boundary and expansion_grid not in self.grid:
                         return False
                     # If the expansion grid is colliding with the rigid grid we must stop
-                    if rigid_grid and rigid_grid.get_overlap_grid(expansion_grid):
+                    if rigid_grid and rigid_grid.is_grid_overlapping(expansion_grid):
                         return False
                     # Now merge the expansion grid with the current corridor grid
                     self.corridor_grid += expansion_grid
@@ -2439,7 +2448,7 @@ class Room:
                             expansion_rect = Rect.from_segments([expansion_segment, perpendicular_segment])
                             expansion_grid = Grid([expansion_rect])
                             # If the expansion grid is colliding with the rigid grid we must stop
-                            if rigid_grid and rigid_grid.get_overlap_grid(expansion_grid):
+                            if rigid_grid and rigid_grid.is_grid_overlapping(expansion_grid):
                                 return False
                             # If we can not expand the grid at this point then we must stop
                             # It may happen, for instance, when we try to expand over a door which can not be relocated anywhere else
@@ -2488,7 +2497,7 @@ class Room:
                                 expansion_rect = Rect.from_segments([expansion_segment, perpendicular_segment])
                                 expansion_grid = Grid([expansion_rect])
                                 # If the expansion grid is colliding with the rigid grid we must stop
-                                if rigid_grid and rigid_grid.get_overlap_grid(expansion_grid):
+                                if rigid_grid and rigid_grid.is_grid_overlapping(expansion_grid):
                                     return False
                                 # If we can not expand the grid at this point then we must stop
                                 # It may happen, for instance, when we try to expand over a door which can not be relocated anywhere else
@@ -2512,9 +2521,9 @@ class Room:
                 # Theorically, we should be always able to expand this segment to cover the minimum length in the door room
                 # However, it may be not possible to the corridor to expand in some direction because of a conflict with a strict boundary
                 # For this reason, we must try to expand the corridor in all possible directions before we surrender
-                # Theorically* there should always work in at least one direction
-                # * The only exception is a bottle neck made by a hand-set strict room
-                # In case we cannot get the suitable space by expanding in any direction it is a fatal scenario and we must stop here
+                # Note that it may not work in any direction (e.g. a bottle neck made by a hand-set strict room)
+                # In case we cannot get the suitable space by expanding in any direction then this configuration is not valid
+                # We return False so the caller discards this configuration and tries a different one
                 if len(available_segments) > 0:
                     for available_segment in available_segments:
                         # Set the segment which covers the region that the corridor must cover
@@ -2602,7 +2611,8 @@ class Room:
                         self.update_display(title='Displaying expanded corridor')
                         break
                     else:
-                        raise RuntimeError(f'Failed to expand corridor for reaching room {door.room.name}')
+                        if verbose: print(f'Failed to expand corridor for reaching room {door.room.name}')
+                        return False
                 # If there is no segment overlap between corridor and door room then we must rely in a point overlap
                 # This point will be a corner for both the corridor and the door room and it must always be there
                 corridor_outside_corners = sum([ boundary.outside_corners for boundary in self.corridor_grid.boundaries ], [])
@@ -2890,7 +2900,9 @@ class Room:
                     outside_pull_length = middle_segment.length - inside_push_length
                     # Pull the outside segment
                     # Pull before push, so we have enought area to recover after the push
-                    if not child.pull_boundary_segment(outside_segment, outside_pull_length, verbose=verbose):
+                    # Pull in easy mode, so it fails instead of force-fitting the grid when the minimum size is not respected
+                    # Otherwise the child may be reshaped and the zigzag segments may be no longer there
+                    if not child.pull_boundary_segment(outside_segment, outside_pull_length, easy=True, verbose=verbose):
                         if verbose: print(f'  Failed to pull corner outside segment {outside_segment}')
                         # Before we give up we try to pull a more conservative distance
                         # It may happen that the resulting grid is not respecting the minimum size
@@ -2914,7 +2926,7 @@ class Room:
                         # Now we are ready to try to pull again
                         # If it fails again then the problem was not the minimum size
                         if verbose: print('     Retrying safe pull')
-                        if not child.pull_boundary_segment(outside_segment, safe_pull_length):
+                        if not child.pull_boundary_segment(outside_segment, safe_pull_length, easy=True):
                             if verbose: print('     Safe pull failed as well')
                             # There is no need to recover the backup at this point
                             continue
@@ -2925,12 +2937,12 @@ class Room:
                         self.restore_grid_backup(backup, title='Restored grid backup while reducing children corners')
                         continue
                     # Relocate children to fit in the new boundary
-                    truncated_children = [ child for child in self.children if not child.is_fit_to_required_area()  ]
+                    truncated_children = [ other_child for other_child in self.children if not other_child.is_fit_to_required_area()  ]
                     child_conflict = False
                     # Note that all children were already backed up before the pull/push
-                    for child in truncated_children:
-                        if not child.fit_to_required_area():
-                            if verbose: print(f'Something went wrong while refitting {child.name}')
+                    for truncated_child in truncated_children:
+                        if not truncated_child.fit_to_required_area():
+                            if verbose: print(f'Something went wrong while refitting {truncated_child.name}')
                             child_conflict = True
                             break
                     # If there was a failure during children relocation then restore the boundary backups and proceed to the next zigzag
@@ -3413,10 +3425,12 @@ class Room:
     # Pull a segment in the boundary
     # Check everything is fine after the pull and, if so, return True
     # In case there is any problem the pull is not done and this function returns False
+    # The easy argument is forwarded to the 'truncate' function
     def pull_boundary_segment (self,
         segment : Segment,
         pull_length : number,
         force_child_truncation : bool = False,
+        easy : bool = False,
         check_parent_free_grid : bool = True,
         verbose : bool = False,
         _recursion_depth : int = 0,
@@ -3435,7 +3449,7 @@ class Room:
         # Make a grid out of the new rect
         removed_region = Grid([new_rect])
         # Truncate self grid
-        return self.truncate_grid(removed_region, force=force_child_truncation, check_parent_free_grid=check_parent_free_grid, verbose=verbose, _recursion_depth=_recursion_depth)
+        return self.truncate_grid(removed_region, force=force_child_truncation, easy=easy, check_parent_free_grid=check_parent_free_grid, verbose=verbose, _recursion_depth=_recursion_depth)
 
     # Try to expand a specific room frontier
     # Note that the frontier must contain the room it belongs to
@@ -3877,8 +3891,7 @@ class Room:
             if not outside_rect:
                 return False
             outside_space = Grid([outside_rect])
-            covered_outside_space = outside_space.get_overlap_grid(truncated_grid)
-            if covered_outside_space:
+            if outside_space.is_grid_overlapping(truncated_grid):
                 return False
         return True
 
@@ -3897,8 +3910,7 @@ class Room:
             if not rect:
                 return False
             space = Grid([rect])
-            covered_space = space.get_overlap_grid(invaded_grid)
-            if covered_space:
+            if space.is_grid_overlapping(invaded_grid):
                 return False
         return True
 
@@ -4161,7 +4173,7 @@ class Room:
         # Check if we are overlapping other spaces
         if check_overlaps:
             # Check if we are expanding over the corridor and, if so, abort the expansion
-            if self.parent.corridor_grid and self.parent.corridor_grid.get_overlap_grid(expansion_grid):
+            if self.parent.corridor_grid and self.parent.corridor_grid.is_grid_overlapping(expansion_grid):
                 if verbose:
                     print(f'Expanding grid of room {self.name} at {expansion_grid} failed:')
                     print('  Grid was expanded over the corridor -> Restoring backup')
@@ -4191,7 +4203,7 @@ class Room:
             invaded_brother_rooms = []
             for brother_room in brother_rooms:
                 # If there is no overlap then skip this brother
-                if not expansion_grid.get_overlap_grid(brother_room.grid): continue
+                if not expansion_grid.is_grid_overlapping(brother_room.grid): continue
                 invaded_brother_rooms.append(brother_room)
                 if verbose: print(f'  Truncating {brother_room.name}')
                 # Try to truncate the brother room grid
