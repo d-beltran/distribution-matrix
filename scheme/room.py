@@ -2057,42 +2057,44 @@ class Room:
             # Set the corridor path
             corridor = Path(current_corridor)
             # Display the current corridor path
-            elements_to_display = [ segment.get_colored_segment('red') for segment in corridor.segments ]
-            self.update_display(extra=elements_to_display, title='Display the corridor path')
-            # Display the current corridor
             if debug:
                 elements_to_display = [ segment.get_colored_segment('red') for segment in corridor.segments ]
-                self.update_display(extra=elements_to_display, title='Display the corridor to build the boundary')
+                self.update_display(extra=elements_to_display, title='Display the corridor path')
             # Now we must substract segments in the free space (fake corridors)
             # Always leave a minimal corridor fragment from the free space for the grid to be continuous
+            # Set a new variable for the modified corridor so the original is conserved
+            functional_corridor = corridor
             if functional_corridor_grid:
                 # Iterate over the different free grids and remove its segments from the corridor
                 for corridor_free_region in corridor_free_regions:
                     for segment in corridor_free_region['corridor_segments']:
                         # We must check if the segment is in the corridor
                         # There is an expectional scenario where the region is included but nots its segment (see figure 11)
-                        if segment in corridor:
-                            corridor -= segment
+                        if segment in functional_corridor:
+                            functional_corridor -= segment
                 # Now that we have the corridor alone we can search for corridor fragments to connect
                 for corridor_free_region in corridor_free_regions:
                     for segment in corridor_free_region['corridor_segments']:
                         # Skip segments not connected to the remaining corridor
-                        if not corridor.is_connected_to_segment(segment):
+                        if not functional_corridor.is_connected_to_segment(segment):
                             continue
                         # Set a fragment to connect the corridor
-                        connection_node = corridor.get_segment_connected_node(segment)
+                        connection_node = functional_corridor.get_segment_connected_node(segment)
                         connection_segment = segment.get_side_segment(connection_node, corridor_size)
-                        corridor += connection_segment
+                        functional_corridor += connection_segment
                         break
-
+            # Display the current corridor
+            if debug:
+                elements_to_display = [ segment.get_colored_segment('red') for segment in functional_corridor.segments ]
+                self.update_display(extra=elements_to_display, title='Display the corridor to build the boundary')
             # Set the first corridor grid
             # Note that the room may have already some preexsiting corridor grid (e.g. from rigid doors)
             corridor_grid = Grid() if self._corridor_grid is None else self._corridor_grid
             # It may happen that there are no corridor segments at this point when all rooms are connected by a point
             # This means that either there is a single node (a single room) or the whole corridor is free space
-            if len(corridor) > 0:
+            if len(functional_corridor) > 0:
                 # Generate a boundary around the current corridor path
-                corridor_grid += corridor.get_margined_grid(corridor_size)
+                corridor_grid += functional_corridor.get_margined_grid(corridor_size)
             elif len(current_corridor_nodes) == 1:
                 # If there is just one node then generate a small corridor over the only node
                 corridor_grid += Grid([ generate_point_rect(current_corridor_nodes[0], corridor_size) ])
@@ -2149,11 +2151,21 @@ class Room:
                 # Keep trach of the boundary they belong to as well
                 segment_boundary = {}
                 excluded_reference_segments = []
+                # Get the free space boundary segments, which are to be removed from the excluded reference segments
+                # Note that corridor segment in free space already have the available space they need, there is no need to compensate
+                free_grid_segments = sum([ boundary.segments for boundary in self.free_grid.boundaries ], []) if self.free_grid else []
                 for corridor_boundary in corridor_grid.boundaries:
                     # IMPORTANT: Use the overlap with the path segments instead of the excluding region boundary segments
                     # IMPORTANT: Otherwise, we may expand the corridor over unnecessary space. See figure 7
                     # The region to be expanded is deducted from the segments in the path which overlap the already truncated corridor boundary
-                    current_excluded_reference_segments = corridor_boundary.get_segments_overlap_segments(current_corridor)
+                    # Note that this does not make sense for corridor segments in contact with free space, these must be eliminated
+                    current_excluded_reference_segments = []
+                    for segment in corridor_boundary.get_segments_overlap_segments(current_corridor):
+                        # Keep the original segment direction, since the substraction may invert it
+                        for remaining_segment in segment.substract_segments(free_grid_segments):
+                            if remaining_segment.direction != segment.direction:
+                                remaining_segment = remaining_segment.inverted()
+                            current_excluded_reference_segments.append(remaining_segment)
                     # Asign the boundary to every segment
                     # Note that we keep the whole boundary and not only its exterior polygon
                     # Segments may overlap an interior polygon (i.e. the corridor surrounds a region) and then the inside is reversed
@@ -2246,8 +2258,11 @@ class Room:
                 if matching_corner: continue
                 # If we failed to stablish a connecting point between at least one boundary then surrender here
                 raise RuntimeError(f'We have a splitted corridor in room {self.name}')
+
+            # Run another excluding-fixing now after we added the extra space
+            fix_excluding_regions()
             
-            # If there is no corridor grid at this point then it may the defaultl placed corridor already convers all rooms
+            # If there is no corridor grid at this point then it may mean the default placed corridor already covers all rooms
             if not corridor_grid: return
 
             # Remove regions from the corridor grid which are not respecting the minimum size
@@ -2268,9 +2283,14 @@ class Room:
                 elements_to_display = corridor_grid.get_colored_perimeter_segments('blue')
                 self.update_display(extra=elements_to_display, title='Displaying corridor boundaries after removing regions not respecting the corridor minimum size')
 
-            # Run another excluding-fixing now
-            # Note that the keep_minimum logic may have expanded some regions over excluding areas
-            fix_excluding_regions()
+            # Make sure the corridor is not out of the room boundaries
+            # Note that child adaptable rooms are allowed to have the corridor outside
+            if not self._child_adaptable_boundary:
+                current_grid = self.grid if self.grid else exterior_polygon.grid
+                out_regions = corridor_grid - current_grid
+                if out_regions:
+                    self.update_display(extra=out_regions.get_colored_perimeter_segments('red'), title=f'Corridor out of room {self.name} boundaries')
+                    raise RuntimeError(f'Corridor is out of room {self.name} boundaries. This should never happen.')
 
             # Now set the corridor grid officially
             self.corridor_grid += corridor_grid
@@ -3960,6 +3980,16 @@ class Room:
         if truncated_grid == grid:
             if verbose: print(' No truncation, no problem')
             return True
+        # Rigid rooms must never be truncated
+        # If the truncation is forced then the invading region should have avoided rigid rooms already, so something is wrong
+        if self.rigid:
+            if force:
+                # Display the exact region we are eating from the rigid room before failing
+                eaten_grid = grid - truncated_grid
+                self.update_display(extra=eaten_grid.get_colored_perimeter_segments('red'), title=f'Forced truncation of rigid room {self.name}')
+                raise RuntimeError(f'Forced truncation of rigid room {self.name}. The invading region should have avoided it.')
+            if verbose: print(f' Failed to truncate grid: The room ({self.name}) is rigid')
+            return False
         # If the grid has been fully consumed then go back
         if not truncated_grid:
             if verbose: print(' Failed to truncate grid: The room would be fully consumed')
