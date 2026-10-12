@@ -2638,6 +2638,19 @@ class Grid:
             # If there is a excluding region then make sure the fix does not fall over it
             if excluding_regions and excluding_regions.is_grid_overlapping(fixing_grid): continue
             if fixing_grid: yield fixing_grid
+
+    # Create a new grid fixing all minimum size problems from this grid by adding as many fixing regions as necessary
+    def fix_minimum (self, minimum : number, excluding_regions : Optional['Grid'] = None) -> Union['Grid', Exception]:
+        final_grid = self
+        # Iterate until the final grid respects the minimum size everywhere
+        while not final_grid.check_minimum(minimum):
+            # Generate a new fixing regions
+            next_fixing_region = next(final_grid.generate_minimum_fixing_regions(minimum, excluding_regions), None)
+            # If we run out of fixing regions then the grid can't be fixed
+            if next_fixing_region is None: return Exception(f'Unfixable grid with minimum {minimum}')
+            # Add the new fixing region to the final grid
+            final_grid += next_fixing_region
+        return final_grid
         
     # Generate regions which do not respect a given minimum size in the grid
     # If the non respecting region has 2 dimensions (two opposed inside corners) then the region returned represents the conflict in 1 dimension only

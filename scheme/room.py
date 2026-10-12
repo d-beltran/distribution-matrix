@@ -2072,17 +2072,17 @@ class Room:
                         # There is an expectional scenario where the region is included but nots its segment (see figure 11)
                         if segment in functional_corridor:
                             functional_corridor -= segment
-                # Now that we have the corridor alone we can search for corridor fragments to connect
-                for corridor_free_region in corridor_free_regions:
-                    for segment in corridor_free_region['corridor_segments']:
-                        # Skip segments not connected to the remaining corridor
-                        if not functional_corridor.is_connected_to_segment(segment):
-                            continue
-                        # Set a fragment to connect the corridor
-                        connection_node = functional_corridor.get_segment_connected_node(segment)
-                        connection_segment = segment.get_side_segment(connection_node, corridor_size)
-                        functional_corridor += connection_segment
-                        break
+                # Now that we have the corridor alone we can search for corridor fragments to connect the free regions
+                # DANI: No recuerdo por que hago esto así que lo quito temporalmente, ya que me da problemas a veces
+                # for corridor_free_region in corridor_free_regions:
+                #     for segment in corridor_free_region['corridor_segments']:
+                #         # Skip segments not connected to the remaining corridor
+                #         if not functional_corridor.is_connected_to_segment(segment): continue
+                #         # Set a fragment to connect the corridor
+                #         connection_node = functional_corridor.get_segment_connected_node(segment)
+                #         connection_segment = segment.get_side_segment(connection_node, corridor_size)
+                #         functional_corridor += connection_segment
+                #         break
             # Display the current corridor
             if debug:
                 elements_to_display = [ segment.get_colored_segment('red') for segment in functional_corridor.segments ]
@@ -2218,19 +2218,14 @@ class Room:
             # DANI: Esto tal vez se puede replantear. No es necesario y perdemos la free grid (espacio claimable)
             if self.free_grid:
                 corridor_grid += self.free_grid
+                # There may be bottle necks between the original corridor grid and the newly added free space
+                # If this is the case then add extra space to fix these bottle necks
+                corridor_grid = corridor_grid.fix_minimum(self.corridor_size, excluding_regions = rigid_grid)
+                if type(corridor_grid) == Exception: raise corridor_grid
                 # Display the corridor boundaries
                 if debug:
                     elements_to_display = corridor_grid.get_colored_perimeter_segments('blue')
                     self.update_display(extra=elements_to_display, title='Displaying corridor boundaries after adding back the parent free space')
-                # There may be bottle necks between the original corridor grid and the newly added free space
-                # If this is the case then add extra space to fix these bottle necks
-                while not corridor_grid.check_minimum(self.corridor_size):
-                    fixing_region = next(corridor_grid.generate_minimum_fixing_regions(self.corridor_size, excluding_regions = rigid_grid), None)
-                    if fixing_region is None: raise RuntimeError('There is no fix for the bottle neck. This should not happen. Are 2 rigid regions making the bottleneck?')
-                    corridor_grid += fixing_region
-                    if debug:
-                        elements_to_display = corridor_grid.get_colored_perimeter_segments('blue')
-                        self.update_display(extra=elements_to_display, title='Displaying corridor boundaries after fixing bottleneck with parent free space')
                 
             # Check the corridor is not splitted, but unified in a single grid
             # If we have more than one, excepctionally, we can fix it if they are connected by a point
@@ -2274,9 +2269,9 @@ class Room:
                 raise RuntimeError(f'Corridor was not respecting minimum size in room {self.name}')
 
             # Make sure the corridor is respecting the minimum size now
-            # Note that after the previous check we could have 2 regions regions separated by a bottleneck
-            if not corridor_grid.check_minimum(self.corridor_size):
-                raise RuntimeError(f'Corridor is not respecting minimum size. This should never happen.')
+            # Note that after the previous check we still could have 2 regions separated by a bottleneck
+            corridor_grid = corridor_grid.fix_minimum(self.corridor_size, excluding_regions = rigid_grid)
+            if type(corridor_grid) == Exception: raise corridor_grid
 
             # Display the corridor boundaries
             if debug:
