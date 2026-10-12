@@ -2297,7 +2297,7 @@ class Room:
         if not self.corridor_grid:
             raise RuntimeError('Failed to set a corridor grid')
 
-        # Set a function to substract the corridor region from the rest of child rooms
+        # Substract the corridor region from the rest of child rooms
         # Note that, at this point, other rooms do not expand to compensate the lost area yet
         for child in self.children:
             if not child.truncate_grid(self.corridor_grid, force=True, skip_update_display=True):
@@ -3939,6 +3939,9 @@ class Room:
         # Relocate each door
         succeed = True
         for door in self.doors:
+            # If the door is already well placed then do not relocate it
+            if door.is_point_suitable(): continue
+            # Otherwise we must relocate it
             if not door.relocate(truncated_polygon):
                 succeed = False
                 break
@@ -4005,7 +4008,7 @@ class Room:
             return False
         truncated_boundaries = truncated_grid.find_boundaries()
         # In case the room has been splitted in 2 parts as a result of the invasion we go back
-        if not force and len(truncated_boundaries) > 1:
+        if len(truncated_boundaries) > 1:
             if verbose: print(' Failed to truncate grid: The room would be splitted')
             return False
         truncated_boundary = truncated_boundaries[0]
@@ -4013,13 +4016,13 @@ class Room:
         # Note that this must be done before relocating doors, so they are restored as well if anything fails later
         backup = self.make_grid_backup()
         # Check doors to be respected
-        if not force and not self.check_doors_required_spaces(truncated_grid):
+        if not self.check_doors_required_spaces(truncated_grid):
             if verbose: print(' Door conflict when truncating: Doors will be relocated')
             if not self.relocate_doors(truncated_boundary):
                 if verbose: print(' Failed to truncate grid: The room would not respect door spaces')
                 return False
         # DANI: Es posible que se coma toda la habitación??
-        if not force and len(truncated_boundaries) == 0:
+        if len(truncated_boundaries) == 0:
             if verbose: print(' Failed to truncate grid: The room has been fully consumed')
             self.restore_grid_backup(backup, title='Restored grid backup while truncating')
             return False
